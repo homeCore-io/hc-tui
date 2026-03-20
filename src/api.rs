@@ -113,6 +113,20 @@ impl HomeCoreClient {
         self.token = Some(token);
     }
 
+    pub fn token(&self) -> Option<&str> {
+        self.token.as_deref()
+    }
+
+    pub fn ws_events_url(&self) -> String {
+        let mut ws_base = self.base_url.clone();
+        if ws_base.starts_with("https://") {
+            ws_base = ws_base.replacen("https://", "wss://", 1);
+        } else if ws_base.starts_with("http://") {
+            ws_base = ws_base.replacen("http://", "ws://", 1);
+        }
+        format!("{}/api/v1/events/stream", ws_base.trim_end_matches('/'))
+    }
+
     pub async fn login(&self, username: &str, password: &str) -> Result<LoginResponse> {
         let url = self.endpoint("/auth/login");
         let resp = self

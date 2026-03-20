@@ -4,6 +4,7 @@ use crate::api::{
 use crate::cache::{CacheSnapshot, CacheStore};
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use serde_json::Value;
 use std::cmp::min;
 use std::path::PathBuf;
 
@@ -58,6 +59,7 @@ pub struct App {
     pub events: Vec<EventEntry>,
     pub users: Vec<UserInfo>,
     pub plugins: Vec<PluginRecord>,
+    pub ws_connected: bool,
 }
 
 impl App {
@@ -82,6 +84,7 @@ impl App {
             events: Vec::new(),
             users: Vec::new(),
             plugins: Vec::new(),
+            ws_connected: false,
         }
     }
 
@@ -246,6 +249,98 @@ impl App {
             }
             _ => false,
         }
+    }
+
+    pub fn ws_endpoint(&self) -> String {
+        self.client.ws_events_url()
+    }
+
+    pub fn ws_token(&self) -> Option<String> {
+        self.client.token().map(ToString::to_string)
+    }
+
+    pub fn on_ws_connected(&mut self) {
+        self.ws_connected = true;
+        self.status = "Live event stream connected".to_string();
+    }
+
+    pub fn on_ws_disconnected(&mut self, reason: String) {
+        self.ws_connected = false;
+        self.status = format!("Live stream disconnected ({reason})");
+    }
+
+    pub fn on_ws_event(&mut self, event: Value) {
+        let event_type = event
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+            .to_string();
+        let timestamp = event
+            .get("timestamp")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+
+        match event_type.as_str() {
+            "device_state_changed" => {
+                if let Some(device_id) = event.get("device_id").and_then(Value::as_str) {
+                    let current = event
+                        .get("current")
+                        .and_then(Value::as_object)
+                        .cloned()
+                        .unwrap_or_default();
+                    if let Some(device) = self.devices.iter_mut().find(|d| d.device_id == device_id) {
+                        device.attributes = current;
+                        if !timestamp.is_empty() {
+                            device.last_seen = timestamp.clone();
+                        }
+                    }
+                }
+            }
+            "device_availability_changed" => {
+                if let Some(device_id) = event.get("device_id").and_then(Value::as_str) {
+                    let available = event
+                        .get("available")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+                    if let Some(device) = self.devices.iter_mut().find(|d| d.device_id == device_id) {
+                        device.available = available;
+                        if !timestamp.is_empty() {
+                            device.last_seen = timestamp.clone();
+                        }
+                    }
+                }
+            }
+            "device_name_changed" => {
+                if let Some(device_id) = event.get("device_id").and_then(Value::as_str) {
+                    if let Some(name) = event.get("current_name").and_then(Value::as_str) {
+                        if let Some(device) = self.devices.iter_mut().find(|d| d.device_id == device_id) {
+                            device.name = name.to_string();
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        let entry = EventEntry {
+            event_type,
+            timestamp,
+            device_id: event
+                .get("device_id")
+                .and_then(Value::as_str)
+                .map(ToString::to_string),
+            rule_name: event
+                .get("rule_name")
+                .and_then(Value::as_str)
+                .map(ToString::to_string),
+            event_type_custom: event
+                .get("event_type")
+                .and_then(Value::as_str)
+                .map(ToString::to_string),
+        };
+        self.events.insert(0, entry);
+        self.events.truncate(200);
     }
 
     pub async fn on_key_authenticated(&mut self, key: KeyEvent) {

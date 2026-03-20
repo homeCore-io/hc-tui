@@ -26,6 +26,9 @@ It is built with:
   - Events
   - Users (admin)
   - Plugins (admin)
+- Live updates:
+  - Connects to `/api/v1/events/stream?token=...` via WebSocket
+  - Applies device state/availability/name changes in real time
 
 ## Run
 
@@ -42,6 +45,7 @@ cargo run -- --base-url http://127.0.0.1:8080 --cache-dir ./cache
 - Manual refresh (`r`) pulls fresh data and updates cache files.
 - Device/scene actions sync and re-cache after completion.
 - There is no background auto-refresh loop while navigating selections.
+- Real-time device status comes from WebSocket events. If the stream drops, the TUI auto-reconnects.
 
 ## Key Bindings
 

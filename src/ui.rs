@@ -45,13 +45,15 @@ pub fn draw(frame: &mut Frame<'_>, app: &App) {
         .as_ref()
         .map(|u| format!("{:?}", u.role))
         .unwrap_or_else(|| "unknown".to_string());
+    let live = if app.ws_connected { "connected" } else { "disconnected" };
     let mut status_line = format!(
-        "user={} role={} | Tab/Shift+Tab switch tab | j/k move | r refresh | q quit",
+        "user={} role={} live_ws={} | Tab/Shift+Tab switch tab | j/k move | r refresh | q quit",
         app.current_user
             .as_ref()
             .map(|u| u.username.as_str())
             .unwrap_or("n/a"),
-        role
+        role,
+        live
     );
     if matches!(app.active_tab(), Tab::Devices) {
         status_line.push_str(" | t toggle selected device");

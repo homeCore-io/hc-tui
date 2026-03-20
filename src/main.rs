@@ -2,6 +2,7 @@ mod api;
 mod app;
 mod cache;
 mod ui;
+mod ws;
 
 use anyhow::Result;
 use app::App;
@@ -13,6 +14,8 @@ use crossterm::{
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::{io, time::Duration};
+use tokio::sync::mpsc;
+use ws::{spawn_events_stream, WsAppMsg};
 
 #[derive(Debug, Parser)]
 #[command(name = "hc-tui", about = "Terminal UI client for HomeCore")]
@@ -44,11 +47,22 @@ async fn run_app(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut App,
 ) -> Result<()> {
+    let (ws_tx, mut ws_rx) = mpsc::unbounded_channel::<WsAppMsg>();
+    let mut ws_started = false;
+
     loop {
         terminal.draw(|frame| ui::draw(frame, app))?;
 
         if app.should_quit {
             break;
+        }
+
+        while let Ok(msg) = ws_rx.try_recv() {
+            match msg {
+                WsAppMsg::Connected => app.on_ws_connected(),
+                WsAppMsg::Disconnected(reason) => app.on_ws_disconnected(reason),
+                WsAppMsg::Event(event) => app.on_ws_event(event),
+            }
         }
 
         if event::poll(Duration::from_millis(100))? {
@@ -58,6 +72,12 @@ async fn run_app(
                     let submit = app.on_key_login(key);
                     if submit {
                         app.login().await;
+                        if app.authenticated && !ws_started {
+                            if let Some(token) = app.ws_token() {
+                                spawn_events_stream(app.ws_endpoint(), token, ws_tx.clone());
+                                ws_started = true;
+                            }
+                        }
                     }
                 } else {
                     app.on_key_authenticated(key).await;
