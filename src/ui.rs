@@ -125,7 +125,7 @@ fn draw_login(frame: &mut Frame<'_>, app: &App) {
     let message = app
         .error
         .clone()
-        .unwrap_or_else(|| "Connects to /api/v1/auth/login on the configured HomeCore URL".to_string());
+        .unwrap_or_else(|| "Connects to /api/v1/auth/login and loads/saves cache snapshots locally".to_string());
     let msg = Paragraph::new(message).alignment(Alignment::Center);
     frame.render_widget(msg, layout[4]);
 }

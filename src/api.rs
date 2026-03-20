@@ -3,7 +3,7 @@ use reqwest::{Client, Method, Response};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Role {
     Admin,
@@ -17,7 +17,7 @@ impl Role {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserInfo {
     pub id: String,
     pub username: String,
@@ -25,13 +25,13 @@ pub struct UserInfo {
     pub created_at: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoginResponse {
     pub token: String,
     pub user: UserInfo,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceState {
     pub device_id: String,
     pub name: String,
@@ -42,20 +42,20 @@ pub struct DeviceState {
     pub last_seen: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Scene {
     pub id: String,
     pub name: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Area {
     pub id: String,
     pub name: String,
     pub device_ids: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Rule {
     pub id: String,
     pub name: String,
@@ -63,14 +63,14 @@ pub struct Rule {
     pub priority: i32,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginRecord {
     pub plugin_id: String,
     pub registered_at: String,
     pub status: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventEntry {
     #[serde(rename = "type")]
     pub event_type: String,
@@ -98,9 +98,13 @@ pub struct HomeCoreClient {
 
 impl HomeCoreClient {
     pub fn new(base_url: String) -> Self {
+        let mut normalized = base_url.trim_end_matches('/').to_string();
+        if normalized.ends_with("/api/v1") {
+            normalized.truncate(normalized.len() - "/api/v1".len());
+        }
         Self {
             http: Client::new(),
-            base_url: base_url.trim_end_matches('/').to_string(),
+            base_url: normalized,
             token: None,
         }
     }
@@ -215,11 +219,7 @@ impl HomeCoreClient {
         if status.is_success() {
             return resp.json::<T>().await.context("failed to parse json response");
         }
-        let body: Value = resp.json().await.unwrap_or_else(|_| json!({}));
-        let message = body
-            .get("error")
-            .and_then(Value::as_str)
-            .unwrap_or("request failed");
+        let message = Self::extract_error_message(resp).await;
         Err(anyhow!("{}: {}", status, message))
     }
 
@@ -228,11 +228,25 @@ impl HomeCoreClient {
         if status.is_success() {
             return Ok(());
         }
-        let body: Value = resp.json().await.unwrap_or_else(|_| json!({}));
-        let message = body
-            .get("error")
-            .and_then(Value::as_str)
-            .unwrap_or("request failed");
+        let message = Self::extract_error_message(resp).await;
         Err(anyhow!("{}: {}", status, message))
+    }
+
+    async fn extract_error_message(resp: Response) -> String {
+        let text = resp.text().await.unwrap_or_default();
+        if text.trim().is_empty() {
+            return "request failed".to_string();
+        }
+
+        if let Ok(body) = serde_json::from_str::<Value>(&text) {
+            if let Some(error) = body.get("error").and_then(Value::as_str) {
+                return error.to_string();
+            }
+            if let Some(message) = body.get("message").and_then(Value::as_str) {
+                return message.to_string();
+            }
+        }
+
+        text
     }
 }

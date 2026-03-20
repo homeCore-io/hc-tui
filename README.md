@@ -30,10 +30,18 @@ It is built with:
 ## Run
 
 ```bash
-cargo run -- --base-url http://127.0.0.1:8080
+cargo run -- --base-url http://127.0.0.1:8080 --cache-dir ./cache
 ```
 
 `--base-url` should point to the HomeCore server root (without `/api/v1`).
+`--cache-dir` stores local JSON cache snapshots per user.
+
+## Caching Behavior
+
+- On login, the TUI loads cached state/config first (if present), then syncs from HomeCore.
+- Manual refresh (`r`) pulls fresh data and updates cache files.
+- Device/scene actions sync and re-cache after completion.
+- There is no background auto-refresh loop while navigating selections.
 
 ## Key Bindings
 

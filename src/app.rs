@@ -1,9 +1,11 @@
 use crate::api::{
     Area, DeviceState, EventEntry, HomeCoreClient, PluginRecord, Rule, Scene, UserInfo,
 };
+use crate::cache::{CacheSnapshot, CacheStore};
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::cmp::min;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FocusField {
@@ -38,6 +40,7 @@ impl Tab {
 
 pub struct App {
     pub client: HomeCoreClient,
+    pub cache: CacheStore,
     pub username: String,
     pub password: String,
     pub focus: FocusField,
@@ -58,9 +61,10 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(base_url: String) -> Self {
+    pub fn new(base_url: String, cache_dir: PathBuf) -> Self {
         Self {
             client: HomeCoreClient::new(base_url),
+            cache: CacheStore::new(cache_dir),
             username: String::new(),
             password: String::new(),
             focus: FocusField::Username,
@@ -119,9 +123,14 @@ impl App {
                 self.client.set_token(auth.token);
                 self.current_user = Some(auth.user);
                 self.authenticated = true;
-                self.status = "Login successful. Loading data...".to_string();
+                self.status = "Login successful. Loading cache + syncing...".to_string();
+
+                if let Err(err) = self.load_from_cache().await {
+                    self.error = Some(format!("cache load error: {err}"));
+                }
+
                 if let Err(err) = self.refresh_all().await {
-                    self.error = Some(err.to_string());
+                    self.error = Some(format!("sync error: {err}"));
                 }
             }
             Err(err) => {
@@ -144,9 +153,53 @@ impl App {
         if self.current_user.is_none() {
             self.current_user = Some(self.client.me().await?);
         }
+        self.save_to_cache().await?;
         self.clamp_selection();
-        self.status = "Data refreshed".to_string();
+        self.status = "Data refreshed and cached".to_string();
         Ok(())
+    }
+
+    async fn load_from_cache(&mut self) -> Result<()> {
+        let Some(user) = self.current_user.as_ref() else {
+            return Ok(());
+        };
+        let snapshot = self.cache.load_snapshot(&user.username).await?;
+        self.apply_snapshot(snapshot);
+        self.status = "Loaded cached state; syncing from HomeCore...".to_string();
+        Ok(())
+    }
+
+    async fn save_to_cache(&self) -> Result<()> {
+        let Some(user) = self.current_user.as_ref() else {
+            return Ok(());
+        };
+        self.cache
+            .save_snapshot(&user.username, &self.snapshot())
+            .await?;
+        Ok(())
+    }
+
+    fn snapshot(&self) -> CacheSnapshot {
+        CacheSnapshot {
+            devices: self.devices.clone(),
+            scenes: self.scenes.clone(),
+            areas: self.areas.clone(),
+            automations: self.automations.clone(),
+            events: self.events.clone(),
+            users: self.users.clone(),
+            plugins: self.plugins.clone(),
+        }
+    }
+
+    fn apply_snapshot(&mut self, snapshot: CacheSnapshot) {
+        self.devices = snapshot.devices;
+        self.scenes = snapshot.scenes;
+        self.areas = snapshot.areas;
+        self.automations = snapshot.automations;
+        self.events = snapshot.events;
+        self.users = snapshot.users;
+        self.plugins = snapshot.plugins;
+        self.clamp_selection();
     }
 
     pub fn on_key_login(&mut self, key: KeyEvent) -> bool {
