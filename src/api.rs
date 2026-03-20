@@ -1,0 +1,238 @@
+use anyhow::{anyhow, Context, Result};
+use reqwest::{Client, Method, Response};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Map, Value};
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Role {
+    Admin,
+    User,
+    ReadOnly,
+}
+
+impl Role {
+    pub fn is_admin(&self) -> bool {
+        matches!(self, Self::Admin)
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UserInfo {
+    pub id: String,
+    pub username: String,
+    pub role: Role,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LoginResponse {
+    pub token: String,
+    pub user: UserInfo,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeviceState {
+    pub device_id: String,
+    pub name: String,
+    pub plugin_id: String,
+    pub area: Option<String>,
+    pub available: bool,
+    pub attributes: Map<String, Value>,
+    pub last_seen: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Scene {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Area {
+    pub id: String,
+    pub name: String,
+    pub device_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Rule {
+    pub id: String,
+    pub name: String,
+    pub enabled: bool,
+    pub priority: i32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PluginRecord {
+    pub plugin_id: String,
+    pub registered_at: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct EventEntry {
+    #[serde(rename = "type")]
+    pub event_type: String,
+    pub timestamp: String,
+    #[serde(default)]
+    pub device_id: Option<String>,
+    #[serde(default)]
+    pub rule_name: Option<String>,
+    #[serde(default)]
+    pub event_type_custom: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LoginBody<'a> {
+    pub username: &'a str,
+    pub password: &'a str,
+}
+
+#[derive(Clone)]
+pub struct HomeCoreClient {
+    http: Client,
+    base_url: String,
+    token: Option<String>,
+}
+
+impl HomeCoreClient {
+    pub fn new(base_url: String) -> Self {
+        Self {
+            http: Client::new(),
+            base_url: base_url.trim_end_matches('/').to_string(),
+            token: None,
+        }
+    }
+
+    pub fn set_token(&mut self, token: String) {
+        self.token = Some(token);
+    }
+
+    pub async fn login(&self, username: &str, password: &str) -> Result<LoginResponse> {
+        let url = self.endpoint("/auth/login");
+        let resp = self
+            .http
+            .post(url)
+            .json(&LoginBody { username, password })
+            .send()
+            .await
+            .context("login request failed")?;
+        Self::parse_json(resp).await
+    }
+
+    pub async fn me(&self) -> Result<UserInfo> {
+        let resp = self.request(Method::GET, "/auth/me").await?;
+        Self::parse_json(resp).await
+    }
+
+    pub async fn list_devices(&self) -> Result<Vec<DeviceState>> {
+        let resp = self.request(Method::GET, "/devices").await?;
+        Self::parse_json(resp).await
+    }
+
+    pub async fn list_scenes(&self) -> Result<Vec<Scene>> {
+        let resp = self.request(Method::GET, "/scenes").await?;
+        Self::parse_json(resp).await
+    }
+
+    pub async fn list_areas(&self) -> Result<Vec<Area>> {
+        let resp = self.request(Method::GET, "/areas").await?;
+        Self::parse_json(resp).await
+    }
+
+    pub async fn list_automations(&self) -> Result<Vec<Rule>> {
+        let resp = self.request(Method::GET, "/automations").await?;
+        Self::parse_json(resp).await
+    }
+
+    pub async fn list_events(&self, limit: usize) -> Result<Vec<EventEntry>> {
+        let path = format!("/events?limit={limit}");
+        let resp = self.request(Method::GET, &path).await?;
+        Self::parse_json(resp).await
+    }
+
+    pub async fn list_plugins(&self) -> Result<Vec<PluginRecord>> {
+        let resp = self.request(Method::GET, "/plugins").await?;
+        Self::parse_json(resp).await
+    }
+
+    pub async fn list_users(&self) -> Result<Vec<UserInfo>> {
+        let resp = self.request(Method::GET, "/auth/users").await?;
+        Self::parse_json(resp).await
+    }
+
+    pub async fn activate_scene(&self, scene_id: &str) -> Result<()> {
+        let path = format!("/scenes/{scene_id}/activate");
+        let resp = self.request(Method::POST, &path).await?;
+        Self::parse_empty(resp).await
+    }
+
+    pub async fn set_device_on(&self, device_id: &str, on: bool) -> Result<()> {
+        let path = format!("/devices/{device_id}/state");
+        let body = json!({ "on": on });
+        let resp = self.request_with_json(Method::PATCH, &path, body).await?;
+        Self::parse_empty(resp).await
+    }
+
+    fn endpoint(&self, path: &str) -> String {
+        format!("{}/api/v1{}", self.base_url, path)
+    }
+
+    async fn request(&self, method: Method, path: &str) -> Result<Response> {
+        let token = self
+            .token
+            .as_deref()
+            .ok_or_else(|| anyhow!("not authenticated"))?;
+        let resp = self
+            .http
+            .request(method, self.endpoint(path))
+            .bearer_auth(token)
+            .send()
+            .await
+            .with_context(|| format!("request failed: {path}"))?;
+        Ok(resp)
+    }
+
+    async fn request_with_json(&self, method: Method, path: &str, body: Value) -> Result<Response> {
+        let token = self
+            .token
+            .as_deref()
+            .ok_or_else(|| anyhow!("not authenticated"))?;
+        let resp = self
+            .http
+            .request(method, self.endpoint(path))
+            .bearer_auth(token)
+            .json(&body)
+            .send()
+            .await
+            .with_context(|| format!("request failed: {path}"))?;
+        Ok(resp)
+    }
+
+    async fn parse_json<T: for<'a> Deserialize<'a>>(resp: Response) -> Result<T> {
+        let status = resp.status();
+        if status.is_success() {
+            return resp.json::<T>().await.context("failed to parse json response");
+        }
+        let body: Value = resp.json().await.unwrap_or_else(|_| json!({}));
+        let message = body
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("request failed");
+        Err(anyhow!("{}: {}", status, message))
+    }
+
+    async fn parse_empty(resp: Response) -> Result<()> {
+        let status = resp.status();
+        if status.is_success() {
+            return Ok(());
+        }
+        let body: Value = resp.json().await.unwrap_or_else(|_| json!({}));
+        let message = body
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("request failed");
+        Err(anyhow!("{}: {}", status, message))
+    }
+}
