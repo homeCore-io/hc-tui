@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::Line,
-    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Tabs, Wrap},
+    widgets::{Block, Borders, Clear, Gauge, List, ListItem, Paragraph, Tabs, Wrap},
     Frame,
 };
 
@@ -73,7 +73,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &App) {
 }
 
 fn draw_login(frame: &mut Frame<'_>, app: &App) {
-    let popup = centered_rect(70, 45, frame.area());
+    let popup = centered_rect(70, 55, frame.area());
     frame.render_widget(Clear, popup);
 
     let layout = Layout::default()
@@ -83,6 +83,7 @@ fn draw_login(frame: &mut Frame<'_>, app: &App) {
             Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(2),
+            Constraint::Length(3),
             Constraint::Min(1),
         ])
         .split(popup);
@@ -124,12 +125,28 @@ fn draw_login(frame: &mut Frame<'_>, app: &App) {
         .alignment(Alignment::Center);
     frame.render_widget(help, layout[3]);
 
+    let loading_label = if app.login_in_progress {
+        format!("{} authenticating with HomeCore...", app.login_spinner())
+    } else {
+        "Idle".to_string()
+    };
+    let loading = Gauge::default()
+        .block(Block::default().borders(Borders::ALL).title(loading_label))
+        .gauge_style(
+            Style::default()
+                .fg(Color::LightGreen)
+                .bg(Color::Black)
+                .add_modifier(Modifier::BOLD),
+        )
+        .ratio(app.login_progress_ratio());
+    frame.render_widget(loading, layout[4]);
+
     let message = app
         .error
         .clone()
         .unwrap_or_else(|| "Connects to /api/v1/auth/login and loads/saves cache snapshots locally".to_string());
     let msg = Paragraph::new(message).alignment(Alignment::Center);
-    frame.render_widget(msg, layout[4]);
+    frame.render_widget(msg, layout[5]);
 }
 
 fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {

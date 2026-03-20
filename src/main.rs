@@ -5,7 +5,7 @@ mod ui;
 mod ws;
 
 use anyhow::Result;
-use app::App;
+use app::{login_workflow, App, LoginWorkflowResult};
 use clap::Parser;
 use crossterm::{
     event::{self, Event},
@@ -16,6 +16,10 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 use std::{io, time::Duration};
 use tokio::sync::mpsc;
 use ws::{spawn_events_stream, WsAppMsg};
+
+enum AsyncMsg {
+    LoginFinished(Result<LoginWorkflowResult, String>),
+}
 
 #[derive(Debug, Parser)]
 #[command(name = "hc-tui", about = "Terminal UI client for HomeCore")]
@@ -48,9 +52,11 @@ async fn run_app(
     app: &mut App,
 ) -> Result<()> {
     let (ws_tx, mut ws_rx) = mpsc::unbounded_channel::<WsAppMsg>();
+    let (async_tx, mut async_rx) = mpsc::unbounded_channel::<AsyncMsg>();
     let mut ws_started = false;
 
     loop {
+        app.tick_login_animation();
         terminal.draw(|frame| ui::draw(frame, app))?;
 
         if app.should_quit {
@@ -65,18 +71,37 @@ async fn run_app(
             }
         }
 
+        while let Ok(msg) = async_rx.try_recv() {
+            match msg {
+                AsyncMsg::LoginFinished(Ok(result)) => {
+                    app.apply_login_success(result);
+                    if app.authenticated && !ws_started {
+                        if let Some(token) = app.ws_token() {
+                            spawn_events_stream(app.ws_endpoint(), token, ws_tx.clone());
+                            ws_started = true;
+                        }
+                    }
+                }
+                AsyncMsg::LoginFinished(Err(error)) => app.apply_login_failure(error),
+            }
+        }
+
         if event::poll(Duration::from_millis(100))? {
             let evt = event::read()?;
             if let Event::Key(key) = evt {
                 if !app.authenticated {
                     let submit = app.on_key_login(key);
                     if submit {
-                        app.login().await;
-                        if app.authenticated && !ws_started {
-                            if let Some(token) = app.ws_token() {
-                                spawn_events_stream(app.ws_endpoint(), token, ws_tx.clone());
-                                ws_started = true;
-                            }
+                        if let Some((username, password)) = app.begin_login() {
+                            let tx = async_tx.clone();
+                            let client = app.client.clone();
+                            let cache = app.cache.clone();
+                            tokio::spawn(async move {
+                                let result = login_workflow(client, cache, username, password)
+                                    .await
+                                    .map_err(|e| e.to_string());
+                                let _ = tx.send(AsyncMsg::LoginFinished(result));
+                            });
                         }
                     }
                 } else {

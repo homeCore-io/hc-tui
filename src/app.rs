@@ -1,5 +1,6 @@
 use crate::api::{
-    Area, DeviceState, EventEntry, HomeCoreClient, PluginRecord, Rule, Scene, UserInfo,
+    Area, DeviceState, EventEntry, HomeCoreClient, LoginResponse, PluginRecord, Role, Rule, Scene,
+    UserInfo,
 };
 use crate::cache::{CacheSnapshot, CacheStore};
 use anyhow::Result;
@@ -60,6 +61,14 @@ pub struct App {
     pub users: Vec<UserInfo>,
     pub plugins: Vec<PluginRecord>,
     pub ws_connected: bool,
+    pub login_in_progress: bool,
+    pub login_animation_step: u16,
+}
+
+pub struct LoginWorkflowResult {
+    pub auth: LoginResponse,
+    pub snapshot: CacheSnapshot,
+    pub warning: Option<String>,
 }
 
 impl App {
@@ -85,6 +94,8 @@ impl App {
             users: Vec::new(),
             plugins: Vec::new(),
             ws_connected: false,
+            login_in_progress: false,
+            login_animation_step: 0,
         }
     }
 
@@ -115,31 +126,50 @@ impl App {
             .unwrap_or(false)
     }
 
-    pub async fn login(&mut self) {
+    pub fn begin_login(&mut self) -> Option<(String, String)> {
         self.error = None;
         if self.username.trim().is_empty() || self.password.is_empty() {
             self.error = Some("username and password are required".to_string());
-            return;
+            return None;
         }
-        match self.client.login(&self.username, &self.password).await {
-            Ok(auth) => {
-                self.client.set_token(auth.token);
-                self.current_user = Some(auth.user);
-                self.authenticated = true;
-                self.status = "Login successful. Loading cache + syncing...".to_string();
+        self.login_in_progress = true;
+        self.login_animation_step = 0;
+        self.status = "Authenticating and syncing state...".to_string();
+        Some((self.username.clone(), self.password.clone()))
+    }
 
-                if let Err(err) = self.load_from_cache().await {
-                    self.error = Some(format!("cache load error: {err}"));
-                }
-
-                if let Err(err) = self.refresh_all().await {
-                    self.error = Some(format!("sync error: {err}"));
-                }
-            }
-            Err(err) => {
-                self.error = Some(err.to_string());
-            }
+    pub fn tick_login_animation(&mut self) {
+        if self.login_in_progress {
+            self.login_animation_step = (self.login_animation_step + 1) % 100;
         }
+    }
+
+    pub fn login_spinner(&self) -> &'static str {
+        const SPINNER: [&str; 8] = ["|", "/", "-", "\\", "|", "/", "-", "\\"];
+        SPINNER[(self.login_animation_step as usize) % SPINNER.len()]
+    }
+
+    pub fn login_progress_ratio(&self) -> f64 {
+        ((self.login_animation_step % 100) as f64) / 100.0
+    }
+
+    pub fn apply_login_success(&mut self, result: LoginWorkflowResult) {
+        self.client.set_token(result.auth.token);
+        self.current_user = Some(result.auth.user);
+        self.authenticated = true;
+        self.login_in_progress = false;
+        self.apply_snapshot(result.snapshot);
+        if let Some(warn) = result.warning {
+            self.status = format!("Logged in with cached data fallback: {warn}");
+        } else {
+            self.status = "Login successful and state synchronized".to_string();
+        }
+    }
+
+    pub fn apply_login_failure(&mut self, error: String) {
+        self.login_in_progress = false;
+        self.error = Some(error);
+        self.status = "Authentication failed".to_string();
     }
 
     pub async fn refresh_all(&mut self) -> Result<()> {
@@ -159,16 +189,6 @@ impl App {
         self.save_to_cache().await?;
         self.clamp_selection();
         self.status = "Data refreshed and cached".to_string();
-        Ok(())
-    }
-
-    async fn load_from_cache(&mut self) -> Result<()> {
-        let Some(user) = self.current_user.as_ref() else {
-            return Ok(());
-        };
-        let snapshot = self.cache.load_snapshot(&user.username).await?;
-        self.apply_snapshot(snapshot);
-        self.status = "Loaded cached state; syncing from HomeCore...".to_string();
         Ok(())
     }
 
@@ -206,6 +226,12 @@ impl App {
     }
 
     pub fn on_key_login(&mut self, key: KeyEvent) -> bool {
+        if self.login_in_progress {
+            if key.code == KeyCode::Esc {
+                self.should_quit = true;
+            }
+            return false;
+        }
         match key.code {
             KeyCode::Esc => {
                 self.should_quit = true;
@@ -450,4 +476,75 @@ impl App {
             }
         }
     }
+}
+
+pub async fn login_workflow(
+    mut client: HomeCoreClient,
+    cache: CacheStore,
+    username: String,
+    password: String,
+) -> Result<LoginWorkflowResult> {
+    let auth = client.login(&username, &password).await?;
+    client.set_token(auth.token.clone());
+
+    let cached = cache
+        .load_snapshot(&auth.user.username)
+        .await
+        .unwrap_or_default();
+
+    let fetched = fetch_remote_snapshot(&client, auth.user.role.clone()).await;
+    match fetched {
+        Ok(snapshot) => {
+            cache.save_snapshot(&auth.user.username, &snapshot).await?;
+            Ok(LoginWorkflowResult {
+                auth,
+                snapshot,
+                warning: None,
+            })
+        }
+        Err(err) => {
+            if snapshot_is_empty(&cached) {
+                Err(err)
+            } else {
+                Ok(LoginWorkflowResult {
+                    auth,
+                    snapshot: cached,
+                    warning: Some(err.to_string()),
+                })
+            }
+        }
+    }
+}
+
+async fn fetch_remote_snapshot(client: &HomeCoreClient, role: Role) -> Result<CacheSnapshot> {
+    let devices = client.list_devices().await?;
+    let scenes = client.list_scenes().await?;
+    let areas = client.list_areas().await?;
+    let automations = client.list_automations().await?;
+    let events = client.list_events(50).await?;
+    let (users, plugins) = if role.is_admin() {
+        (client.list_users().await?, client.list_plugins().await?)
+    } else {
+        (Vec::new(), Vec::new())
+    };
+
+    Ok(CacheSnapshot {
+        devices,
+        scenes,
+        areas,
+        automations,
+        events,
+        users,
+        plugins,
+    })
+}
+
+fn snapshot_is_empty(snapshot: &CacheSnapshot) -> bool {
+    snapshot.devices.is_empty()
+        && snapshot.scenes.is_empty()
+        && snapshot.areas.is_empty()
+        && snapshot.automations.is_empty()
+        && snapshot.events.is_empty()
+        && snapshot.users.is_empty()
+        && snapshot.plugins.is_empty()
 }
