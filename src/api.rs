@@ -6,8 +6,17 @@ use serde_json::{json, Map, Value};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Role {
+    #[serde(alias = "admin", alias = "Admin", alias = "ADMIN")]
     Admin,
+    #[serde(alias = "user", alias = "User", alias = "USER")]
     User,
+    #[serde(
+        alias = "read_only",
+        alias = "readonly",
+        alias = "readOnly",
+        alias = "ReadOnly",
+        alias = "READ_ONLY"
+    )]
     ReadOnly,
 }
 
@@ -22,6 +31,7 @@ pub struct UserInfo {
     pub id: String,
     pub username: String,
     pub role: Role,
+    #[serde(default)]
     pub created_at: String,
 }
 
@@ -136,7 +146,7 @@ impl HomeCoreClient {
             .send()
             .await
             .context("login request failed")?;
-        Self::parse_json(resp).await
+        Self::parse_login_response(resp).await
     }
 
     pub async fn me(&self) -> Result<UserInfo> {
@@ -231,7 +241,11 @@ impl HomeCoreClient {
     async fn parse_json<T: for<'a> Deserialize<'a>>(resp: Response) -> Result<T> {
         let status = resp.status();
         if status.is_success() {
-            return resp.json::<T>().await.context("failed to parse json response");
+            let text = resp.text().await.context("failed to read response body")?;
+            return serde_json::from_str::<T>(&text).with_context(|| {
+                let snippet = text.chars().take(300).collect::<String>();
+                format!("failed to parse json response: {snippet}")
+            });
         }
         let message = Self::extract_error_message(resp).await;
         Err(anyhow!("{}: {}", status, message))
@@ -262,5 +276,37 @@ impl HomeCoreClient {
         }
 
         text
+    }
+
+    async fn parse_login_response(resp: Response) -> Result<LoginResponse> {
+        let status = resp.status();
+        if !status.is_success() {
+            let message = Self::extract_error_message(resp).await;
+            return Err(anyhow!("{}: {}", status, message));
+        }
+
+        let text = resp.text().await.context("failed to read login response body")?;
+        let parsed = serde_json::from_str::<Value>(&text).with_context(|| {
+            let snippet = text.chars().take(300).collect::<String>();
+            format!("failed to parse login json: {snippet}")
+        })?;
+
+        let body = parsed.get("data").unwrap_or(&parsed);
+        let token = body
+            .get("token")
+            .or_else(|| body.get("access_token"))
+            .and_then(Value::as_str)
+            .ok_or_else(|| anyhow!("login response missing token/access_token field"))?
+            .to_string();
+
+        let user_value = body
+            .get("user")
+            .ok_or_else(|| anyhow!("login response missing user field"))?
+            .clone();
+
+        let user = serde_json::from_value::<UserInfo>(user_value)
+            .context("failed to parse user object from login response")?;
+
+        Ok(LoginResponse { token, user })
     }
 }
