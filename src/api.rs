@@ -156,7 +156,7 @@ impl HomeCoreClient {
 
     pub async fn list_devices(&self) -> Result<Vec<DeviceState>> {
         let resp = self.request(Method::GET, "/devices").await?;
-        Self::parse_json(resp).await
+        Self::parse_devices_response(resp).await
     }
 
     pub async fn list_scenes(&self) -> Result<Vec<Scene>> {
@@ -177,7 +177,7 @@ impl HomeCoreClient {
     pub async fn list_events(&self, limit: usize) -> Result<Vec<EventEntry>> {
         let path = format!("/events?limit={limit}");
         let resp = self.request(Method::GET, &path).await?;
-        Self::parse_json(resp).await
+        Self::parse_events_response(resp).await
     }
 
     pub async fn list_plugins(&self) -> Result<Vec<PluginRecord>> {
@@ -308,5 +308,160 @@ impl HomeCoreClient {
             .context("failed to parse user object from login response")?;
 
         Ok(LoginResponse { token, user })
+    }
+
+    async fn parse_devices_response(resp: Response) -> Result<Vec<DeviceState>> {
+        let status = resp.status();
+        if !status.is_success() {
+            let message = Self::extract_error_message(resp).await;
+            return Err(anyhow!("{}: {}", status, message));
+        }
+
+        let text = resp
+            .text()
+            .await
+            .context("failed to read devices response body")?;
+        let parsed = serde_json::from_str::<Value>(&text).with_context(|| {
+            let snippet = text.chars().take(300).collect::<String>();
+            format!("failed to parse devices json: {snippet}")
+        })?;
+        let arr = parsed
+            .as_array()
+            .ok_or_else(|| anyhow!("devices payload was not a JSON array"))?;
+
+        let mut devices = Vec::with_capacity(arr.len());
+        for item in arr {
+            let obj = match item.as_object() {
+                Some(v) => v,
+                None => continue,
+            };
+            let device_id = obj
+                .get("device_id")
+                .or_else(|| obj.get("id"))
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            if device_id.is_empty() {
+                continue;
+            }
+
+            let name = obj
+                .get("name")
+                .and_then(Value::as_str)
+                .map(ToString::to_string)
+                .unwrap_or_else(|| device_id.clone());
+            let plugin_id = obj
+                .get("plugin_id")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown")
+                .to_string();
+            let area = obj
+                .get("area")
+                .and_then(Value::as_str)
+                .map(ToString::to_string);
+            let available = obj
+                .get("available")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let attributes = obj
+                .get("attributes")
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default();
+            let last_seen = obj
+                .get("last_seen")
+                .and_then(Value::as_str)
+                .map(ToString::to_string)
+                .unwrap_or_default();
+
+            devices.push(DeviceState {
+                device_id,
+                name,
+                plugin_id,
+                area,
+                available,
+                attributes,
+                last_seen,
+            });
+        }
+
+        Ok(devices)
+    }
+
+    async fn parse_events_response(resp: Response) -> Result<Vec<EventEntry>> {
+        let status = resp.status();
+        if !status.is_success() {
+            let message = Self::extract_error_message(resp).await;
+            return Err(anyhow!("{}: {}", status, message));
+        }
+
+        let text = resp
+            .text()
+            .await
+            .context("failed to read events response body")?;
+        let parsed = serde_json::from_str::<Value>(&text).with_context(|| {
+            let snippet = text.chars().take(300).collect::<String>();
+            format!("failed to parse events json: {snippet}")
+        })?;
+        let arr = parsed
+            .as_array()
+            .ok_or_else(|| anyhow!("events payload was not a JSON array"))?;
+
+        let mut events = Vec::with_capacity(arr.len());
+        for item in arr {
+            let obj = match item.as_object() {
+                Some(v) => v,
+                None => continue,
+            };
+
+            let event_obj = obj
+                .get("event")
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default();
+
+            let event_type = obj
+                .get("type")
+                .and_then(Value::as_str)
+                .or_else(|| event_obj.get("type").and_then(Value::as_str))
+                .or_else(|| obj.get("event_type").and_then(Value::as_str))
+                .unwrap_or("unknown")
+                .to_string();
+
+            let timestamp = obj
+                .get("timestamp")
+                .and_then(Value::as_str)
+                .or_else(|| event_obj.get("timestamp").and_then(Value::as_str))
+                .unwrap_or("")
+                .to_string();
+
+            let device_id = obj
+                .get("device_id")
+                .and_then(Value::as_str)
+                .or_else(|| event_obj.get("device_id").and_then(Value::as_str))
+                .map(ToString::to_string);
+
+            let rule_name = obj
+                .get("rule_name")
+                .and_then(Value::as_str)
+                .or_else(|| event_obj.get("rule_name").and_then(Value::as_str))
+                .map(ToString::to_string);
+
+            let event_type_custom = obj
+                .get("event_type")
+                .and_then(Value::as_str)
+                .or_else(|| event_obj.get("event_type").and_then(Value::as_str))
+                .map(ToString::to_string);
+
+            events.push(EventEntry {
+                event_type,
+                timestamp,
+                device_id,
+                rule_name,
+                event_type_custom,
+            });
+        }
+
+        Ok(events)
     }
 }

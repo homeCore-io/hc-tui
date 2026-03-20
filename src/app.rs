@@ -63,12 +63,19 @@ pub struct App {
     pub ws_connected: bool,
     pub login_in_progress: bool,
     pub login_animation_step: u16,
+    pub login_phase: LoginPhase,
 }
 
 pub struct LoginWorkflowResult {
     pub auth: LoginResponse,
     pub snapshot: CacheSnapshot,
     pub warning: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoginPhase {
+    Authenticating,
+    Synthesizing,
 }
 
 impl App {
@@ -96,6 +103,7 @@ impl App {
             ws_connected: false,
             login_in_progress: false,
             login_animation_step: 0,
+            login_phase: LoginPhase::Authenticating,
         }
     }
 
@@ -134,8 +142,16 @@ impl App {
         }
         self.login_in_progress = true;
         self.login_animation_step = 0;
+        self.login_phase = LoginPhase::Authenticating;
         self.status = "Authenticating and syncing state...".to_string();
         Some((self.username.clone(), self.password.clone()))
+    }
+
+    pub fn set_login_phase_synthesizing(&mut self) {
+        if self.login_in_progress {
+            self.login_phase = LoginPhase::Synthesizing;
+            self.status = "Synthesizing homeCore...".to_string();
+        }
     }
 
     pub fn tick_login_animation(&mut self) {
@@ -478,13 +494,11 @@ impl App {
     }
 }
 
-pub async fn login_workflow(
+pub async fn login_workflow_from_auth(
     mut client: HomeCoreClient,
     cache: CacheStore,
-    username: String,
-    password: String,
+    auth: LoginResponse,
 ) -> Result<LoginWorkflowResult> {
-    let auth = client.login(&username, &password).await?;
     client.set_token(auth.token.clone());
 
     let cached = cache
@@ -517,13 +531,16 @@ pub async fn login_workflow(
 }
 
 async fn fetch_remote_snapshot(client: &HomeCoreClient, role: Role) -> Result<CacheSnapshot> {
-    let devices = client.list_devices().await?;
-    let scenes = client.list_scenes().await?;
-    let areas = client.list_areas().await?;
-    let automations = client.list_automations().await?;
-    let events = client.list_events(50).await?;
+    let devices = client.list_devices().await.unwrap_or_default();
+    let scenes = client.list_scenes().await.unwrap_or_default();
+    let areas = client.list_areas().await.unwrap_or_default();
+    let automations = client.list_automations().await.unwrap_or_default();
+    let events = client.list_events(50).await.unwrap_or_default();
     let (users, plugins) = if role.is_admin() {
-        (client.list_users().await?, client.list_plugins().await?)
+        (
+            client.list_users().await.unwrap_or_default(),
+            client.list_plugins().await.unwrap_or_default(),
+        )
     } else {
         (Vec::new(), Vec::new())
     };

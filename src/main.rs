@@ -5,7 +5,7 @@ mod ui;
 mod ws;
 
 use anyhow::Result;
-use app::{login_workflow, App, LoginWorkflowResult};
+use app::{login_workflow_from_auth, App, LoginWorkflowResult};
 use clap::Parser;
 use crossterm::{
     event::{self, Event},
@@ -19,6 +19,7 @@ use ws::{spawn_events_stream, WsAppMsg};
 
 enum AsyncMsg {
     LoginFinished(Result<LoginWorkflowResult, String>),
+    LoginPhaseSynthesizing,
 }
 
 #[derive(Debug, Parser)]
@@ -83,6 +84,7 @@ async fn run_app(
                     }
                 }
                 AsyncMsg::LoginFinished(Err(error)) => app.apply_login_failure(error),
+                AsyncMsg::LoginPhaseSynthesizing => app.set_login_phase_synthesizing(),
             }
         }
 
@@ -97,9 +99,15 @@ async fn run_app(
                             let client = app.client.clone();
                             let cache = app.cache.clone();
                             tokio::spawn(async move {
-                                let result = login_workflow(client, cache, username, password)
-                                    .await
-                                    .map_err(|e| e.to_string());
+                                let result = match client.login(&username, &password).await {
+                                    Ok(auth) => {
+                                        let _ = tx.send(AsyncMsg::LoginPhaseSynthesizing);
+                                        login_workflow_from_auth(client, cache, auth)
+                                            .await
+                                            .map_err(|e| e.to_string())
+                                    }
+                                    Err(e) => Err(e.to_string()),
+                                };
                                 let _ = tx.send(AsyncMsg::LoginFinished(result));
                             });
                         }

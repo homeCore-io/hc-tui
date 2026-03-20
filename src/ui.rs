@@ -1,9 +1,9 @@
-use crate::app::{App, FocusField, Tab};
+use crate::app::{App, FocusField, LoginPhase, Tab};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::Line,
-    widgets::{Block, Borders, Clear, Gauge, List, ListItem, Paragraph, Tabs, Wrap},
+    widgets::{Block, Borders, Cell, Clear, Gauge, List, ListItem, Paragraph, Row, Table, Tabs, Wrap},
     Frame,
 };
 
@@ -126,7 +126,14 @@ fn draw_login(frame: &mut Frame<'_>, app: &App) {
     frame.render_widget(help, layout[3]);
 
     let loading_label = if app.login_in_progress {
-        format!("{} authenticating with HomeCore...", app.login_spinner())
+        match app.login_phase {
+            LoginPhase::Authenticating => {
+                format!("{} authenticating with HomeCore...", app.login_spinner())
+            }
+            LoginPhase::Synthesizing => {
+                format!("{} Synthesizing homeCore...", app.login_spinner())
+            }
+        }
     } else {
         "Idle".to_string()
     };
@@ -150,30 +157,13 @@ fn draw_login(frame: &mut Frame<'_>, app: &App) {
 }
 
 fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    if matches!(app.active_tab(), Tab::Devices) {
+        draw_devices_table(frame, app, area);
+        return;
+    }
+
     let items = match app.active_tab() {
-        Tab::Devices => app
-            .devices
-            .iter()
-            .map(|d| {
-                let on = d.attributes.get("on").and_then(|v| v.as_bool()).unwrap_or(false);
-                let brightness = d
-                    .attributes
-                    .get("brightness")
-                    .map(|v| v.to_string())
-                    .unwrap_or_else(|| "-".to_string());
-                ListItem::new(format!(
-                    "{} ({}) | on={} bright={} | available={} | area={} | plugin={} | seen={}",
-                    d.name,
-                    d.device_id,
-                    on,
-                    brightness,
-                    d.available,
-                    d.area.clone().unwrap_or_else(|| "-".to_string()),
-                    d.plugin_id,
-                    d.last_seen
-                ))
-            })
-            .collect::<Vec<_>>(),
+        Tab::Devices => Vec::new(),
         Tab::Scenes => app
             .scenes
             .iter()
@@ -235,6 +225,109 @@ fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
         state.select(Some(app.selected));
     }
     frame.render_stateful_widget(list, area, &mut state);
+}
+
+fn draw_devices_table(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let header = Row::new(vec![
+        Cell::from("Name"),
+        Cell::from("Status"),
+        Cell::from("Availability"),
+        Cell::from("Room"),
+        Cell::from("Plugin"),
+    ])
+    .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+
+    let rows = app
+        .devices
+        .iter()
+        .map(|device| {
+            Row::new(vec![
+                Cell::from(clean_name(&device.name)),
+                Cell::from(canonical_device_status(device)),
+                Cell::from(if device.available { "Online" } else { "Offline" }),
+                Cell::from(device.area.clone().unwrap_or_else(|| "-".to_string())),
+                Cell::from(clean_plugin_id(&device.plugin_id)),
+            ])
+        })
+        .collect::<Vec<_>>();
+
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Percentage(32),
+            Constraint::Percentage(14),
+            Constraint::Percentage(18),
+            Constraint::Percentage(18),
+            Constraint::Percentage(18),
+        ],
+    )
+    .header(header)
+    .block(Block::default().borders(Borders::ALL).title("Devices"))
+    .row_highlight_style(
+        Style::default()
+            .fg(Color::Black)
+            .bg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    );
+
+    let mut state = ratatui::widgets::TableState::default();
+    if !app.devices.is_empty() {
+        state.select(Some(app.selected));
+    }
+    frame.render_stateful_widget(table, area, &mut state);
+}
+
+fn canonical_device_status(device: &crate::api::DeviceState) -> String {
+    if let Some(on) = device.attributes.get("on").and_then(|v| v.as_bool()) {
+        return if on { "On".to_string() } else { "Off".to_string() };
+    }
+    if let Some(state) = device.attributes.get("state").and_then(|v| v.as_str()) {
+        return normalize_label(state);
+    }
+    if let Some(open) = device.attributes.get("open").and_then(|v| v.as_bool()) {
+        return if open { "Open".to_string() } else { "Closed".to_string() };
+    }
+    if let Some(online) = device.attributes.get("online").and_then(|v| v.as_bool()) {
+        return if online { "Online".to_string() } else { "Offline".to_string() };
+    }
+    "Unknown".to_string()
+}
+
+fn clean_plugin_id(plugin_id: &str) -> String {
+    let mut value = plugin_id.to_string();
+    for prefix in ["plugin.", "plugin_", "hc-"] {
+        if let Some(stripped) = value.strip_prefix(prefix) {
+            value = stripped.to_string();
+        }
+    }
+    if let Some(last) = value.rsplit('.').next() {
+        value = last.to_string();
+    }
+    normalize_label(&value)
+}
+
+fn clean_name(name: &str) -> String {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        "-".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn normalize_label(value: &str) -> String {
+    value
+        .replace('_', " ")
+        .split_whitespace()
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => format!("{}{}", first.to_ascii_uppercase(), chars.as_str().to_ascii_lowercase()),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn list_is_empty(app: &App) -> bool {
