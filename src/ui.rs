@@ -451,9 +451,37 @@ fn draw_plugin_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
                             "unreachable" => "unreachable",
                             _ => "unknown",
                         });
+                    let pairing_in_progress = d
+                        .attributes
+                        .get("pairing_in_progress")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    let pairing_last_result = d
+                        .attributes
+                        .get("pairing_last_result")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("n/a");
+                    let pairing_last_error = d
+                        .attributes
+                        .get("pairing_last_error")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("none");
+
+                    let pairing_display = if pairing_in_progress {
+                        "in_progress"
+                    } else {
+                        pairing_status
+                    };
                     format!(
-                        "- {} | host={} | bridge_id={} | online={} | pairing={} | integration={}",
-                        d.name, host, bridge_id, online, pairing_status, integration_state
+                        "- {} | host={} | bridge_id={} | online={} | pairing={} | integration={} | pair_result={} | pair_error={}",
+                        d.name,
+                        host,
+                        bridge_id,
+                        online,
+                        pairing_display,
+                        integration_state,
+                        pairing_last_result,
+                        pairing_last_error
                     )
                 })
                 .collect::<Vec<_>>();

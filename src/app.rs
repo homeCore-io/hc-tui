@@ -1013,16 +1013,27 @@ impl App {
         }
 
         if failed.is_empty() {
-            self.status = format!(
+            let pairing_status = format!(
                 "Pairing requested for {ok} bridge(s). Press Hue link button if needed."
             );
+            self.status = pairing_status.clone();
+
+            if let Err(err) = self.refresh_all().await {
+                if self.error.is_none() {
+                    self.error = Some(err.to_string());
+                }
+                return;
+            }
+
+            // Preserve explicit pairing feedback instead of generic refresh status.
+            self.status = pairing_status;
         } else {
             self.error = Some(format!("Pairing request errors: {}", failed.join(" | ")));
-        }
 
-        if let Err(err) = self.refresh_all().await {
-            if self.error.is_none() {
-                self.error = Some(err.to_string());
+            if let Err(err) = self.refresh_all().await {
+                if self.error.is_none() {
+                    self.error = Some(err.to_string());
+                }
             }
         }
     }
@@ -1060,10 +1071,10 @@ impl App {
             EventsFilterMode::HueInputs => {
                 matches!(
                     ty,
-                    "device_button" | "device_rotary" | "entertainment_action_applied" | "entertainment_status_changed" | "plugin_command_result"
+                    "device_button" | "device_rotary" | "entertainment_action_applied" | "entertainment_status_changed" | "plugin_command_result" | "bridge_pairing_status"
                 ) || matches!(
                     custom,
-                    "device_button" | "device_rotary" | "entertainment_action_applied" | "entertainment_status_changed" | "plugin_command_result"
+                    "device_button" | "device_rotary" | "entertainment_action_applied" | "entertainment_status_changed" | "plugin_command_result" | "bridge_pairing_status"
                 )
             }
             EventsFilterMode::Entertainment => {
@@ -1561,6 +1572,25 @@ fn summarize_live_event_detail(event: &Value) -> Option<String> {
             } else {
                 Some(parts.join(" "))
             }
+        }
+        "bridge_pairing_status" => {
+            let phase = event.get("phase").and_then(Value::as_str).unwrap_or("unknown");
+            let success = event.get("success").and_then(Value::as_bool);
+            let error = event.get("error").and_then(Value::as_str);
+
+            let mut parts = vec![format!("phase={phase}")];
+            if let Some(v) = success {
+                parts.push(if v { "success".to_string() } else { "failed".to_string() });
+            }
+            if let Some(msg) = error {
+                let msg_short = if msg.len() > 30 {
+                    format!("{}...", &msg[..27])
+                } else {
+                    msg.to_string()
+                };
+                parts.push(format!("msg={msg_short}"));
+            }
+            Some(parts.join(" "))
         }
         "plugin_metrics" => {
             let fallback = event
