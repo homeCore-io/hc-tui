@@ -574,7 +574,7 @@ fn device_list_row(app: &App, device: &DeviceState, is_selected: bool, indent: b
     if device.plugin_id == "core.timer" {
         let timer_state = device.attributes.get("state").and_then(|v| v.as_str()).unwrap_or("idle");
         if matches!(timer_state, "running" | "paused") {
-            let remaining_ms = device.attributes.get("remaining_ms").and_then(|v| v.as_u64()).unwrap_or(0);
+            let remaining_ms = device.attributes.get("remaining_secs").and_then(|v| v.as_u64()).unwrap_or(0) * 1000;
             let icon = if timer_state == "running" { "▶" } else { "⏸" };
             suffix.push_str(&format!(" {icon} {}", format_duration_ms(remaining_ms)));
         }
@@ -693,8 +693,8 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
     // Timer detail (core.timer devices)
     if device.plugin_id == "core.timer" {
         let timer_state = device.attributes.get("state").and_then(|v| v.as_str()).unwrap_or("idle");
-        let duration_ms = device.attributes.get("duration_ms").and_then(|v| v.as_u64()).unwrap_or(0);
-        let remaining_ms = device.attributes.get("remaining_ms").and_then(|v| v.as_u64()).unwrap_or(0);
+        let duration_ms = device.attributes.get("duration_secs").and_then(|v| v.as_u64()).unwrap_or(0) * 1000;
+        let remaining_ms = device.attributes.get("remaining_secs").and_then(|v| v.as_u64()).unwrap_or(0) * 1000;
         let repeat = device.attributes.get("repeat").and_then(|v| v.as_bool()).unwrap_or(false);
 
         let state_color = match timer_state {
@@ -750,7 +750,7 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
 
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
-            "Commands: start {duration_ms:N}  pause  resume  cancel  restart",
+            "Commands: start {duration_secs:N}  pause  resume  cancel  restart",
             Style::default().fg(Color::DarkGray),
         )));
         lines.push(Line::from(Span::styled(
@@ -981,7 +981,7 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
         "lock_operation_type", "lock_timeout_secs", "lock_auto_relock_secs",
         "last_alert", "auto_lock_secs", "sound_level",
         // Timer device attributes
-        "duration_ms", "remaining_ms", "repeat", "started_at", "label",
+        "duration_secs", "remaining_secs", "repeat", "started_at", "label",
     ];
     // ZWave internal / write-echo properties with no useful display value.
     // Also includes raw nodeInfo keys that survived field_map (shouldn't normally
