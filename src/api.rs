@@ -190,6 +190,62 @@ impl HomeCoreClient {
         Self::parse_json(resp).await
     }
 
+    pub async fn create_area(&self, name: &str) -> Result<Area> {
+        let body = serde_json::json!({ "name": name });
+        let resp = self.request_with_json(Method::POST, "/areas", body).await?;
+        Self::parse_json(resp).await
+    }
+
+    pub async fn rename_area(&self, id: &str, name: &str) -> Result<Area> {
+        let path = format!("/areas/{id}");
+        let body = serde_json::json!({ "name": name });
+        let resp = self.request_with_json(Method::PATCH, &path, body).await?;
+        Self::parse_json(resp).await
+    }
+
+    pub async fn delete_area(&self, id: &str) -> Result<()> {
+        let path = format!("/areas/{id}");
+        let resp = self.request(Method::DELETE, &path).await?;
+        Self::parse_empty(resp).await
+    }
+
+    pub async fn delete_device(&self, device_id: &str) -> Result<()> {
+        let path = format!("/devices/{device_id}");
+        let resp = self.request(Method::DELETE, &path).await?;
+        Self::parse_empty(resp).await
+    }
+
+    pub async fn create_user(&self, username: &str, password: &str, role: &Role) -> Result<UserInfo> {
+        let body = serde_json::json!({ "username": username, "password": password, "role": role });
+        let resp = self.request_with_json(Method::POST, "/auth/users", body).await?;
+        Self::parse_json(resp).await
+    }
+
+    pub async fn delete_user(&self, id: &str) -> Result<()> {
+        let path = format!("/auth/users/{id}");
+        let resp = self.request(Method::DELETE, &path).await?;
+        Self::parse_empty(resp).await
+    }
+
+    pub async fn set_user_role(&self, id: &str, role: &Role) -> Result<UserInfo> {
+        let path = format!("/auth/users/{id}/role");
+        let body = serde_json::json!({ "role": role });
+        let resp = self.request_with_json(Method::PATCH, &path, body).await?;
+        Self::parse_json(resp).await
+    }
+
+    pub async fn change_password(&self, current_password: &str, new_password: &str) -> Result<()> {
+        let body = serde_json::json!({ "current_password": current_password, "new_password": new_password });
+        let resp = self.request_with_json(Method::POST, "/auth/change-password", body).await?;
+        Self::parse_empty(resp).await
+    }
+
+    pub async fn deregister_plugin(&self, plugin_id: &str) -> Result<()> {
+        let path = format!("/plugins/{plugin_id}");
+        let resp = self.request(Method::DELETE, &path).await?;
+        Self::parse_empty(resp).await
+    }
+
     pub async fn activate_scene(&self, scene_id: &str) -> Result<()> {
         let path = format!("/scenes/{scene_id}/activate");
         let resp = self.request(Method::POST, &path).await?;

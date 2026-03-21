@@ -1,4 +1,4 @@
-use crate::app::{App, DeviceEditField, DeviceViewMode, FocusField, LoginPhase, Tab};
+use crate::app::{App, AreaEditor, DeviceEditField, DeviceViewMode, FocusField, LoginPhase, Tab, UserEditField, UserEditMode, UserEditor};
 use crate::api::DeviceState;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -48,6 +48,12 @@ pub fn draw(frame: &mut Frame<'_>, app: &App) {
     if app.device_editor.is_some() {
         draw_device_editor(frame, app);
     }
+    if let Some(editor) = app.area_editor.as_ref() {
+        draw_area_editor(frame, app, editor);
+    }
+    if let Some(editor) = app.user_editor.as_ref() {
+        draw_user_editor(frame, app, editor);
+    }
 }
 
 fn draw_status_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
@@ -71,19 +77,39 @@ fn draw_status_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
         .map(|u| u.username.as_str())
         .unwrap_or("n/a");
 
-    let mut hints = vec!["Tab/Shift+Tab tab", "j/k move", "r refresh", "q quit"];
-    if matches!(app.active_tab(), Tab::Devices) {
-        hints.push("t toggle");
-        hints.push("+/- bright");
-        hints.push("l/u lock");
-        hints.push("v view");
-        hints.push("Enter edit");
-    }
-    if matches!(app.active_tab(), Tab::Scenes) {
-        hints.push("a activate");
+    let mut hints = vec!["Tab/← → tab", "j/k move", "r refresh", "q quit"];
+    match app.active_tab() {
+        Tab::Devices => {
+            hints.push("t toggle");
+            hints.push("+/- bright");
+            hints.push("l/u lock");
+            hints.push("v view");
+            hints.push("Enter edit");
+            hints.push("d delete");
+        }
+        Tab::Scenes => { hints.push("a activate"); }
+        Tab::Areas => {
+            hints.push("n new");
+            hints.push("Enter rename");
+            hints.push("d delete");
+        }
+        Tab::Users => {
+            hints.push("n new");
+            hints.push("Enter role");
+            hints.push("p password");
+            hints.push("d delete");
+        }
+        Tab::Plugins => { hints.push("d deregister"); }
+        _ => {}
     }
     if app.device_editor.is_some() {
         hints = vec!["Tab field", "Enter save", "Esc cancel"];
+    }
+    if app.area_editor.is_some() {
+        hints = vec!["Enter save", "Esc cancel"];
+    }
+    if app.user_editor.is_some() {
+        hints = vec!["Tab field", "Space cycle role", "Enter save", "Esc cancel"];
     }
 
     let hint_str = hints.join(" | ");
@@ -203,7 +229,20 @@ fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
         Tab::Areas => app
             .areas
             .iter()
-            .map(|a| ListItem::new(format!("{} ({}) devices={}", a.name, a.id, a.device_ids.len())))
+            .map(|a| {
+                let count = a.device_ids.len();
+                let dev_label = if count == 1 { "device" } else { "devices" };
+                ListItem::new(Line::from(vec![
+                    Span::styled(
+                        format!("  {:<28}", a.name),
+                        Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!("{count} {dev_label}"),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ]))
+            })
             .collect::<Vec<_>>(),
         Tab::Automations => app
             .automations
@@ -234,20 +273,41 @@ fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
             .users
             .iter()
             .map(|u| {
-                ListItem::new(format!(
-                    "{} ({}) role={:?} created_at={}",
-                    u.username, u.id, u.role, u.created_at
-                ))
+                let is_self = app.current_user.as_ref().map(|me| me.id == u.id).unwrap_or(false);
+                let role_str = format!("{:?}", u.role);
+                let role_color = match u.role {
+                    crate::api::Role::Admin    => Color::Yellow,
+                    crate::api::Role::User     => Color::White,
+                    crate::api::Role::ReadOnly => Color::DarkGray,
+                };
+                let me_tag = if is_self { " (you)" } else { "" };
+                let date = u.created_at.chars().take(10).collect::<String>();
+                ListItem::new(Line::from(vec![
+                    Span::styled(
+                        format!("  {:<22}", format!("{}{}", u.username, me_tag)),
+                        Style::default().fg(Color::White),
+                    ),
+                    Span::styled(format!("{:<12}", role_str), Style::default().fg(role_color)),
+                    Span::styled(date, Style::default().fg(Color::DarkGray)),
+                ]))
             })
             .collect::<Vec<_>>(),
         Tab::Plugins => app
             .plugins
             .iter()
             .map(|p| {
-                ListItem::new(format!(
-                    "{} status={} registered_at={}",
-                    p.plugin_id, p.status, p.registered_at
-                ))
+                let (dot, dot_color) = match p.status.as_str() {
+                    "active"   => ("●", Color::Green),
+                    "degraded" => ("●", Color::Yellow),
+                    _          => ("○", Color::Red),
+                };
+                let ts = p.registered_at.chars().take(19).collect::<String>().replace('T', " ");
+                ListItem::new(Line::from(vec![
+                    Span::styled(format!("  {dot} "), Style::default().fg(dot_color)),
+                    Span::styled(format!("{:<30}", p.plugin_id), Style::default().fg(Color::White)),
+                    Span::styled(format!("{:<12}", p.status), Style::default().fg(dot_color)),
+                    Span::styled(ts, Style::default().fg(Color::DarkGray)),
+                ]))
             })
             .collect::<Vec<_>>(),
     };
@@ -731,6 +791,165 @@ fn draw_device_editor(frame: &mut Frame<'_>, app: &App) {
         .alignment(Alignment::Center)
         .block(Block::default().borders(Borders::ALL));
     frame.render_widget(help, layout[4]);
+}
+
+fn draw_area_editor(frame: &mut Frame<'_>, app: &App, editor: &AreaEditor) {
+    let title = if editor.id.is_none() { "New Area" } else { "Rename Area" };
+    let popup = centered_rect(60, 30, frame.area());
+    frame.render_widget(Clear, popup);
+
+    let outer = Block::default().borders(Borders::ALL).title(title);
+    let inner = outer.inner(popup);
+    frame.render_widget(outer, popup);
+
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(1),
+        ])
+        .split(inner);
+
+    let name_field = Paragraph::new(editor.name.as_str())
+        .block(Block::default().borders(Borders::ALL).title("Name")
+            .border_style(Style::default().fg(Color::Yellow)));
+    frame.render_widget(name_field, layout[0]);
+
+    let help = Paragraph::new("Enter save | Esc cancel").alignment(Alignment::Center);
+    frame.render_widget(help, layout[1]);
+
+    let _ = app;
+}
+
+fn draw_user_editor(frame: &mut Frame<'_>, app: &App, editor: &UserEditor) {
+    let title = match editor.mode {
+        UserEditMode::Create         => "New User",
+        UserEditMode::EditRole       => "Change Role",
+        UserEditMode::ChangePassword => "Change Password",
+    };
+    let popup = centered_rect(64, 60, frame.area());
+    frame.render_widget(Clear, popup);
+
+    let outer = Block::default().borders(Borders::ALL).title(title);
+    let inner = outer.inner(popup);
+    frame.render_widget(outer, popup);
+
+    let focused = Style::default().fg(Color::Yellow);
+    let normal  = Style::default();
+
+    match editor.mode {
+        UserEditMode::Create => {
+            let layout = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(3),
+                    Constraint::Length(3),
+                    Constraint::Length(3),
+                    Constraint::Length(3),
+                    Constraint::Min(1),
+                ])
+                .split(inner);
+
+            frame.render_widget(
+                Paragraph::new(editor.username.as_str()).block(
+                    Block::default().borders(Borders::ALL).title("Username")
+                        .border_style(if editor.field == UserEditField::Username { focused } else { normal })
+                ),
+                layout[0],
+            );
+            let pw_mask = "*".repeat(editor.password.len());
+            frame.render_widget(
+                Paragraph::new(pw_mask).block(
+                    Block::default().borders(Borders::ALL).title("Password")
+                        .border_style(if editor.field == UserEditField::Password { focused } else { normal })
+                ),
+                layout[1],
+            );
+            let cpw_mask = "*".repeat(editor.confirm_password.len());
+            frame.render_widget(
+                Paragraph::new(cpw_mask).block(
+                    Block::default().borders(Borders::ALL).title("Confirm Password")
+                        .border_style(if editor.field == UserEditField::ConfirmPassword { focused } else { normal })
+                ),
+                layout[2],
+            );
+            let role_str = format!("{:?}  (Space to cycle)", editor.role);
+            frame.render_widget(
+                Paragraph::new(role_str).block(
+                    Block::default().borders(Borders::ALL).title("Role")
+                        .border_style(if editor.field == UserEditField::Role { focused } else { normal })
+                ),
+                layout[3],
+            );
+            let help = Paragraph::new("Tab/↑↓ field | Space cycle role | Enter save | Esc cancel")
+                .alignment(Alignment::Center);
+            frame.render_widget(help, layout[4]);
+        }
+        UserEditMode::EditRole => {
+            let layout = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(2),
+                    Constraint::Length(3),
+                    Constraint::Min(1),
+                ])
+                .split(inner);
+            let label = Paragraph::new(format!("User: {}", editor.username))
+                .style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD));
+            frame.render_widget(label, layout[0]);
+            let role_str = format!("{:?}  (Space to cycle)", editor.role);
+            frame.render_widget(
+                Paragraph::new(role_str).block(Block::default().borders(Borders::ALL).title("Role").border_style(focused)),
+                layout[1],
+            );
+            let help = Paragraph::new("Space cycle | Enter save | Esc cancel").alignment(Alignment::Center);
+            frame.render_widget(help, layout[2]);
+        }
+        UserEditMode::ChangePassword => {
+            let layout = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(2),
+                    Constraint::Length(3),
+                    Constraint::Length(3),
+                    Constraint::Length(3),
+                    Constraint::Min(1),
+                ])
+                .split(inner);
+            let label = Paragraph::new(format!("User: {}", editor.username))
+                .style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD));
+            frame.render_widget(label, layout[0]);
+            let cpw_mask = "*".repeat(editor.current_password.len());
+            frame.render_widget(
+                Paragraph::new(cpw_mask).block(
+                    Block::default().borders(Borders::ALL).title("Current Password")
+                        .border_style(if editor.field == UserEditField::CurrentPassword { focused } else { normal })
+                ),
+                layout[1],
+            );
+            let pw_mask = "*".repeat(editor.password.len());
+            frame.render_widget(
+                Paragraph::new(pw_mask).block(
+                    Block::default().borders(Borders::ALL).title("New Password")
+                        .border_style(if editor.field == UserEditField::Password { focused } else { normal })
+                ),
+                layout[2],
+            );
+            let confirm_mask = "*".repeat(editor.confirm_password.len());
+            frame.render_widget(
+                Paragraph::new(confirm_mask).block(
+                    Block::default().borders(Borders::ALL).title("Confirm New Password")
+                        .border_style(if editor.field == UserEditField::ConfirmPassword { focused } else { normal })
+                ),
+                layout[3],
+            );
+            let help = Paragraph::new("Tab/↑↓ field | Enter save | Esc cancel").alignment(Alignment::Center);
+            frame.render_widget(help, layout[4]);
+        }
+    }
+
+    // Suppress unused warning
+    let _ = app;
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────

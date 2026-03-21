@@ -29,6 +29,44 @@ pub struct DeviceEditor {
     pub field: DeviceEditField,
 }
 
+/// Area create/rename editor (modal).
+#[derive(Debug, Clone)]
+pub struct AreaEditor {
+    /// `None` = create mode, `Some(id)` = rename mode.
+    pub id: Option<String>,
+    pub name: String,
+}
+
+/// Which operation the user editor is performing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UserEditMode {
+    Create,
+    EditRole,
+    ChangePassword,
+}
+
+/// Active field in the user editor modal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UserEditField {
+    Username,
+    Password,
+    ConfirmPassword,
+    CurrentPassword,
+    Role,
+}
+
+#[derive(Debug, Clone)]
+pub struct UserEditor {
+    pub mode: UserEditMode,
+    pub id: Option<String>,
+    pub field: UserEditField,
+    pub username: String,
+    pub current_password: String,
+    pub password: String,
+    pub confirm_password: String,
+    pub role: Role,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeviceViewMode {
     Grouped,
@@ -86,6 +124,8 @@ pub struct App {
     pub login_animation_step: u16,
     pub login_phase: LoginPhase,
     pub device_editor: Option<DeviceEditor>,
+    pub area_editor: Option<AreaEditor>,
+    pub user_editor: Option<UserEditor>,
 }
 
 pub struct LoginWorkflowResult {
@@ -128,6 +168,8 @@ impl App {
             login_animation_step: 0,
             login_phase: LoginPhase::Authenticating,
             device_editor: None,
+            area_editor: None,
+            user_editor: None,
         }
     }
 
@@ -416,6 +458,14 @@ impl App {
             self.on_key_device_editor(key).await;
             return;
         }
+        if self.area_editor.is_some() {
+            self.on_key_area_editor(key).await;
+            return;
+        }
+        if self.user_editor.is_some() {
+            self.on_key_user_editor(key).await;
+            return;
+        }
 
         match key.code {
             KeyCode::Char('q') => self.should_quit = true,
@@ -446,8 +496,32 @@ impl App {
                 self.selected = self.selected.saturating_sub(1);
             }
             KeyCode::Enter => {
-                if matches!(self.active_tab(), Tab::Devices) {
-                    self.open_selected_device_editor();
+                match self.active_tab() {
+                    Tab::Devices => self.open_selected_device_editor(),
+                    Tab::Areas   => self.open_area_editor_edit(),
+                    Tab::Users   => self.open_user_editor_role(),
+                    _ => {}
+                }
+            }
+            KeyCode::Char('n') => {
+                match self.active_tab() {
+                    Tab::Areas => self.open_area_editor_create(),
+                    Tab::Users if self.is_admin() => self.open_user_editor_create(),
+                    _ => {}
+                }
+            }
+            KeyCode::Char('d') => {
+                match self.active_tab() {
+                    Tab::Devices => self.delete_selected_device().await,
+                    Tab::Areas   => self.delete_selected_area().await,
+                    Tab::Users   => self.delete_selected_user().await,
+                    Tab::Plugins => self.deregister_selected_plugin().await,
+                    _ => {}
+                }
+            }
+            KeyCode::Char('p') => {
+                if matches!(self.active_tab(), Tab::Users) {
+                    self.open_user_editor_password();
                 }
             }
             KeyCode::Char('t') => {
@@ -796,6 +870,317 @@ impl App {
                 self.status = format!("{} {}", if locked { "Locked" } else { "Unlocked" }, device_id);
             }
             Err(err) => self.error = Some(err.to_string()),
+        }
+    }
+
+    // ── Area CRUD ─────────────────────────────────────────────────────────────
+
+    fn open_area_editor_create(&mut self) {
+        self.area_editor = Some(AreaEditor { id: None, name: String::new() });
+    }
+
+    fn open_area_editor_edit(&mut self) {
+        let Some(area) = self.areas.get(self.selected) else { return };
+        self.area_editor = Some(AreaEditor {
+            id:   Some(area.id.clone()),
+            name: area.name.clone(),
+        });
+    }
+
+    async fn on_key_area_editor(&mut self, key: KeyEvent) {
+        let Some(editor) = self.area_editor.as_mut() else { return };
+        match key.code {
+            KeyCode::Esc => {
+                self.area_editor = None;
+                self.status = "Area edit canceled".to_string();
+            }
+            KeyCode::Backspace => { editor.name.pop(); }
+            KeyCode::Enter => { self.save_area_editor().await; }
+            KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                editor.name.push(ch);
+            }
+            _ => {}
+        }
+    }
+
+    async fn save_area_editor(&mut self) {
+        let Some(editor) = self.area_editor.clone() else { return };
+        let name = editor.name.trim().to_string();
+        if name.is_empty() {
+            self.error = Some("area name cannot be empty".to_string());
+            return;
+        }
+        match editor.id {
+            None => {
+                match self.client.create_area(&name).await {
+                    Ok(area) => {
+                        self.areas.push(area);
+                        self.area_editor = None;
+                        self.status = format!("Created area '{name}'");
+                        let _ = self.save_to_cache().await;
+                    }
+                    Err(e) => self.error = Some(e.to_string()),
+                }
+            }
+            Some(ref id) => {
+                match self.client.rename_area(id, &name).await {
+                    Ok(updated) => {
+                        if let Some(a) = self.areas.iter_mut().find(|a| a.id == updated.id) {
+                            a.name = updated.name.clone();
+                        }
+                        self.area_editor = None;
+                        self.status = format!("Renamed area to '{}'", updated.name);
+                        let _ = self.save_to_cache().await;
+                    }
+                    Err(e) => self.error = Some(e.to_string()),
+                }
+            }
+        }
+    }
+
+    async fn delete_selected_area(&mut self) {
+        let Some(area) = self.areas.get(self.selected) else { return };
+        let id = area.id.clone();
+        let name = area.name.clone();
+        match self.client.delete_area(&id).await {
+            Ok(_) => {
+                self.areas.retain(|a| a.id != id);
+                self.clamp_selection();
+                self.status = format!("Deleted area '{name}'");
+                let _ = self.save_to_cache().await;
+            }
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    // ── Device delete ─────────────────────────────────────────────────────────
+
+    async fn delete_selected_device(&mut self) {
+        let device_id = {
+            let Some(device) = self.selected_device() else { return };
+            device.device_id.clone()
+        };
+        match self.client.delete_device(&device_id).await {
+            Ok(_) => {
+                self.devices.retain(|d| d.device_id != device_id);
+                self.clamp_selection();
+                self.status = format!("Deleted device '{device_id}'");
+                let _ = self.save_to_cache().await;
+            }
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    // ── Plugin deregister ─────────────────────────────────────────────────────
+
+    async fn deregister_selected_plugin(&mut self) {
+        let Some(plugin) = self.plugins.get(self.selected) else { return };
+        let id = plugin.plugin_id.clone();
+        match self.client.deregister_plugin(&id).await {
+            Ok(_) => {
+                self.plugins.retain(|p| p.plugin_id != id);
+                self.clamp_selection();
+                self.status = format!("Deregistered plugin '{id}'");
+                let _ = self.save_to_cache().await;
+            }
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    // ── User CRUD ─────────────────────────────────────────────────────────────
+
+    fn open_user_editor_create(&mut self) {
+        self.user_editor = Some(UserEditor {
+            mode:             UserEditMode::Create,
+            id:               None,
+            field:            UserEditField::Username,
+            username:         String::new(),
+            current_password: String::new(),
+            password:         String::new(),
+            confirm_password: String::new(),
+            role:             Role::User,
+        });
+    }
+
+    fn open_user_editor_role(&mut self) {
+        let Some(user) = self.users.get(self.selected) else { return };
+        self.user_editor = Some(UserEditor {
+            mode:             UserEditMode::EditRole,
+            id:               Some(user.id.clone()),
+            field:            UserEditField::Role,
+            username:         user.username.clone(),
+            current_password: String::new(),
+            password:         String::new(),
+            confirm_password: String::new(),
+            role:             user.role.clone(),
+        });
+    }
+
+    fn open_user_editor_password(&mut self) {
+        // Admins can change any user's password; non-admins change their own.
+        let (id, username) = if self.is_admin() {
+            if let Some(user) = self.users.get(self.selected) {
+                (Some(user.id.clone()), user.username.clone())
+            } else {
+                return;
+            }
+        } else {
+            let u = self.current_user.clone().unwrap();
+            (Some(u.id.clone()), u.username.clone())
+        };
+        self.user_editor = Some(UserEditor {
+            mode:             UserEditMode::ChangePassword,
+            id,
+            field:            UserEditField::CurrentPassword,
+            username,
+            current_password: String::new(),
+            password:         String::new(),
+            confirm_password: String::new(),
+            role:             Role::User,
+        });
+    }
+
+    pub async fn on_key_user_editor(&mut self, key: KeyEvent) {
+        let Some(editor) = self.user_editor.as_mut() else { return };
+        match key.code {
+            KeyCode::Esc => {
+                self.user_editor = None;
+                self.status = "User edit canceled".to_string();
+            }
+            KeyCode::Tab | KeyCode::Down => {
+                editor.field = match (&editor.mode, &editor.field) {
+                    (UserEditMode::Create, UserEditField::Username) => UserEditField::Password,
+                    (UserEditMode::Create, UserEditField::Password) => UserEditField::ConfirmPassword,
+                    (UserEditMode::Create, UserEditField::ConfirmPassword) => UserEditField::Role,
+                    (UserEditMode::Create, UserEditField::Role) => UserEditField::Username,
+                    (UserEditMode::ChangePassword, UserEditField::CurrentPassword) => UserEditField::Password,
+                    (UserEditMode::ChangePassword, UserEditField::Password) => UserEditField::ConfirmPassword,
+                    (UserEditMode::ChangePassword, UserEditField::ConfirmPassword) => UserEditField::CurrentPassword,
+                    _ => editor.field,
+                };
+            }
+            KeyCode::BackTab | KeyCode::Up => {
+                editor.field = match (&editor.mode, &editor.field) {
+                    (UserEditMode::Create, UserEditField::Username) => UserEditField::Role,
+                    (UserEditMode::Create, UserEditField::Password) => UserEditField::Username,
+                    (UserEditMode::Create, UserEditField::ConfirmPassword) => UserEditField::Password,
+                    (UserEditMode::Create, UserEditField::Role) => UserEditField::ConfirmPassword,
+                    (UserEditMode::ChangePassword, UserEditField::CurrentPassword) => UserEditField::ConfirmPassword,
+                    (UserEditMode::ChangePassword, UserEditField::Password) => UserEditField::CurrentPassword,
+                    (UserEditMode::ChangePassword, UserEditField::ConfirmPassword) => UserEditField::Password,
+                    _ => editor.field,
+                };
+            }
+            KeyCode::Backspace => {
+                match editor.field {
+                    UserEditField::Username        => { editor.username.pop(); }
+                    UserEditField::CurrentPassword => { editor.current_password.pop(); }
+                    UserEditField::Password        => { editor.password.pop(); }
+                    UserEditField::ConfirmPassword => { editor.confirm_password.pop(); }
+                    UserEditField::Role            => {}
+                }
+            }
+            KeyCode::Char(' ') if editor.field == UserEditField::Role => {
+                // Cycle role
+                editor.role = match editor.role {
+                    Role::Admin    => Role::User,
+                    Role::User     => Role::ReadOnly,
+                    Role::ReadOnly => Role::Admin,
+                };
+            }
+            KeyCode::Enter => { self.save_user_editor().await; }
+            KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                let editor = self.user_editor.as_mut().unwrap();
+                match editor.field {
+                    UserEditField::Username        => editor.username.push(ch),
+                    UserEditField::CurrentPassword => editor.current_password.push(ch),
+                    UserEditField::Password        => editor.password.push(ch),
+                    UserEditField::ConfirmPassword => editor.confirm_password.push(ch),
+                    UserEditField::Role            => {}
+                }
+            }
+            _ => {}
+        }
+    }
+
+    async fn save_user_editor(&mut self) {
+        let Some(editor) = self.user_editor.clone() else { return };
+        match editor.mode {
+            UserEditMode::Create => {
+                let username = editor.username.trim().to_string();
+                if username.is_empty() {
+                    self.error = Some("username cannot be empty".to_string());
+                    return;
+                }
+                if editor.password.len() < 8 {
+                    self.error = Some("password must be at least 8 characters".to_string());
+                    return;
+                }
+                if editor.password != editor.confirm_password {
+                    self.error = Some("passwords do not match".to_string());
+                    return;
+                }
+                match self.client.create_user(&username, &editor.password, &editor.role).await {
+                    Ok(user) => {
+                        self.users.push(user);
+                        self.user_editor = None;
+                        self.status = format!("Created user '{username}'");
+                        let _ = self.save_to_cache().await;
+                    }
+                    Err(e) => self.error = Some(e.to_string()),
+                }
+            }
+            UserEditMode::EditRole => {
+                let Some(id) = editor.id else { return };
+                match self.client.set_user_role(&id, &editor.role).await {
+                    Ok(updated) => {
+                        if let Some(u) = self.users.iter_mut().find(|u| u.id == updated.id) {
+                            u.role = updated.role;
+                        }
+                        self.user_editor = None;
+                        self.status = format!("Updated role for '{}'", editor.username);
+                        let _ = self.save_to_cache().await;
+                    }
+                    Err(e) => self.error = Some(e.to_string()),
+                }
+            }
+            UserEditMode::ChangePassword => {
+                if editor.password.len() < 8 {
+                    self.error = Some("new password must be at least 8 characters".to_string());
+                    return;
+                }
+                if editor.password != editor.confirm_password {
+                    self.error = Some("passwords do not match".to_string());
+                    return;
+                }
+                match self.client.change_password(&editor.current_password, &editor.password).await {
+                    Ok(_) => {
+                        self.user_editor = None;
+                        self.status = format!("Password changed for '{}'", editor.username);
+                    }
+                    Err(e) => self.error = Some(e.to_string()),
+                }
+            }
+        }
+    }
+
+    async fn delete_selected_user(&mut self) {
+        let Some(user) = self.users.get(self.selected) else { return };
+        // Guard: cannot delete yourself
+        if self.current_user.as_ref().map(|u| u.id == user.id).unwrap_or(false) {
+            self.error = Some("cannot delete your own account".to_string());
+            return;
+        }
+        let id = user.id.clone();
+        let username = user.username.clone();
+        match self.client.delete_user(&id).await {
+            Ok(_) => {
+                self.users.retain(|u| u.id != id);
+                self.clamp_selection();
+                self.status = format!("Deleted user '{username}'");
+                let _ = self.save_to_cache().await;
+            }
+            Err(e) => self.error = Some(e.to_string()),
         }
     }
 
