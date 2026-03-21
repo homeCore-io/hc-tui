@@ -549,6 +549,20 @@ impl App {
                 KeyCode::Char('3') => {
                     self.plugin_detail_panel = PluginDetailPanel::Metrics;
                 }
+                KeyCode::Left | KeyCode::BackTab => {
+                    self.cycle_plugin_detail_panel(false);
+                }
+                KeyCode::Right | KeyCode::Tab => {
+                    self.cycle_plugin_detail_panel(true);
+                }
+                KeyCode::Char('r') => {
+                    if let Err(err) = self.refresh_all().await {
+                        self.error = Some(err.to_string());
+                    }
+                }
+                KeyCode::Char('b') => {
+                    self.discover_bridges_for_selected_plugin().await;
+                }
                 _ => {}
             }
             return;
@@ -943,6 +957,35 @@ impl App {
 
     pub fn selected_plugin(&self) -> Option<&PluginRecord> {
         self.plugins.get(self.selected)
+    }
+
+    fn cycle_plugin_detail_panel(&mut self, forward: bool) {
+        self.plugin_detail_panel = match (self.plugin_detail_panel, forward) {
+            (PluginDetailPanel::Overview, true) => PluginDetailPanel::Diagnostics,
+            (PluginDetailPanel::Diagnostics, true) => PluginDetailPanel::Metrics,
+            (PluginDetailPanel::Metrics, true) => PluginDetailPanel::Overview,
+            (PluginDetailPanel::Overview, false) => PluginDetailPanel::Metrics,
+            (PluginDetailPanel::Diagnostics, false) => PluginDetailPanel::Overview,
+            (PluginDetailPanel::Metrics, false) => PluginDetailPanel::Diagnostics,
+        };
+    }
+
+    async fn discover_bridges_for_selected_plugin(&mut self) {
+        let Some(plugin_id) = self.plugin_detail_plugin_id.clone() else {
+            return;
+        };
+
+        match self.client.discover_plugin_bridges(&plugin_id).await {
+            Ok(_) => {
+                self.status = format!("Requested bridge discovery for {}", plugin_id);
+                if let Err(err) = self.refresh_all().await {
+                    self.error = Some(err.to_string());
+                }
+            }
+            Err(err) => {
+                self.error = Some(format!("Bridge discovery failed: {}", err));
+            }
+        }
     }
 
     fn open_plugin_detail(&mut self) {
@@ -1762,6 +1805,14 @@ mod tests {
         assert_eq!(app.plugin_detail_panel, PluginDetailPanel::Diagnostics);
 
         app.on_key_authenticated(KeyEvent::new(KeyCode::Char('3'), KeyModifiers::NONE))
+            .await;
+        assert_eq!(app.plugin_detail_panel, PluginDetailPanel::Metrics);
+
+        app.on_key_authenticated(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE))
+            .await;
+        assert_eq!(app.plugin_detail_panel, PluginDetailPanel::Overview);
+
+        app.on_key_authenticated(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE))
             .await;
         assert_eq!(app.plugin_detail_panel, PluginDetailPanel::Metrics);
 

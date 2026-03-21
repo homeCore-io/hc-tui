@@ -114,7 +114,7 @@ fn draw_status_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
         hints = vec!["Tab field", "Space cycle role", "Enter save", "Esc cancel"];
     }
     if app.plugin_detail_open {
-        hints = vec!["1/2/3 panel", "Esc close", "r refresh", "q quit"];
+        hints = vec!["1/2/3 or ←/→ panel", "b discover bridges", "r refresh", "Esc close", "q quit"];
     }
 
     let hint_str = hints.join(" | ");
@@ -403,6 +403,44 @@ fn draw_plugin_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
             let plugin = app.plugins.iter().find(|p| p.plugin_id == plugin_id);
             let plugin_events = app.plugin_events(plugin_id);
             let event_total = plugin_events.len();
+            let bridge_rows = app
+                .devices
+                .iter()
+                .filter(|d| {
+                    d.plugin_id == plugin_id
+                        && d
+                            .attributes
+                            .get("kind")
+                            .and_then(|v| v.as_str())
+                            == Some("hue_bridge")
+                })
+                .map(|d| {
+                    let host = d
+                        .attributes
+                        .get("host")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
+                    let bridge_id = d
+                        .attributes
+                        .get("bridge_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
+                    let online = d
+                        .attributes
+                        .get("online")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(d.available);
+                    format!(
+                        "- {} | host={} | bridge_id={} | online={}",
+                        d.name, host, bridge_id, online
+                    )
+                })
+                .collect::<Vec<_>>();
+            let bridge_text = if bridge_rows.is_empty() {
+                "- none discovered".to_string()
+            } else {
+                bridge_rows.join("\n")
+            };
             let count_type = |name: &str| {
                 plugin_events
                     .iter()
@@ -416,11 +454,12 @@ fn draw_plugin_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
             let metrics_events = count_type("plugin_metrics");
             let body = if let Some(p) = plugin {
                 format!(
-                    "plugin_id: {}\nstatus: {}\nregistered_at: {}\nws_connected: {}\n\nrecent_event_total: {}\nbutton_events: {}\nrotary_events: {}\nentertainment_events: {}\nmetrics_events: {}",
+                    "plugin_id: {}\nstatus: {}\nregistered_at: {}\nws_connected: {}\n\nbridges:\n{}\n\nrecent_event_total: {}\nbutton_events: {}\nrotary_events: {}\nentertainment_events: {}\nmetrics_events: {}",
                     p.plugin_id,
                     p.status,
                     p.registered_at,
                     app.ws_connected,
+                    bridge_text,
                     event_total,
                     button_events,
                     rotary_events,

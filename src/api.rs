@@ -86,11 +86,15 @@ pub struct EventEntry {
     pub event_type: String,
     pub timestamp: String,
     #[serde(default)]
+    pub plugin_id: Option<String>,
+    #[serde(default)]
     pub device_id: Option<String>,
     #[serde(default)]
     pub rule_name: Option<String>,
     #[serde(default)]
     pub event_type_custom: Option<String>,
+    #[serde(default)]
+    pub event_detail: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -244,6 +248,38 @@ impl HomeCoreClient {
         let path = format!("/plugins/{plugin_id}");
         let resp = self.request(Method::DELETE, &path).await?;
         Self::parse_empty(resp).await
+    }
+
+    pub async fn discover_plugin_bridges(&self, plugin_id: &str) -> Result<()> {
+        // Try known endpoint patterns so TUI can work across HomeCore API variants.
+        let paths = [
+            format!("/plugins/{plugin_id}/discover"),
+            format!("/plugins/{plugin_id}/bridges/discover"),
+            "/plugins/hue/bridges/discover".to_string(),
+        ];
+
+        let mut last_not_found: Option<String> = None;
+
+        for path in paths {
+            let resp = self.request(Method::POST, &path).await?;
+            let status = resp.status();
+            if status.is_success() {
+                return Ok(());
+            }
+
+            let msg = Self::extract_error_message(resp).await;
+            if status.as_u16() == 404 {
+                last_not_found = Some(format!("{}: {}", status, msg));
+                continue;
+            }
+
+            return Err(anyhow!("{}: {}", status, msg));
+        }
+
+        Err(anyhow!(
+            "discover endpoint not available: {}",
+            last_not_found.unwrap_or_else(|| "no supported discover endpoint".to_string())
+        ))
     }
 
     pub async fn activate_scene(&self, scene_id: &str) -> Result<()> {
@@ -539,6 +575,12 @@ impl HomeCoreClient {
                 .or_else(|| event_obj.get("device_id").and_then(Value::as_str))
                 .map(ToString::to_string);
 
+            let plugin_id = obj
+                .get("plugin_id")
+                .and_then(Value::as_str)
+                .or_else(|| event_obj.get("plugin_id").and_then(Value::as_str))
+                .map(ToString::to_string);
+
             let rule_name = obj
                 .get("rule_name")
                 .and_then(Value::as_str)
@@ -551,15 +593,120 @@ impl HomeCoreClient {
                 .or_else(|| event_obj.get("event_type").and_then(Value::as_str))
                 .map(ToString::to_string);
 
+            let event_detail = summarize_event_detail(obj, &event_obj);
+
             events.push(EventEntry {
                 event_type,
                 timestamp,
+                plugin_id,
                 device_id,
                 rule_name,
                 event_type_custom,
+                event_detail,
             });
         }
 
         Ok(events)
+    }
+}
+
+fn summarize_event_detail(
+    root: &serde_json::Map<String, Value>,
+    event_obj: &serde_json::Map<String, Value>,
+) -> Option<String> {
+    let get_str = |k: &str| {
+        root.get(k)
+            .and_then(Value::as_str)
+            .or_else(|| event_obj.get(k).and_then(Value::as_str))
+    };
+    let get_i64 = |k: &str| {
+        root.get(k)
+            .and_then(Value::as_i64)
+            .or_else(|| event_obj.get(k).and_then(Value::as_i64))
+    };
+    let get_u64 = |k: &str| {
+        root.get(k)
+            .and_then(Value::as_u64)
+            .or_else(|| event_obj.get(k).and_then(Value::as_u64))
+    };
+    let get_f64 = |k: &str| {
+        root.get(k)
+            .and_then(Value::as_f64)
+            .or_else(|| event_obj.get(k).and_then(Value::as_f64))
+    };
+
+    let event_type = get_str("type")
+        .or_else(|| get_str("event_type"))
+        .unwrap_or("unknown");
+
+    match event_type {
+        "device_button" => get_str("event").map(|e| format!("button_event={e}")),
+        "device_rotary" => {
+            let action = get_str("action");
+            let direction = get_str("direction");
+            let steps = get_i64("steps");
+            let mut parts = Vec::new();
+            if let Some(v) = action {
+                parts.push(format!("action={v}"));
+            }
+            if let Some(v) = direction {
+                parts.push(format!("direction={v}"));
+            }
+            if let Some(v) = steps {
+                parts.push(format!("steps={v}"));
+            }
+            if parts.is_empty() {
+                None
+            } else {
+                Some(parts.join(" "))
+            }
+        }
+        "plugin_metrics" => {
+            let fallback = get_u64("eventstream_fallback_refresh_total");
+            let applied = get_u64("eventstream_incremental_applied_total");
+            let ratio = get_f64("eventstream_fallback_ratio_pct");
+            let recent_fallback = get_u64("eventstream_fallback_refresh_recent");
+            let recent_applied = get_u64("eventstream_incremental_applied_recent");
+            let recent_ratio = get_f64("eventstream_fallback_ratio_recent_pct");
+
+            let mut parts = Vec::new();
+            if let (Some(f), Some(a), Some(r)) = (fallback, applied, ratio) {
+                parts.push(format!("fallback={f} incremental={a} fallback_ratio={r:.2}%"));
+            }
+            if let (Some(f), Some(a), Some(r)) = (recent_fallback, recent_applied, recent_ratio) {
+                parts.push(format!("recent_fallback={f} recent_incremental={a} recent_ratio={r:.2}%"));
+            }
+
+            if parts.is_empty() {
+                None
+            } else {
+                Some(parts.join(" | "))
+            }
+        }
+        "entertainment_action_applied" => {
+            let action = get_str("action");
+            let config_id = get_str("config_id");
+            let active = root
+                .get("active")
+                .and_then(Value::as_bool)
+                .or_else(|| event_obj.get("active").and_then(Value::as_bool));
+
+            let mut parts = Vec::new();
+            if let Some(v) = action {
+                parts.push(format!("action={v}"));
+            }
+            if let Some(v) = config_id {
+                parts.push(format!("config_id={v}"));
+            }
+            if let Some(v) = active {
+                parts.push(format!("active={v}"));
+            }
+            if parts.is_empty() {
+                None
+            } else {
+                Some(parts.join(" "))
+            }
+        }
+        _ => None,
     }
 }
