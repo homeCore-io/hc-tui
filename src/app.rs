@@ -587,6 +587,11 @@ impl App {
                     self.lock_device(false).await;
                 }
             }
+            KeyCode::Char(' ') => {
+                if matches!(self.active_tab(), Tab::Devices) {
+                    self.toggle_lock_or_switch().await;
+                }
+            }
             KeyCode::Char('a') => {
                 if matches!(self.active_tab(), Tab::Scenes) {
                     self.activate_selected_scene().await;
@@ -899,6 +904,30 @@ impl App {
                 self.status = format!("{} {}", if locked { "Locked" } else { "Unlocked" }, device_id);
             }
             Err(err) => self.error = Some(err.to_string()),
+        }
+    }
+
+    /// Space bar: toggle lock state for lock devices, or on/off for switches.
+    async fn toggle_lock_or_switch(&mut self) {
+        let Some(device) = self.selected_device() else { return };
+        let device_id = device.device_id.clone();
+
+        if let Some(locked) = Self::device_lock_state(device) {
+            let new_locked = !locked;
+            match self.client.set_device_locked(&device_id, new_locked).await {
+                Ok(_) => self.status = format!(
+                    "{} {}",
+                    if new_locked { "Locked" } else { "Unlocked" },
+                    device_id
+                ),
+                Err(err) => self.error = Some(err.to_string()),
+            }
+        } else {
+            let on = device.attributes.get("on").and_then(|v| v.as_bool()).unwrap_or(false);
+            match self.client.set_device_on(&device_id, !on).await {
+                Ok(_) => self.status = format!("Toggled {} → on={}", device_id, !on),
+                Err(err) => self.error = Some(err.to_string()),
+            }
         }
     }
 

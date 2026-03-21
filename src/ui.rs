@@ -80,7 +80,8 @@ fn draw_status_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let mut hints = vec!["Tab/← → tab", "j/k move", "r refresh", "q quit"];
     match app.active_tab() {
         Tab::Devices => {
-            hints.push("t toggle");
+            hints.push("Spc toggle");
+            hints.push("t on/off");
             hints.push("+/- bright");
             hints.push("l/u lock");
             hints.push("v view");
@@ -596,7 +597,7 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
         ));
     }
 
-    // Lock state
+    // Lock state (CC 98 currentMode)
     if let Some(locked) = App::device_lock_state(device) {
         let (lock_str, lock_color) = if locked {
             ("Locked", Color::Red)
@@ -607,6 +608,54 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
             "Lock",
             vec![Span::styled(lock_str, Style::default().fg(lock_color))],
         ));
+
+        // Physical bolt sensor (only present when hardware supports it)
+        if let Some(bolt) = device.attributes.get("bolt_status").and_then(|v| v.as_str()) {
+            let (s, c) = if bolt == "locked" {
+                ("Locked", Color::Red)
+            } else {
+                ("Unlocked", Color::Green)
+            };
+            lines.push(detail_row("Bolt", vec![Span::styled(s, Style::default().fg(c))]));
+        }
+        // Physical latch sensor
+        if let Some(latch) = device.attributes.get("latch_status").and_then(|v| v.as_str()) {
+            let (s, c) = if latch == "closed" {
+                ("Closed", Color::Green)
+            } else {
+                ("Open", Color::Yellow)
+            };
+            lines.push(detail_row("Latch", vec![Span::styled(s, Style::default().fg(c))]));
+        }
+        // Door open/closed sensor
+        if let Some(door) = device.attributes.get("door_status").and_then(|v| v.as_str()) {
+            let (s, c) = if door == "closed" {
+                ("Closed", Color::Green)
+            } else {
+                ("Open", Color::Yellow)
+            };
+            lines.push(detail_row("Door", vec![Span::styled(s, Style::default().fg(c))]));
+        }
+        // Operation type: 1=Constant, 2=Timed
+        if let Some(op_type) = device.attributes.get("lock_operation_type").and_then(|v| v.as_f64()) {
+            let label = match op_type as u64 {
+                1 => "Constant",
+                2 => "Timed",
+                _ => "Unknown",
+            };
+            lines.push(detail_row("Op Mode", vec![Span::raw(label)]));
+        }
+        // Timed mode timeout
+        if let Some(timeout) = device.attributes.get("lock_timeout_secs").and_then(|v| v.as_f64()) {
+            if timeout > 0.0 {
+                lines.push(detail_row("Timeout", vec![Span::raw(format!("{timeout:.0}s"))]));
+            }
+        }
+        if let Some(relock) = device.attributes.get("lock_auto_relock_secs").and_then(|v| v.as_f64()) {
+            if relock > 0.0 {
+                lines.push(detail_row("Auto-relock", vec![Span::raw(format!("{relock:.0}s"))]));
+            }
+        }
     }
 
     // Motion sensor
@@ -691,6 +740,9 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
         "illuminance", "co2_ppm", "pressure", "uv_index",
         "smoke", "co", "water_detected", "tamper", "vibration",
         "color_rgb", "color_temp",
+        // Door lock physical sensors + config
+        "bolt_status", "latch_status", "door_status",
+        "lock_operation_type", "lock_timeout_secs", "lock_auto_relock_secs",
     ];
     // ZWave internal / write-echo properties with no useful display value.
     // Also includes raw nodeInfo keys that survived field_map (shouldn't normally
