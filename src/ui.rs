@@ -542,35 +542,113 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
         ));
     }
 
-    // Other attributes
+    // Motion sensor
+    if let Some(motion) = device.attributes.get("motion").and_then(|v| v.as_bool()) {
+        let (s, c) = if motion { ("Motion", Color::Yellow) } else { ("Clear", Color::Green) };
+        lines.push(detail_row("Motion", vec![Span::styled(s, Style::default().fg(c))]));
+    }
+
+    // Contact sensor
+    if let Some(open) = device.attributes.get("contact_open").and_then(|v| v.as_bool()) {
+        let (s, c) = if open { ("Open", Color::Red) } else { ("Closed", Color::Green) };
+        lines.push(detail_row("Contact", vec![Span::styled(s, Style::default().fg(c))]));
+    }
+
+    // Window covering position
+    if let Some(pos) = device.attributes.get("position").and_then(|v| v.as_f64()) {
+        let bar = make_bar(pos / 100.0, 10);
+        lines.push(detail_row(
+            "Position",
+            vec![
+                Span::styled(format!("{pos:3.0}% "), Style::default().fg(Color::Cyan)),
+                Span::styled(bar, Style::default().fg(Color::Cyan)),
+            ],
+        ));
+    }
+
+    // Thermostat
+    if let Some(mode) = device.attributes.get("mode").and_then(|v| v.as_str()) {
+        let mc = match mode { "heat" => Color::Red, "cool" => Color::Cyan, "off" => Color::DarkGray, _ => Color::White };
+        lines.push(detail_row("Mode", vec![Span::styled(normalize_label(mode), Style::default().fg(mc))]));
+    }
+    if let Some(action) = device.attributes.get("hvac_action").and_then(|v| v.as_str()) {
+        lines.push(detail_row("HVAC", vec![Span::raw(normalize_label(action))]));
+    }
+    if let Some(setpoint) = device.attributes.get("target_temp").and_then(|v| v.as_f64()) {
+        lines.push(detail_row("Setpoint", vec![Span::styled(format!("{setpoint:.1}°F"), Style::default().fg(Color::Yellow))]));
+    }
+
+    // Energy monitoring
+    let has_energy = ["power_w", "energy_kwh", "voltage", "current_a"].iter().any(|k| device.attributes.contains_key(*k));
+    if has_energy {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled("─── Energy ───", Style::default().fg(Color::DarkGray))));
+    }
+    if let Some(w) = device.attributes.get("power_w").and_then(|v| v.as_f64()) {
+        lines.push(detail_row("Power", vec![Span::styled(format!("{w:.1} W"), Style::default().fg(Color::Yellow))]));
+    }
+    if let Some(kwh) = device.attributes.get("energy_kwh").and_then(|v| v.as_f64()) {
+        lines.push(detail_row("Energy", vec![Span::raw(format!("{kwh:.3} kWh"))]));
+    }
+    if let Some(v) = device.attributes.get("voltage").and_then(|v| v.as_f64()) {
+        lines.push(detail_row("Voltage", vec![Span::raw(format!("{v:.1} V"))]));
+    }
+    if let Some(a) = device.attributes.get("current_a").and_then(|v| v.as_f64()) {
+        lines.push(detail_row("Current", vec![Span::raw(format!("{a:.2} A"))]));
+    }
+
+    // Environmental extras
+    if let Some(lux) = device.attributes.get("illuminance").and_then(|v| v.as_f64()) {
+        lines.push(detail_row("Illuminance", vec![Span::raw(format!("{lux:.0} lx"))]));
+    }
+    if let Some(co2) = device.attributes.get("co2_ppm").and_then(|v| v.as_f64()) {
+        lines.push(detail_row("CO₂", vec![Span::raw(format!("{co2:.0} ppm"))]));
+    }
+
+    // Alarm states (only show when active)
+    for (key, label) in &[("smoke", "Smoke"), ("co", "CO"), ("water_detected", "Water"), ("tamper", "Tamper"), ("vibration", "Vibration")] {
+        if let Some(true) = device.attributes.get(*key).and_then(|v| v.as_bool()) {
+            lines.push(detail_row(label, vec![Span::styled("ALARM", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))]));
+        }
+    }
+
+    // Other attributes — everything not already rendered above, excluding ZWave
+    // internal noise properties that have no user-visible meaning.
     let shown = [
         "on", "state", "open", "online", "locked",
-        "battery", "battery_level", "battery_percent",
+        "battery", "battery_level", "battery_percent", "battery_low",
         "temperature", "temp", "humidity", "brightness",
+        "motion", "contact_open", "position",
+        "mode", "hvac_action", "target_temp",
+        "power_w", "energy_kwh", "voltage", "current_a",
+        "illuminance", "co2_ppm", "pressure", "uv_index",
+        "smoke", "co", "water_detected", "tamper", "vibration",
+        "color_rgb", "color_temp",
     ];
+    // ZWave internal properties: aliased values whose raw form sometimes leaks through,
+    // or write-echo values with no display value.
+    let zwave_noise = [
+        "targetValue", "currentValue", "targetMode", "currentMode",
+        "duration", "restorePrevious", "targetColor", "currentColor",
+    ];
+
     let other_attrs: Vec<(&String, &serde_json::Value)> = device
         .attributes
         .iter()
-        .filter(|(k, _)| !shown.contains(&k.as_str()))
+        .filter(|(k, _)| !shown.contains(&k.as_str()) && !zwave_noise.contains(&k.as_str()))
         .collect();
 
     if !other_attrs.is_empty() {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
-            "─── Attributes ───",
+            "─── Other ───",
             Style::default().fg(Color::DarkGray),
         )));
         for (key, val) in &other_attrs {
-            let val_str = val
-                .as_str()
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| val.to_string());
+            let val_str = val.as_str().map(|s| s.to_string()).unwrap_or_else(|| val.to_string());
             let display_key = normalize_label(key);
             lines.push(Line::from(vec![
-                Span::styled(
-                    format!("  {:<13}", display_key),
-                    Style::default().fg(Color::DarkGray),
-                ),
+                Span::styled(format!("  {:<13}", display_key), Style::default().fg(Color::DarkGray)),
                 Span::raw(val_str),
             ]));
         }
@@ -707,7 +785,18 @@ fn clean_name(name: &str) -> String {
 }
 
 fn normalize_label(value: &str) -> String {
-    value
+    // Split camelCase before handling underscores/spaces.
+    // "targetValue" → "target Value", "hvacAction" → "hvac Action"
+    let mut spaced = String::with_capacity(value.len() + 4);
+    let mut prev_lower = false;
+    for ch in value.chars() {
+        if ch.is_uppercase() && prev_lower {
+            spaced.push(' ');
+        }
+        prev_lower = ch.is_lowercase();
+        spaced.push(ch);
+    }
+    spaced
         .replace('_', " ")
         .split_whitespace()
         .map(|part| {

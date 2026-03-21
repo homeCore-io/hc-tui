@@ -677,19 +677,55 @@ impl App {
     }
 
     pub fn device_status(&self, device: &DeviceState) -> String {
-        if let Some(locked) = device.attributes.get("locked").and_then(|v| v.as_bool()) {
+        let attrs = &device.attributes;
+
+        // Lock state (ZWave CC 98, door locks)
+        if let Some(locked) = attrs.get("locked").and_then(|v| v.as_bool()) {
             return if locked { "Locked".to_string() } else { "Unlocked".to_string() };
         }
-        if let Some(on) = device.attributes.get("on").and_then(|v| v.as_bool()) {
+        // Explicit on/off (binary switch, most smart plugs)
+        if let Some(on) = attrs.get("on").and_then(|v| v.as_bool()) {
             return if on { "On".to_string() } else { "Off".to_string() };
         }
-        if let Some(state) = device.attributes.get("state").and_then(|v| v.as_str()) {
+        // Generic state string
+        if let Some(state) = attrs.get("state").and_then(|v| v.as_str()) {
             return normalize_label(state);
         }
-        if let Some(open) = device.attributes.get("open").and_then(|v| v.as_bool()) {
+        // Dimmer — derive on/off from brightness (ZWave CC 38, no explicit `on`)
+        if let Some(b) = attrs.get("brightness").and_then(|v| v.as_f64()) {
+            return if b > 0.0 { "On".to_string() } else { "Off".to_string() };
+        }
+        // Contact sensor (open/closed bool)
+        if let Some(open) = attrs.get("open").or_else(|| attrs.get("contact_open")).and_then(|v| v.as_bool()) {
             return if open { "Open".to_string() } else { "Closed".to_string() };
         }
-        if let Some(online) = device.attributes.get("online").and_then(|v| v.as_bool()) {
+        // Motion sensor
+        if let Some(motion) = attrs.get("motion").and_then(|v| v.as_bool()) {
+            return if motion { "Motion".to_string() } else { "Clear".to_string() };
+        }
+        // Thermostat mode
+        if let Some(mode) = attrs.get("mode").and_then(|v| v.as_str()) {
+            return normalize_label(mode);
+        }
+        // Window covering position
+        if let Some(pos) = attrs.get("position").and_then(|v| v.as_f64()) {
+            return if pos >= 99.0 { "Open".to_string() } else if pos <= 1.0 { "Closed".to_string() } else { format!("{pos:.0}%") };
+        }
+        // Sensor-only devices — show primary reading as status
+        if let Some(temp) = attrs.get("temperature").or_else(|| attrs.get("temp")).and_then(|v| v.as_f64()) {
+            return format!("{temp:.1}°");
+        }
+        if let Some(hum) = attrs.get("humidity").and_then(|v| v.as_f64()) {
+            return format!("{hum:.0}%rh");
+        }
+        // Smoke / CO / water alarms
+        for key in &["smoke", "co", "water_detected"] {
+            if let Some(true) = attrs.get(*key).and_then(|v| v.as_bool()) {
+                return normalize_label(key);
+            }
+        }
+        // Online/offline from a plugin status field
+        if let Some(online) = attrs.get("online").and_then(|v| v.as_bool()) {
             return if online { "Online".to_string() } else { "Offline".to_string() };
         }
         "Unknown".to_string()
@@ -782,7 +818,16 @@ impl App {
 }
 
 fn normalize_label(value: &str) -> String {
-    value
+    let mut spaced = String::with_capacity(value.len() + 4);
+    let mut prev_lower = false;
+    for ch in value.chars() {
+        if ch.is_uppercase() && prev_lower {
+            spaced.push(' ');
+        }
+        prev_lower = ch.is_lowercase();
+        spaced.push(ch);
+    }
+    spaced
         .replace('_', " ")
         .split_whitespace()
         .map(|part| {
