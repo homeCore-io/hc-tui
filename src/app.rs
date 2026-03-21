@@ -963,14 +963,15 @@ impl App {
             EventsFilterMode::HueInputs => {
                 matches!(
                     ty,
-                    "device_button" | "device_rotary" | "entertainment_action_applied" | "plugin_command_result"
+                    "device_button" | "device_rotary" | "entertainment_action_applied" | "entertainment_status_changed" | "plugin_command_result"
                 ) || matches!(
                     custom,
-                    "device_button" | "device_rotary" | "entertainment_action_applied" | "plugin_command_result"
+                    "device_button" | "device_rotary" | "entertainment_action_applied" | "entertainment_status_changed" | "plugin_command_result"
                 )
             }
             EventsFilterMode::Entertainment => {
-                ty == "entertainment_action_applied" || custom == "entertainment_action_applied"
+                matches!(ty, "entertainment_action_applied" | "entertainment_status_changed")
+                    || matches!(custom, "entertainment_action_applied" | "entertainment_status_changed")
             }
             EventsFilterMode::PluginMetrics => {
                 ty == "plugin_metrics" || custom == "plugin_metrics"
@@ -1519,6 +1520,31 @@ fn summarize_live_event_detail(event: &Value) -> Option<String> {
                 Some(parts.join(" "))
             }
         }
+        "entertainment_status_changed" => {
+            let config_id = event.get("config_id").and_then(Value::as_str);
+            let active = event.get("active").and_then(Value::as_bool);
+            let status = event.get("status").and_then(Value::as_str);
+            let etype = event.get("entertainment_type").and_then(Value::as_str);
+
+            let mut parts = Vec::new();
+            if let Some(v) = config_id {
+                parts.push(format!("config_id={v}"));
+            }
+            if let Some(v) = active {
+                parts.push(format!("active={v}"));
+            }
+            if let Some(v) = status {
+                parts.push(format!("status={v}"));
+            }
+            if let Some(v) = etype {
+                parts.push(format!("type={v}"));
+            }
+            if parts.is_empty() {
+                None
+            } else {
+                Some(parts.join(" "))
+            }
+        }
         _ => None,
     }
 }
@@ -1664,18 +1690,19 @@ mod tests {
             mk_event("device_button"),
             mk_event("device_rotary"),
             mk_event("entertainment_action_applied"),
+            mk_event("entertainment_status_changed"),
             mk_event("plugin_metrics"),
             mk_event("device_state_changed"),
         ];
 
         app.events_filter_mode = EventsFilterMode::All;
-        assert_eq!(app.filtered_events().len(), 5);
+        assert_eq!(app.filtered_events().len(), 6);
 
         app.events_filter_mode = EventsFilterMode::HueInputs;
-        assert_eq!(app.filtered_events().len(), 3);
+        assert_eq!(app.filtered_events().len(), 4);
 
         app.events_filter_mode = EventsFilterMode::Entertainment;
-        assert_eq!(app.filtered_events().len(), 1);
+        assert_eq!(app.filtered_events().len(), 2);
 
         app.events_filter_mode = EventsFilterMode::PluginMetrics;
         assert_eq!(app.filtered_events().len(), 1);

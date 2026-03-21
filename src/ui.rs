@@ -283,6 +283,7 @@ fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
                     "device_button" => ("BTN", Color::LightBlue),
                     "device_rotary" => ("ROT", Color::Cyan),
                     "entertainment_action_applied" => ("ENT", Color::Magenta),
+                    "entertainment_status_changed" => ("ENT", Color::Magenta),
                     "plugin_command_result" => ("CMD", Color::LightGreen),
                     "plugin_metrics" => ("MET", Color::Yellow),
                     _ => ("EVT", Color::DarkGray),
@@ -410,7 +411,8 @@ fn draw_plugin_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
             };
             let button_events = count_type("device_button");
             let rotary_events = count_type("device_rotary");
-            let entertainment_events = count_type("entertainment_action_applied");
+            let entertainment_events =
+                count_type("entertainment_action_applied") + count_type("entertainment_status_changed");
             let metrics_events = count_type("plugin_metrics");
             let body = if let Some(p) = plugin {
                 format!(
