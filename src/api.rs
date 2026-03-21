@@ -203,6 +203,46 @@ impl HomeCoreClient {
         Self::parse_empty(resp).await
     }
 
+    pub async fn set_device_brightness(&self, device_id: &str, brightness: i64) -> Result<()> {
+        let path = format!("/devices/{device_id}/state");
+        let body = json!({ "brightness": brightness });
+        let resp = self.request_with_json(Method::PATCH, &path, body).await?;
+        Self::parse_empty(resp).await
+    }
+
+    pub async fn set_device_locked(&self, device_id: &str, locked: bool) -> Result<()> {
+        let path = format!("/devices/{device_id}/state");
+        let body = json!({ "locked": locked });
+        let resp = self.request_with_json(Method::PATCH, &path, body).await?;
+        Self::parse_empty(resp).await
+    }
+
+    pub async fn update_device_metadata(
+        &self,
+        device_id: &str,
+        name: &str,
+        area: Option<&str>,
+    ) -> Result<()> {
+        let path = format!("/devices/{device_id}");
+        let mut body = Map::new();
+        body.insert("name".to_string(), Value::String(name.to_string()));
+        body.insert(
+            "area".to_string(),
+            match area {
+                Some(a) => Value::String(a.to_string()),
+                None => Value::Null,
+            },
+        );
+        let resp = self
+            .request_with_json(Method::PATCH, &path, Value::Object(body))
+            .await?;
+        if resp.status().is_success() {
+            return Ok(());
+        }
+        let message = Self::extract_error_message(resp).await;
+        Err(anyhow!("failed to update device: {message}"))
+    }
+
     fn endpoint(&self, path: &str) -> String {
         format!("{}/api/v1{}", self.base_url, path)
     }
@@ -357,6 +397,8 @@ impl HomeCoreClient {
                 .to_string();
             let area = obj
                 .get("area")
+                .or_else(|| obj.get("room"))
+                .or_else(|| obj.get("area_id"))
                 .and_then(Value::as_str)
                 .map(ToString::to_string);
             let available = obj

@@ -16,6 +16,26 @@ pub enum FocusField {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceEditField {
+    Name,
+    Area,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeviceEditor {
+    pub device_id: String,
+    pub name: String,
+    pub area: String,
+    pub field: DeviceEditField,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceViewMode {
+    Grouped,
+    Flat,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Devices,
     Scenes,
@@ -53,6 +73,7 @@ pub struct App {
     pub should_quit: bool,
     pub tab: usize,
     pub selected: usize,
+    pub view_mode: DeviceViewMode,
     pub devices: Vec<DeviceState>,
     pub scenes: Vec<Scene>,
     pub areas: Vec<Area>,
@@ -64,6 +85,7 @@ pub struct App {
     pub login_in_progress: bool,
     pub login_animation_step: u16,
     pub login_phase: LoginPhase,
+    pub device_editor: Option<DeviceEditor>,
 }
 
 pub struct LoginWorkflowResult {
@@ -93,6 +115,7 @@ impl App {
             should_quit: false,
             tab: 0,
             selected: 0,
+            view_mode: DeviceViewMode::Grouped,
             devices: Vec::new(),
             scenes: Vec::new(),
             areas: Vec::new(),
@@ -104,6 +127,7 @@ impl App {
             login_in_progress: false,
             login_animation_step: 0,
             login_phase: LoginPhase::Authenticating,
+            device_editor: None,
         }
     }
 
@@ -387,6 +411,12 @@ impl App {
 
     pub async fn on_key_authenticated(&mut self, key: KeyEvent) {
         self.error = None;
+
+        if self.device_editor.is_some() {
+            self.on_key_device_editor(key).await;
+            return;
+        }
+
         match key.code {
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Char('r') => {
@@ -415,9 +445,43 @@ impl App {
             KeyCode::Up | KeyCode::Char('k') => {
                 self.selected = self.selected.saturating_sub(1);
             }
+            KeyCode::Enter => {
+                if matches!(self.active_tab(), Tab::Devices) {
+                    self.open_selected_device_editor();
+                }
+            }
             KeyCode::Char('t') => {
                 if matches!(self.active_tab(), Tab::Devices) {
                     self.toggle_selected_device().await;
+                }
+            }
+            KeyCode::Char('v') => {
+                if matches!(self.active_tab(), Tab::Devices) {
+                    self.view_mode = match self.view_mode {
+                        DeviceViewMode::Grouped => DeviceViewMode::Flat,
+                        DeviceViewMode::Flat => DeviceViewMode::Grouped,
+                    };
+                    self.selected = 0;
+                }
+            }
+            KeyCode::Char('+') | KeyCode::Char('=') => {
+                if matches!(self.active_tab(), Tab::Devices) {
+                    self.adjust_brightness(1).await;
+                }
+            }
+            KeyCode::Char('-') => {
+                if matches!(self.active_tab(), Tab::Devices) {
+                    self.adjust_brightness(-1).await;
+                }
+            }
+            KeyCode::Char('l') => {
+                if matches!(self.active_tab(), Tab::Devices) {
+                    self.lock_device(true).await;
+                }
+            }
+            KeyCode::Char('u') => {
+                if matches!(self.active_tab(), Tab::Devices) {
+                    self.lock_device(false).await;
                 }
             }
             KeyCode::Char('a') => {
@@ -427,6 +491,208 @@ impl App {
             }
             _ => {}
         }
+    }
+
+    /// Returns devices grouped by area, sorted alphabetically. Unassigned devices last.
+    pub fn grouped_devices(&self) -> Vec<(String, Vec<usize>)> {
+        let mut map: std::collections::BTreeMap<String, Vec<usize>> =
+            std::collections::BTreeMap::new();
+        let mut unassigned: Vec<usize> = Vec::new();
+        for (i, device) in self.devices.iter().enumerate() {
+            match &device.area {
+                Some(area) if !area.is_empty() => {
+                    map.entry(area.clone()).or_default().push(i);
+                }
+                _ => unassigned.push(i),
+            }
+        }
+        let mut groups: Vec<(String, Vec<usize>)> = map.into_iter().collect();
+        if !unassigned.is_empty() {
+            groups.push(("Unassigned".to_string(), unassigned));
+        }
+        groups
+    }
+
+    /// Resolves `self.selected` to a device, accounting for view mode.
+    pub fn selected_device(&self) -> Option<&DeviceState> {
+        if self.view_mode == DeviceViewMode::Grouped {
+            let groups = self.grouped_devices();
+            let mut flat = 0usize;
+            for (_, indices) in &groups {
+                for &idx in indices {
+                    if flat == self.selected {
+                        return self.devices.get(idx);
+                    }
+                    flat += 1;
+                }
+            }
+            None
+        } else {
+            self.devices.get(self.selected)
+        }
+    }
+
+    pub fn device_battery(device: &DeviceState) -> Option<u8> {
+        for key in &["battery", "battery_level", "battery_percent"] {
+            if let Some(n) = device.attributes.get(*key).and_then(|v| v.as_f64()) {
+                return Some(n.clamp(0.0, 100.0) as u8);
+            }
+        }
+        None
+    }
+
+    pub fn device_temperature(device: &DeviceState) -> Option<f64> {
+        for key in &["temperature", "temp"] {
+            if let Some(n) = device.attributes.get(*key).and_then(|v| v.as_f64()) {
+                return Some(n);
+            }
+        }
+        None
+    }
+
+    pub fn device_humidity(device: &DeviceState) -> Option<f64> {
+        device.attributes.get("humidity").and_then(|v| v.as_f64())
+    }
+
+    pub fn device_brightness(device: &DeviceState) -> Option<u8> {
+        device.attributes.get("brightness").and_then(|v| v.as_f64()).map(|n| {
+            if n <= 1.0 {
+                (n * 100.0) as u8
+            } else if n <= 100.0 {
+                n as u8
+            } else {
+                (n / 255.0 * 100.0) as u8
+            }
+        })
+    }
+
+    pub fn device_lock_state(device: &DeviceState) -> Option<bool> {
+        device.attributes.get("locked").and_then(|v| v.as_bool())
+    }
+
+    fn open_selected_device_editor(&mut self) {
+        let Some(device) = self.selected_device() else {
+            return;
+        };
+        let device_id = device.device_id.clone();
+        let name = device.name.clone();
+        let area = device.area.clone().unwrap_or_default();
+
+        self.device_editor = Some(DeviceEditor {
+            device_id,
+            name,
+            area,
+            field: DeviceEditField::Name,
+        });
+    }
+
+    async fn on_key_device_editor(&mut self, key: KeyEvent) {
+        let Some(editor) = self.device_editor.as_mut() else {
+            return;
+        };
+
+        match key.code {
+            KeyCode::Esc => {
+                self.device_editor = None;
+                self.status = "Device edit canceled".to_string();
+            }
+            KeyCode::Tab | KeyCode::Right => {
+                editor.field = match editor.field {
+                    DeviceEditField::Name => DeviceEditField::Area,
+                    DeviceEditField::Area => DeviceEditField::Name,
+                };
+            }
+            KeyCode::BackTab | KeyCode::Left => {
+                editor.field = match editor.field {
+                    DeviceEditField::Name => DeviceEditField::Area,
+                    DeviceEditField::Area => DeviceEditField::Name,
+                };
+            }
+            KeyCode::Backspace => match editor.field {
+                DeviceEditField::Name => {
+                    editor.name.pop();
+                }
+                DeviceEditField::Area => {
+                    editor.area.pop();
+                }
+            },
+            KeyCode::Enter => {
+                self.save_device_editor().await;
+            }
+            KeyCode::Char(ch) => {
+                if key.modifiers.contains(KeyModifiers::CONTROL) {
+                    return;
+                }
+                match editor.field {
+                    DeviceEditField::Name => editor.name.push(ch),
+                    DeviceEditField::Area => editor.area.push(ch),
+                }
+            }
+            _ => {}
+        }
+    }
+
+    async fn save_device_editor(&mut self) {
+        let Some(editor) = self.device_editor.clone() else {
+            return;
+        };
+
+        let name = editor.name.trim().to_string();
+        if name.is_empty() {
+            self.error = Some("device name cannot be empty".to_string());
+            return;
+        }
+
+        let area_value = editor.area.trim().to_string();
+        let area = if area_value.is_empty() {
+            None
+        } else {
+            Some(area_value.clone())
+        };
+
+        match self
+            .client
+            .update_device_metadata(&editor.device_id, &name, area.as_deref())
+            .await
+        {
+            Ok(_) => {
+                if let Some(device) = self
+                    .devices
+                    .iter_mut()
+                    .find(|device| device.device_id == editor.device_id)
+                {
+                    device.name = name.clone();
+                    device.area = area.clone();
+                }
+                self.device_editor = None;
+                self.status = format!("Updated {}", editor.device_id);
+                if let Err(err) = self.save_to_cache().await {
+                    self.error = Some(err.to_string());
+                }
+            }
+            Err(err) => {
+                self.error = Some(err.to_string());
+            }
+        }
+    }
+
+    pub fn device_status(&self, device: &DeviceState) -> String {
+        if let Some(locked) = device.attributes.get("locked").and_then(|v| v.as_bool()) {
+            return if locked { "Locked".to_string() } else { "Unlocked".to_string() };
+        }
+        if let Some(on) = device.attributes.get("on").and_then(|v| v.as_bool()) {
+            return if on { "On".to_string() } else { "Off".to_string() };
+        }
+        if let Some(state) = device.attributes.get("state").and_then(|v| v.as_str()) {
+            return normalize_label(state);
+        }
+        if let Some(open) = device.attributes.get("open").and_then(|v| v.as_bool()) {
+            return if open { "Open".to_string() } else { "Closed".to_string() };
+        }
+        if let Some(online) = device.attributes.get("online").and_then(|v| v.as_bool()) {
+            return if online { "Online".to_string() } else { "Offline".to_string() };
+        }
+        "Unknown".to_string()
     }
 
     fn active_items_len(&self) -> usize {
@@ -451,28 +717,49 @@ impl App {
     }
 
     async fn toggle_selected_device(&mut self) {
-        let Some(device) = self.devices.get(self.selected) else {
-            return;
+        let (device_id, current_on) = {
+            let Some(device) = self.selected_device() else { return };
+            let on = device.attributes.get("on").and_then(|v| v.as_bool()).unwrap_or(false);
+            (device.device_id.clone(), on)
         };
-        let current_on = device
-            .attributes
-            .get("on")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        match self
-            .client
-            .set_device_on(&device.device_id, !current_on)
-            .await
-        {
+        match self.client.set_device_on(&device_id, !current_on).await {
+            Ok(_) => self.status = format!("Toggled {} → on={}", device_id, !current_on),
+            Err(err) => self.error = Some(err.to_string()),
+        }
+    }
+
+    async fn adjust_brightness(&mut self, direction: i64) {
+        let (device_id, raw) = {
+            let Some(device) = self.selected_device() else { return };
+            let raw = device.attributes.get("brightness").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            (device.device_id.clone(), raw)
+        };
+        // Determine scale and step (10% of range)
+        let (max, step) = if raw <= 1.0 && raw >= 0.0 {
+            (1.0_f64, 0.1)
+        } else if raw <= 100.0 {
+            (100.0_f64, 10.0)
+        } else {
+            (255.0_f64, 25.0)
+        };
+        let new_val = ((raw + direction as f64 * step).clamp(0.0, max) * 10.0).round() / 10.0;
+        let new_val_i = new_val as i64;
+        match self.client.set_device_brightness(&device_id, new_val_i).await {
+            Ok(_) => self.status = format!("Brightness → {new_val_i}"),
+            Err(err) => self.error = Some(err.to_string()),
+        }
+    }
+
+    async fn lock_device(&mut self, locked: bool) {
+        let device_id = {
+            let Some(device) = self.selected_device() else { return };
+            device.device_id.clone()
+        };
+        match self.client.set_device_locked(&device_id, locked).await {
             Ok(_) => {
-                self.status = format!("Set {} to on={}", device.device_id, !current_on);
-                if let Err(err) = self.refresh_all().await {
-                    self.error = Some(err.to_string());
-                }
+                self.status = format!("{} {}", if locked { "Locked" } else { "Unlocked" }, device_id);
             }
-            Err(err) => {
-                self.error = Some(err.to_string());
-            }
+            Err(err) => self.error = Some(err.to_string()),
         }
     }
 
@@ -492,6 +779,25 @@ impl App {
             }
         }
     }
+}
+
+fn normalize_label(value: &str) -> String {
+    value
+        .replace('_', " ")
+        .split_whitespace()
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => format!(
+                    "{}{}",
+                    first.to_ascii_uppercase(),
+                    chars.as_str().to_ascii_lowercase()
+                ),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 pub async fn login_workflow_from_auth(

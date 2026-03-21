@@ -1,9 +1,12 @@
-use crate::app::{App, FocusField, LoginPhase, Tab};
+use crate::app::{App, DeviceEditField, DeviceViewMode, FocusField, LoginPhase, Tab};
+use crate::api::DeviceState;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::Line,
-    widgets::{Block, Borders, Cell, Clear, Gauge, List, ListItem, Paragraph, Row, Table, Tabs, Wrap},
+    text::{Line, Span},
+    widgets::{
+        Block, Borders, Clear, Gauge, List, ListItem, Paragraph, Tabs, Wrap,
+    },
     Frame,
 };
 
@@ -40,36 +43,66 @@ pub fn draw(frame: &mut Frame<'_>, app: &App) {
 
     draw_tab_body(frame, app, layout[1]);
 
+    draw_status_bar(frame, app, layout[2]);
+
+    if app.device_editor.is_some() {
+        draw_device_editor(frame, app);
+    }
+}
+
+fn draw_status_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let role = app
         .current_user
         .as_ref()
         .map(|u| format!("{:?}", u.role))
         .unwrap_or_else(|| "unknown".to_string());
-    let live = if app.ws_connected { "connected" } else { "disconnected" };
-    let mut status_line = format!(
-        "user={} role={} live_ws={} | Tab/Shift+Tab switch tab | j/k move | r refresh | q quit",
-        app.current_user
-            .as_ref()
-            .map(|u| u.username.as_str())
-            .unwrap_or("n/a"),
-        role,
-        live
-    );
+    let live = if app.ws_connected { "●" } else { "○" };
+    let live_color = if app.ws_connected { Color::Green } else { Color::Red };
+
+    let status_text = if let Some(err) = &app.error {
+        format!("ERROR: {err}")
+    } else {
+        app.status.clone()
+    };
+
+    let user_str = app
+        .current_user
+        .as_ref()
+        .map(|u| u.username.as_str())
+        .unwrap_or("n/a");
+
+    let mut hints = vec!["Tab/Shift+Tab tab", "j/k move", "r refresh", "q quit"];
     if matches!(app.active_tab(), Tab::Devices) {
-        status_line.push_str(" | t toggle selected device");
+        hints.push("t toggle");
+        hints.push("+/- bright");
+        hints.push("l/u lock");
+        hints.push("v view");
+        hints.push("Enter edit");
     }
     if matches!(app.active_tab(), Tab::Scenes) {
-        status_line.push_str(" | a activate selected scene");
+        hints.push("a activate");
     }
-    if let Some(err) = &app.error {
-        status_line = format!("ERROR: {err}");
+    if app.device_editor.is_some() {
+        hints = vec!["Tab field", "Enter save", "Esc cancel"];
+    }
+
+    let hint_str = hints.join(" | ");
+    let style = if app.error.is_some() {
+        Style::default().fg(Color::Red)
     } else {
-        status_line = format!("{} | {}", app.status, status_line);
-    }
-    let footer = Paragraph::new(status_line)
+        Style::default()
+    };
+
+    let line = Line::from(vec![
+        Span::styled(format!("{status_text} | {user_str} ({role}) "), style),
+        Span::styled(live, Style::default().fg(live_color)),
+        Span::styled(format!(" | {hint_str}"), style),
+    ]);
+
+    let footer = Paragraph::new(line)
         .block(Block::default().borders(Borders::ALL).title("Status"))
         .wrap(Wrap { trim: true });
-    frame.render_widget(footer, layout[2]);
+    frame.render_widget(footer, area);
 }
 
 fn draw_login(frame: &mut Frame<'_>, app: &App) {
@@ -121,8 +154,7 @@ fn draw_login(frame: &mut Frame<'_>, app: &App) {
     );
     frame.render_widget(password, layout[2]);
 
-    let help = Paragraph::new("Tab switch field | Enter login | Esc quit")
-        .alignment(Alignment::Center);
+    let help = Paragraph::new("Tab switch field | Enter login | Esc quit").alignment(Alignment::Center);
     frame.render_widget(help, layout[3]);
 
     let loading_label = if app.login_in_progress {
@@ -148,17 +180,16 @@ fn draw_login(frame: &mut Frame<'_>, app: &App) {
         .ratio(app.login_progress_ratio());
     frame.render_widget(loading, layout[4]);
 
-    let message = app
-        .error
-        .clone()
-        .unwrap_or_else(|| "Connects to /api/v1/auth/login and loads/saves cache snapshots locally".to_string());
+    let message = app.error.clone().unwrap_or_else(|| {
+        "Connects to /api/v1/auth/login and loads/saves cache snapshots locally".to_string()
+    });
     let msg = Paragraph::new(message).alignment(Alignment::Center);
     frame.render_widget(msg, layout[5]);
 }
 
 fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
     if matches!(app.active_tab(), Tab::Devices) {
-        draw_devices_table(frame, app, area);
+        draw_dashboard(frame, app, area);
         return;
     }
 
@@ -177,7 +208,12 @@ fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
         Tab::Automations => app
             .automations
             .iter()
-            .map(|r| ListItem::new(format!("{} ({}) enabled={} priority={}", r.name, r.id, r.enabled, r.priority)))
+            .map(|r| {
+                ListItem::new(format!(
+                    "{} ({}) enabled={} priority={}",
+                    r.name, r.id, r.enabled, r.priority
+                ))
+            })
             .collect::<Vec<_>>(),
         Tab::Events => app
             .events
@@ -207,7 +243,12 @@ fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
         Tab::Plugins => app
             .plugins
             .iter()
-            .map(|p| ListItem::new(format!("{} status={} registered_at={}", p.plugin_id, p.status, p.registered_at)))
+            .map(|p| {
+                ListItem::new(format!(
+                    "{} status={} registered_at={}",
+                    p.plugin_id, p.status, p.registered_at
+                ))
+            })
             .collect::<Vec<_>>(),
     };
 
@@ -227,70 +268,420 @@ fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
     frame.render_stateful_widget(list, area, &mut state);
 }
 
-fn draw_devices_table(frame: &mut Frame<'_>, app: &App, area: Rect) {
-    let header = Row::new(vec![
-        Cell::from("Name"),
-        Cell::from("Status"),
-        Cell::from("Availability"),
-        Cell::from("Room"),
-        Cell::from("Plugin"),
-    ])
-    .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+fn draw_dashboard(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let panes = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+        .split(area);
 
-    let rows = app
-        .devices
-        .iter()
-        .map(|device| {
-            Row::new(vec![
-                Cell::from(clean_name(&device.name)),
-                Cell::from(canonical_device_status(device)),
-                Cell::from(if device.available { "Online" } else { "Offline" }),
-                Cell::from(device.area.clone().unwrap_or_else(|| "-".to_string())),
-                Cell::from(clean_plugin_id(&device.plugin_id)),
-            ])
-        })
-        .collect::<Vec<_>>();
-
-    let table = Table::new(
-        rows,
-        [
-            Constraint::Percentage(32),
-            Constraint::Percentage(14),
-            Constraint::Percentage(18),
-            Constraint::Percentage(18),
-            Constraint::Percentage(18),
-        ],
-    )
-    .header(header)
-    .block(Block::default().borders(Borders::ALL).title("Devices"))
-    .row_highlight_style(
-        Style::default()
-            .fg(Color::Black)
-            .bg(Color::Cyan)
-            .add_modifier(Modifier::BOLD),
-    );
-
-    let mut state = ratatui::widgets::TableState::default();
-    if !app.devices.is_empty() {
-        state.select(Some(app.selected));
-    }
-    frame.render_stateful_widget(table, area, &mut state);
+    draw_device_list(frame, app, panes[0]);
+    draw_device_detail(frame, app, panes[1]);
 }
 
-fn canonical_device_status(device: &crate::api::DeviceState) -> String {
-    if let Some(on) = device.attributes.get("on").and_then(|v| v.as_bool()) {
-        return if on { "On".to_string() } else { "Off".to_string() };
+fn draw_device_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let (items, render_selected) = if app.view_mode == DeviceViewMode::Grouped {
+        build_grouped_list(app)
+    } else {
+        build_flat_list(app)
+    };
+
+    let mode_label = if app.view_mode == DeviceViewMode::Grouped { "Grouped" } else { "Flat" };
+    let title = format!("Devices ({mode_label}) [{}]", app.devices.len());
+
+    let list = List::new(items).block(Block::default().borders(Borders::ALL).title(title));
+
+    let mut state = ratatui::widgets::ListState::default();
+    state.select(render_selected);
+    frame.render_stateful_widget(list, area, &mut state);
+}
+
+fn build_grouped_list(app: &App) -> (Vec<ListItem<'static>>, Option<usize>) {
+    let groups = app.grouped_devices();
+    let mut items: Vec<ListItem<'static>> = Vec::new();
+    let mut render_selected: Option<usize> = None;
+    let mut flat_idx = 0usize;
+    let mut render_idx = 0usize;
+
+    for (area_name, indices) in &groups {
+        // Area header row
+        items.push(ListItem::new(Line::from(vec![Span::styled(
+            format!(" {area_name} "),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD)
+                .add_modifier(Modifier::UNDERLINED),
+        )])));
+        render_idx += 1;
+
+        for &dev_idx in indices {
+            let Some(device) = app.devices.get(dev_idx) else {
+                flat_idx += 1;
+                render_idx += 1;
+                continue;
+            };
+
+            let is_selected = flat_idx == app.selected;
+            if is_selected {
+                render_selected = Some(render_idx);
+            }
+
+            items.push(device_list_row(app, device, is_selected, true));
+            flat_idx += 1;
+            render_idx += 1;
+        }
     }
-    if let Some(state) = device.attributes.get("state").and_then(|v| v.as_str()) {
-        return normalize_label(state);
+
+    (items, render_selected)
+}
+
+fn build_flat_list(app: &App) -> (Vec<ListItem<'static>>, Option<usize>) {
+    let items = app
+        .devices
+        .iter()
+        .enumerate()
+        .map(|(i, device)| device_list_row(app, device, i == app.selected, false))
+        .collect();
+    let selected = if app.devices.is_empty() { None } else { Some(app.selected) };
+    (items, selected)
+}
+
+fn device_list_row(app: &App, device: &DeviceState, is_selected: bool, indent: bool) -> ListItem<'static> {
+    let status = app.device_status(device);
+    let sc = status_color(&status, device.available);
+
+    let prefix = if indent { "  " } else { "" };
+    let name_raw = clean_name(&device.name);
+    let name_truncated: String = name_raw.chars().take(26).collect();
+
+    let avail_dot = if device.available {
+        Span::styled("● ", Style::default().fg(Color::Green))
+    } else {
+        Span::styled("○ ", Style::default().fg(Color::DarkGray))
+    };
+
+    // Compact sensor suffix
+    let mut suffix = String::new();
+    if let Some(b) = App::device_battery(device) {
+        suffix.push_str(&format!(" {b}%🔋"));
     }
-    if let Some(open) = device.attributes.get("open").and_then(|v| v.as_bool()) {
-        return if open { "Open".to_string() } else { "Closed".to_string() };
+    if let Some(t) = App::device_temperature(device) {
+        suffix.push_str(&format!(" {t:.1}°"));
     }
-    if let Some(online) = device.attributes.get("online").and_then(|v| v.as_bool()) {
-        return if online { "Online".to_string() } else { "Offline".to_string() };
+    if let Some(h) = App::device_humidity(device) {
+        suffix.push_str(&format!(" {h:.0}%"));
     }
-    "Unknown".to_string()
+
+    if is_selected {
+        let sel_style = Style::default()
+            .fg(Color::Black)
+            .bg(Color::Cyan)
+            .add_modifier(Modifier::BOLD);
+        let line = Line::from(vec![
+            Span::styled(format!("{prefix}"), sel_style),
+            Span::styled("● ", sel_style),
+            Span::styled(format!("{name_truncated:<26}"), sel_style),
+            Span::styled(format!(" {:<10}", &status), sel_style),
+            Span::styled(suffix, sel_style),
+        ]);
+        ListItem::new(line)
+    } else {
+        let base_style = if device.available {
+            Style::default()
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        let status_style = if device.available {
+            Style::default().fg(sc)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        let line = Line::from(vec![
+            Span::styled(format!("{prefix}"), base_style),
+            avail_dot,
+            Span::styled(format!("{name_truncated:<26}"), base_style),
+            Span::styled(format!(" {:<10}", &status), status_style),
+            Span::styled(suffix, Style::default().fg(Color::DarkGray)),
+        ]);
+        ListItem::new(line)
+    }
+}
+
+fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let block = Block::default().borders(Borders::ALL).title("Detail");
+
+    let Some(device) = app.selected_device() else {
+        let msg = Paragraph::new("No device selected")
+            .block(block)
+            .alignment(Alignment::Center);
+        frame.render_widget(msg, area);
+        return;
+    };
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+
+    // Name
+    lines.push(Line::from(vec![Span::styled(
+        clean_name(&device.name),
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD),
+    )]));
+    lines.push(Line::from(""));
+
+    // Status
+    let status = app.device_status(device);
+    let sc = status_color(&status, device.available);
+    lines.push(detail_row(
+        "Status",
+        vec![Span::styled(status, Style::default().fg(sc).add_modifier(Modifier::BOLD))],
+    ));
+
+    // Availability
+    let (avail_str, avail_color) = if device.available {
+        ("Online", Color::Green)
+    } else {
+        ("Offline", Color::Red)
+    };
+    lines.push(detail_row(
+        "Available",
+        vec![Span::styled(avail_str, Style::default().fg(avail_color))],
+    ));
+
+    // Area
+    if let Some(area_name) = &device.area {
+        lines.push(detail_row("Area", vec![Span::raw(area_name.clone())]));
+    }
+
+    // Plugin
+    lines.push(detail_row(
+        "Plugin",
+        vec![Span::raw(clean_plugin_id(&device.plugin_id))],
+    ));
+
+    // Last seen
+    if !device.last_seen.is_empty() {
+        lines.push(detail_row(
+            "Last seen",
+            vec![Span::styled(
+                format_timestamp(&device.last_seen),
+                Style::default().fg(Color::DarkGray),
+            )],
+        ));
+    }
+
+    lines.push(Line::from(""));
+
+    // Battery
+    if let Some(battery) = App::device_battery(device) {
+        let bc = if battery <= 20 {
+            Color::Red
+        } else if battery <= 40 {
+            Color::Yellow
+        } else {
+            Color::Green
+        };
+        let bar = make_bar(battery as f64 / 100.0, 10);
+        let low = if battery <= 20 { " LOW" } else { "" };
+        lines.push(detail_row(
+            "Battery",
+            vec![
+                Span::styled(format!("{battery:3}% "), Style::default().fg(bc)),
+                Span::styled(bar, Style::default().fg(bc)),
+                Span::styled(low, Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            ],
+        ));
+    }
+
+    // Temperature
+    if let Some(temp) = App::device_temperature(device) {
+        lines.push(detail_row(
+            "Temperature",
+            vec![Span::styled(
+                format!("{temp:.1}°F"),
+                Style::default().fg(Color::Yellow),
+            )],
+        ));
+    }
+
+    // Humidity
+    if let Some(humidity) = App::device_humidity(device) {
+        lines.push(detail_row(
+            "Humidity",
+            vec![Span::styled(
+                format!("{humidity:.0}%"),
+                Style::default().fg(Color::Cyan),
+            )],
+        ));
+    }
+
+    // Brightness
+    if let Some(brightness) = App::device_brightness(device) {
+        let bar = make_bar(brightness as f64 / 100.0, 10);
+        lines.push(detail_row(
+            "Brightness",
+            vec![
+                Span::styled(format!("{brightness:3}% "), Style::default().fg(Color::Yellow)),
+                Span::styled(bar, Style::default().fg(Color::Yellow)),
+            ],
+        ));
+    }
+
+    // Lock state
+    if let Some(locked) = App::device_lock_state(device) {
+        let (lock_str, lock_color) = if locked {
+            ("Locked", Color::Red)
+        } else {
+            ("Unlocked", Color::Green)
+        };
+        lines.push(detail_row(
+            "Lock",
+            vec![Span::styled(lock_str, Style::default().fg(lock_color))],
+        ));
+    }
+
+    // Other attributes
+    let shown = [
+        "on", "state", "open", "online", "locked",
+        "battery", "battery_level", "battery_percent",
+        "temperature", "temp", "humidity", "brightness",
+    ];
+    let other_attrs: Vec<(&String, &serde_json::Value)> = device
+        .attributes
+        .iter()
+        .filter(|(k, _)| !shown.contains(&k.as_str()))
+        .collect();
+
+    if !other_attrs.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "─── Attributes ───",
+            Style::default().fg(Color::DarkGray),
+        )));
+        for (key, val) in &other_attrs {
+            let val_str = val
+                .as_str()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| val.to_string());
+            let display_key = normalize_label(key);
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("  {:<13}", display_key),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::raw(val_str),
+            ]));
+        }
+    }
+
+    let para = Paragraph::new(lines).wrap(Wrap { trim: false });
+    frame.render_widget(para, inner);
+}
+
+fn draw_device_editor(frame: &mut Frame<'_>, app: &App) {
+    let Some(editor) = app.device_editor.as_ref() else {
+        return;
+    };
+
+    let popup = centered_rect(72, 58, frame.area());
+    frame.render_widget(Clear, popup);
+
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Min(1),
+        ])
+        .split(popup);
+
+    let title = Paragraph::new(format!("Device: {}", editor.device_id))
+        .alignment(Alignment::Left)
+        .block(Block::default().borders(Borders::ALL).title("Edit Device"));
+    frame.render_widget(title, layout[0]);
+
+    let name_style = if matches!(editor.field, DeviceEditField::Name) {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default()
+    };
+    let name = Paragraph::new(editor.name.as_str()).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Name")
+            .border_style(name_style),
+    );
+    frame.render_widget(name, layout[1]);
+
+    let area_style = if matches!(editor.field, DeviceEditField::Area) {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default()
+    };
+    let area = Paragraph::new(editor.area.as_str()).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Area / Room")
+            .border_style(area_style),
+    );
+    frame.render_widget(area, layout[2]);
+
+    let status = app
+        .devices
+        .iter()
+        .find(|device| device.device_id == editor.device_id)
+        .map(|device| app.device_status(device))
+        .unwrap_or_else(|| "Unknown".to_string());
+    let status_line = Paragraph::new(format!("Status: {status}"))
+        .block(Block::default().borders(Borders::ALL).title("Device Status"));
+    frame.render_widget(status_line, layout[3]);
+
+    let help = Paragraph::new("Tab switch field | Enter save | Esc cancel")
+        .alignment(Alignment::Center)
+        .block(Block::default().borders(Borders::ALL));
+    frame.render_widget(help, layout[4]);
+}
+
+// ── helpers ──────────────────────────────────────────────────────────────────
+
+fn status_color(status: &str, available: bool) -> Color {
+    if !available {
+        return Color::DarkGray;
+    }
+    match status {
+        "On" | "Open" | "Unlocked" | "Online" => Color::Green,
+        "Off" | "Closed" | "Locked" | "Offline" => Color::Red,
+        "Unknown" => Color::DarkGray,
+        _ => Color::White,
+    }
+}
+
+/// Build a `"Label  : "` + spans detail row.
+fn detail_row(label: &str, spans: Vec<Span<'static>>) -> Line<'static> {
+    let mut all = vec![Span::styled(
+        format!("{label:<11}: "),
+        Style::default().fg(Color::DarkGray),
+    )];
+    all.extend(spans);
+    Line::from(all)
+}
+
+fn make_bar(ratio: f64, width: usize) -> String {
+    let filled = (ratio.clamp(0.0, 1.0) * width as f64).round() as usize;
+    let empty = width.saturating_sub(filled);
+    format!("[{}{}]", "█".repeat(filled), "░".repeat(empty))
+}
+
+fn format_timestamp(ts: &str) -> String {
+    if let Some(time_part) = ts.split('T').nth(1) {
+        time_part.split('.').next().unwrap_or(time_part).to_string()
+    } else {
+        ts.chars().take(20).collect()
+    }
 }
 
 fn clean_plugin_id(plugin_id: &str) -> String {
@@ -322,7 +713,11 @@ fn normalize_label(value: &str) -> String {
         .map(|part| {
             let mut chars = part.chars();
             match chars.next() {
-                Some(first) => format!("{}{}", first.to_ascii_uppercase(), chars.as_str().to_ascii_lowercase()),
+                Some(first) => format!(
+                    "{}{}",
+                    first.to_ascii_uppercase(),
+                    chars.as_str().to_ascii_lowercase()
+                ),
                 None => String::new(),
             }
         })
