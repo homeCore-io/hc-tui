@@ -73,6 +73,42 @@ pub enum DeviceViewMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventsFilterMode {
+    All,
+    HueInputs,
+    Entertainment,
+    PluginMetrics,
+}
+
+impl EventsFilterMode {
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::HueInputs => "hue_inputs",
+            Self::Entertainment => "entertainment",
+            Self::PluginMetrics => "plugin_metrics",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PluginDetailPanel {
+    Overview,
+    Diagnostics,
+    Metrics,
+}
+
+impl PluginDetailPanel {
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Overview => "Overview",
+            Self::Diagnostics => "Diagnostics",
+            Self::Metrics => "Metrics",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Devices,
     Scenes,
@@ -111,6 +147,10 @@ pub struct App {
     pub tab: usize,
     pub selected: usize,
     pub view_mode: DeviceViewMode,
+    pub events_filter_mode: EventsFilterMode,
+    pub plugin_detail_open: bool,
+    pub plugin_detail_plugin_id: Option<String>,
+    pub plugin_detail_panel: PluginDetailPanel,
     pub devices: Vec<DeviceState>,
     pub scenes: Vec<Scene>,
     pub areas: Vec<Area>,
@@ -155,6 +195,10 @@ impl App {
             tab: 0,
             selected: 0,
             view_mode: DeviceViewMode::Grouped,
+            events_filter_mode: EventsFilterMode::All,
+            plugin_detail_open: false,
+            plugin_detail_plugin_id: None,
+            plugin_detail_panel: PluginDetailPanel::Overview,
             devices: Vec::new(),
             scenes: Vec::new(),
             areas: Vec::new(),
@@ -463,6 +507,10 @@ impl App {
         let entry = EventEntry {
             event_type,
             timestamp,
+            plugin_id: event
+                .get("plugin_id")
+                .and_then(Value::as_str)
+                .map(ToString::to_string),
             device_id: event
                 .get("device_id")
                 .and_then(Value::as_str)
@@ -475,13 +523,36 @@ impl App {
                 .get("event_type")
                 .and_then(Value::as_str)
                 .map(ToString::to_string),
+            event_detail: summarize_live_event_detail(&event),
         };
         self.events.insert(0, entry);
         self.events.truncate(200);
     }
 
+
     pub async fn on_key_authenticated(&mut self, key: KeyEvent) {
         self.error = None;
+
+        if self.plugin_detail_open {
+            match key.code {
+                KeyCode::Esc => {
+                    self.plugin_detail_open = false;
+                    self.plugin_detail_plugin_id = None;
+                    self.status = "Closed plugin detail".to_string();
+                }
+                KeyCode::Char('1') => {
+                    self.plugin_detail_panel = PluginDetailPanel::Overview;
+                }
+                KeyCode::Char('2') => {
+                    self.plugin_detail_panel = PluginDetailPanel::Diagnostics;
+                }
+                KeyCode::Char('3') => {
+                    self.plugin_detail_panel = PluginDetailPanel::Metrics;
+                }
+                _ => {}
+            }
+            return;
+        }
 
         if self.device_editor.is_some() {
             self.on_key_device_editor(key).await;
@@ -529,6 +600,7 @@ impl App {
                     Tab::Devices => self.open_selected_device_editor(),
                     Tab::Areas   => self.open_area_editor_edit(),
                     Tab::Users   => self.open_user_editor_role(),
+                    Tab::Plugins => self.open_plugin_detail(),
                     _ => {}
                 }
             }
@@ -595,6 +667,22 @@ impl App {
             KeyCode::Char('a') => {
                 if matches!(self.active_tab(), Tab::Scenes) {
                     self.activate_selected_scene().await;
+                }
+            }
+            KeyCode::Char('f') => {
+                if matches!(self.active_tab(), Tab::Events) {
+                    self.events_filter_mode = match self.events_filter_mode {
+                        EventsFilterMode::All => EventsFilterMode::HueInputs,
+                        EventsFilterMode::HueInputs => EventsFilterMode::Entertainment,
+                        EventsFilterMode::Entertainment => EventsFilterMode::PluginMetrics,
+                        EventsFilterMode::PluginMetrics => EventsFilterMode::All,
+                    };
+                    self.selected = 0;
+                    self.clamp_selection();
+                    self.status = format!(
+                        "Events filter: {}",
+                        self.events_filter_mode.title()
+                    );
                 }
             }
             _ => {}
@@ -839,13 +927,64 @@ impl App {
         "Unknown".to_string()
     }
 
+    pub fn filtered_events(&self) -> Vec<&EventEntry> {
+        self.events
+            .iter()
+            .filter(|e| self.event_matches_filter(e))
+            .collect()
+    }
+
+    pub fn plugin_events(&self, plugin_id: &str) -> Vec<&EventEntry> {
+        self.events
+            .iter()
+            .filter(|e| e.plugin_id.as_deref() == Some(plugin_id))
+            .collect()
+    }
+
+    pub fn selected_plugin(&self) -> Option<&PluginRecord> {
+        self.plugins.get(self.selected)
+    }
+
+    fn open_plugin_detail(&mut self) {
+        let Some(plugin_id) = self.selected_plugin().map(|p| p.plugin_id.clone()) else {
+            return;
+        };
+        self.plugin_detail_open = true;
+        self.plugin_detail_plugin_id = Some(plugin_id.clone());
+        self.plugin_detail_panel = PluginDetailPanel::Overview;
+        self.status = format!("Opened plugin detail: {}", plugin_id);
+    }
+
+    fn event_matches_filter(&self, entry: &EventEntry) -> bool {
+        let ty = entry.event_type.as_str();
+        let custom = entry.event_type_custom.as_deref().unwrap_or("");
+        match self.events_filter_mode {
+            EventsFilterMode::All => true,
+            EventsFilterMode::HueInputs => {
+                matches!(
+                    ty,
+                    "device_button" | "device_rotary" | "entertainment_action_applied" | "plugin_command_result"
+                ) || matches!(
+                    custom,
+                    "device_button" | "device_rotary" | "entertainment_action_applied" | "plugin_command_result"
+                )
+            }
+            EventsFilterMode::Entertainment => {
+                ty == "entertainment_action_applied" || custom == "entertainment_action_applied"
+            }
+            EventsFilterMode::PluginMetrics => {
+                ty == "plugin_metrics" || custom == "plugin_metrics"
+            }
+        }
+    }
+
     fn active_items_len(&self) -> usize {
         match self.active_tab() {
             Tab::Devices => self.devices.len(),
             Tab::Scenes => self.scenes.len(),
             Tab::Areas => self.areas.len(),
             Tab::Automations => self.automations.len(),
-            Tab::Events => self.events.len(),
+            Tab::Events => self.filtered_events().len(),
             Tab::Users => self.users.len(),
             Tab::Plugins => self.plugins.len(),
         }
@@ -1260,6 +1399,130 @@ impl App {
     }
 }
 
+fn summarize_live_event_detail(event: &Value) -> Option<String> {
+    let event_type = event.get("type").and_then(Value::as_str).unwrap_or("unknown");
+    match event_type {
+        "device_button" => event
+            .get("event")
+            .and_then(Value::as_str)
+            .map(|v| format!("button_event={v}")),
+        "device_rotary" => {
+            let action = event.get("action").and_then(Value::as_str);
+            let direction = event.get("direction").and_then(Value::as_str);
+            let steps = event.get("steps").and_then(Value::as_i64);
+            let mut parts = Vec::new();
+            if let Some(v) = action {
+                parts.push(format!("action={v}"));
+            }
+            if let Some(v) = direction {
+                parts.push(format!("direction={v}"));
+            }
+            if let Some(v) = steps {
+                parts.push(format!("steps={v}"));
+            }
+            if parts.is_empty() {
+                None
+            } else {
+                Some(parts.join(" "))
+            }
+        }
+        "plugin_command_result" => {
+            let operation = event.get("operation").and_then(Value::as_str).unwrap_or("unknown");
+            let success = event.get("success").and_then(Value::as_bool).unwrap_or(false);
+            let error_code = event.get("error_code").and_then(Value::as_str);
+            let latency_ms = event.get("latency_ms").and_then(Value::as_u64);
+            let error = event.get("error").and_then(Value::as_str);
+
+            let mut parts = Vec::new();
+            parts.push(format!("op={operation}"));
+
+            if success {
+                parts.push("success".to_string());
+            } else {
+                parts.push("failed".to_string());
+                if let Some(code) = error_code {
+                    parts.push(format!("err_code={code}"));
+                }
+                if let Some(msg) = error {
+                    // Truncate long error messages
+                    let msg_short = if msg.len() > 30 {
+                        format!("{}...", &msg[..27])
+                    } else {
+                        msg.to_string()
+                    };
+                    parts.push(format!("msg={msg_short}"));
+                }
+            }
+
+            if let Some(ms) = latency_ms {
+                parts.push(format!("{ms}ms"));
+            }
+
+            if parts.is_empty() {
+                None
+            } else {
+                Some(parts.join(" "))
+            }
+        }
+        "plugin_metrics" => {
+            let fallback = event
+                .get("eventstream_fallback_refresh_total")
+                .and_then(Value::as_u64);
+            let applied = event
+                .get("eventstream_incremental_applied_total")
+                .and_then(Value::as_u64);
+            let ratio = event
+                .get("eventstream_fallback_ratio_pct")
+                .and_then(Value::as_f64);
+            let recent_fallback = event
+                .get("eventstream_fallback_refresh_recent")
+                .and_then(Value::as_u64);
+            let recent_applied = event
+                .get("eventstream_incremental_applied_recent")
+                .and_then(Value::as_u64);
+            let recent_ratio = event
+                .get("eventstream_fallback_ratio_recent_pct")
+                .and_then(Value::as_f64);
+
+            let mut parts = Vec::new();
+            if let (Some(f), Some(a), Some(r)) = (fallback, applied, ratio) {
+                parts.push(format!("fallback={f} incremental={a} fallback_ratio={r:.2}%"));
+            }
+            if let (Some(f), Some(a), Some(r)) = (recent_fallback, recent_applied, recent_ratio) {
+                parts.push(format!("recent_fallback={f} recent_incremental={a} recent_ratio={r:.2}%"));
+            }
+
+            if parts.is_empty() {
+                None
+            } else {
+                Some(parts.join(" | "))
+            }
+        }
+        "entertainment_action_applied" => {
+            let action = event.get("action").and_then(Value::as_str);
+            let config_id = event.get("config_id").and_then(Value::as_str);
+            let active = event.get("active").and_then(Value::as_bool);
+
+            let mut parts = Vec::new();
+            if let Some(v) = action {
+                parts.push(format!("action={v}"));
+            }
+            if let Some(v) = config_id {
+                parts.push(format!("config_id={v}"));
+            }
+            if let Some(v) = active {
+                parts.push(format!("active={v}"));
+            }
+            if parts.is_empty() {
+                None
+            } else {
+                Some(parts.join(" "))
+            }
+        }
+        _ => None,
+    }
+}
+
 fn normalize_label(value: &str) -> String {
     let mut spaced = String::with_capacity(value.len() + 4);
     let mut prev_lower = false;
@@ -1358,4 +1621,126 @@ fn snapshot_is_empty(snapshot: &CacheSnapshot) -> bool {
         && snapshot.events.is_empty()
         && snapshot.users.is_empty()
         && snapshot.plugins.is_empty()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn test_app() -> App {
+        App::new(
+            "http://127.0.0.1:8080".to_string(),
+            CacheStore::new(PathBuf::from("/tmp/hc-tui-tests")),
+        )
+    }
+
+    fn mk_event(event_type: &str) -> EventEntry {
+        EventEntry {
+            event_type: event_type.to_string(),
+            timestamp: "2026-03-21T00:00:00Z".to_string(),
+            plugin_id: None,
+            device_id: None,
+            rule_name: None,
+            event_type_custom: None,
+            event_detail: None,
+        }
+    }
+
+    fn make_admin(app: &mut App) {
+        app.current_user = Some(UserInfo {
+            id: "u1".to_string(),
+            username: "admin".to_string(),
+            role: Role::Admin,
+            created_at: "2026-03-21T00:00:00Z".to_string(),
+        });
+        app.authenticated = true;
+    }
+
+    #[test]
+    fn filtered_events_respects_selected_mode() {
+        let mut app = test_app();
+        app.events = vec![
+            mk_event("device_button"),
+            mk_event("device_rotary"),
+            mk_event("entertainment_action_applied"),
+            mk_event("plugin_metrics"),
+            mk_event("device_state_changed"),
+        ];
+
+        app.events_filter_mode = EventsFilterMode::All;
+        assert_eq!(app.filtered_events().len(), 5);
+
+        app.events_filter_mode = EventsFilterMode::HueInputs;
+        assert_eq!(app.filtered_events().len(), 3);
+
+        app.events_filter_mode = EventsFilterMode::Entertainment;
+        assert_eq!(app.filtered_events().len(), 1);
+
+        app.events_filter_mode = EventsFilterMode::PluginMetrics;
+        assert_eq!(app.filtered_events().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn events_filter_key_cycles_modes() {
+        let mut app = test_app();
+        app.tab = app
+            .tabs()
+            .iter()
+            .position(|t| matches!(t, Tab::Events))
+            .unwrap_or(4);
+        app.events_filter_mode = EventsFilterMode::All;
+
+        app.on_key_authenticated(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE))
+            .await;
+        assert_eq!(app.events_filter_mode, EventsFilterMode::HueInputs);
+
+        app.on_key_authenticated(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE))
+            .await;
+        assert_eq!(app.events_filter_mode, EventsFilterMode::Entertainment);
+
+        app.on_key_authenticated(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE))
+            .await;
+        assert_eq!(app.events_filter_mode, EventsFilterMode::PluginMetrics);
+
+        app.on_key_authenticated(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE))
+            .await;
+        assert_eq!(app.events_filter_mode, EventsFilterMode::All);
+    }
+
+    #[tokio::test]
+    async fn plugin_detail_key_flow_open_switch_close() {
+        let mut app = test_app();
+        make_admin(&mut app);
+        app.plugins.push(PluginRecord {
+            plugin_id: "plugin.hue".to_string(),
+            registered_at: "2026-03-21T00:00:00Z".to_string(),
+            status: "active".to_string(),
+        });
+        app.selected = 0;
+        app.tab = app
+            .tabs()
+            .iter()
+            .position(|t| matches!(t, Tab::Plugins))
+            .unwrap_or(0);
+
+        app.on_key_authenticated(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            .await;
+        assert!(app.plugin_detail_open);
+        assert_eq!(app.plugin_detail_plugin_id.as_deref(), Some("plugin.hue"));
+        assert_eq!(app.plugin_detail_panel, PluginDetailPanel::Overview);
+
+        app.on_key_authenticated(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE))
+            .await;
+        assert_eq!(app.plugin_detail_panel, PluginDetailPanel::Diagnostics);
+
+        app.on_key_authenticated(KeyEvent::new(KeyCode::Char('3'), KeyModifiers::NONE))
+            .await;
+        assert_eq!(app.plugin_detail_panel, PluginDetailPanel::Metrics);
+
+        app.on_key_authenticated(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+            .await;
+        assert!(!app.plugin_detail_open);
+        assert!(app.plugin_detail_plugin_id.is_none());
+    }
 }

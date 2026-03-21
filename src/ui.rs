@@ -283,6 +283,7 @@ fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
                     "device_button" => ("BTN", Color::LightBlue),
                     "device_rotary" => ("ROT", Color::Cyan),
                     "entertainment_action_applied" => ("ENT", Color::Magenta),
+                    "plugin_command_result" => ("CMD", Color::LightGreen),
                     "plugin_metrics" => ("MET", Color::Yellow),
                     _ => ("EVT", Color::DarkGray),
                 };
