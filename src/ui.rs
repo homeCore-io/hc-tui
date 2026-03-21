@@ -461,6 +461,13 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
         vec![Span::raw(clean_plugin_id(&device.plugin_id))],
     ));
 
+    // ZWave node location (from nodeInfo, distinct from the HC area field)
+    if let Some(loc) = device.attributes.get("location").and_then(|v| v.as_str()) {
+        if !loc.is_empty() {
+            lines.push(detail_row("ZW Location", vec![Span::styled(loc.to_string(), Style::default().fg(Color::DarkGray))]));
+        }
+    }
+
     // Last seen
     if !device.last_seen.is_empty() {
         lines.push(detail_row(
@@ -618,18 +625,20 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
         "on", "state", "open", "online", "locked",
         "battery", "battery_level", "battery_percent", "battery_low",
         "temperature", "temp", "humidity", "brightness",
-        "motion", "contact_open", "position",
+        "motion", "contact_open", "position", "location",
         "mode", "hvac_action", "target_temp",
         "power_w", "energy_kwh", "voltage", "current_a",
         "illuminance", "co2_ppm", "pressure", "uv_index",
         "smoke", "co", "water_detected", "tamper", "vibration",
         "color_rgb", "color_temp",
     ];
-    // ZWave internal properties: aliased values whose raw form sometimes leaks through,
-    // or write-echo values with no display value.
+    // ZWave internal / write-echo properties with no useful display value.
+    // Also includes raw nodeInfo keys that survived field_map (shouldn't normally
+    // appear, but guard against config mismatches).
     let zwave_noise = [
         "targetValue", "currentValue", "targetMode", "currentMode",
         "duration", "restorePrevious", "targetColor", "currentColor",
+        "nodeName", "nodeLocation",  // raw nodeInfo keys (mapped → name/location)
     ];
 
     let other_attrs: Vec<(&String, &serde_json::Value)> = device
