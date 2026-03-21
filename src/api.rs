@@ -309,6 +309,13 @@ impl HomeCoreClient {
         Self::parse_empty(resp).await
     }
 
+    pub async fn send_device_action(&self, device_id: &str, action: &str) -> Result<()> {
+        let path = format!("/devices/{device_id}/state");
+        let body = json!({ "action": action });
+        let resp = self.request_with_json(Method::PATCH, &path, body).await?;
+        Self::parse_empty(resp).await
+    }
+
     pub async fn update_device_metadata(
         &self,
         device_id: &str,

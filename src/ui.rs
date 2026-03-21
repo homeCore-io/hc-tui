@@ -114,7 +114,7 @@ fn draw_status_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
         hints = vec!["Tab field", "Space cycle role", "Enter save", "Esc cancel"];
     }
     if app.plugin_detail_open {
-        hints = vec!["1/2/3 or ←/→ panel", "b discover bridges", "r refresh", "Esc close", "q quit"];
+        hints = vec!["1/2/3 or ←/→ panel", "b discover bridges", "p pair bridges", "r refresh", "Esc close", "q quit"];
     }
 
     let hint_str = hints.join(" | ");
@@ -430,9 +430,30 @@ fn draw_plugin_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
                         .get("online")
                         .and_then(|v| v.as_bool())
                         .unwrap_or(d.available);
+                    let integration_state = d
+                        .attributes
+                        .get("integration_state")
+                        .and_then(|v| v.as_str())
+                        .or_else(|| {
+                            d.attributes
+                                .get("summary")
+                                .and_then(|s| s.get("integration_state"))
+                                .and_then(|v| v.as_str())
+                        })
+                        .unwrap_or("unknown");
+                    let pairing_status = d
+                        .attributes
+                        .get("pairing_status")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(match integration_state {
+                            "connected" => "paired",
+                            "auth_required" => "unpaired",
+                            "unreachable" => "unreachable",
+                            _ => "unknown",
+                        });
                     format!(
-                        "- {} | host={} | bridge_id={} | online={}",
-                        d.name, host, bridge_id, online
+                        "- {} | host={} | bridge_id={} | online={} | pairing={} | integration={}",
+                        d.name, host, bridge_id, online, pairing_status, integration_state
                     )
                 })
                 .collect::<Vec<_>>();

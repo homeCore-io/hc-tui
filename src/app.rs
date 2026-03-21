@@ -563,6 +563,9 @@ impl App {
                 KeyCode::Char('b') => {
                     self.discover_bridges_for_selected_plugin().await;
                 }
+                KeyCode::Char('p') => {
+                    self.pair_bridges_for_selected_plugin().await;
+                }
                 _ => {}
             }
             return;
@@ -988,6 +991,42 @@ impl App {
         }
     }
 
+    async fn pair_bridges_for_selected_plugin(&mut self) {
+        let Some(plugin_id) = self.plugin_detail_plugin_id.clone() else {
+            return;
+        };
+
+        let bridge_ids = self.selected_plugin_hue_bridge_ids(&plugin_id);
+
+        if bridge_ids.is_empty() {
+            self.error = Some("No Hue bridges found for selected plugin".to_string());
+            return;
+        }
+
+        let mut ok = 0usize;
+        let mut failed = Vec::new();
+        for device_id in bridge_ids {
+            match self.client.send_device_action(&device_id, "pair_bridge").await {
+                Ok(_) => ok += 1,
+                Err(err) => failed.push(format!("{device_id}: {err}")),
+            }
+        }
+
+        if failed.is_empty() {
+            self.status = format!(
+                "Pairing requested for {ok} bridge(s). Press Hue link button if needed."
+            );
+        } else {
+            self.error = Some(format!("Pairing request errors: {}", failed.join(" | ")));
+        }
+
+        if let Err(err) = self.refresh_all().await {
+            if self.error.is_none() {
+                self.error = Some(err.to_string());
+            }
+        }
+    }
+
     fn open_plugin_detail(&mut self) {
         let Some(plugin_id) = self.selected_plugin().map(|p| p.plugin_id.clone()) else {
             return;
@@ -996,6 +1035,21 @@ impl App {
         self.plugin_detail_plugin_id = Some(plugin_id.clone());
         self.plugin_detail_panel = PluginDetailPanel::Overview;
         self.status = format!("Opened plugin detail: {}", plugin_id);
+    }
+
+    fn selected_plugin_hue_bridge_ids(&self, plugin_id: &str) -> Vec<String> {
+        self.devices
+            .iter()
+            .filter(|d| {
+                d.plugin_id == plugin_id
+                    && d
+                        .attributes
+                        .get("kind")
+                        .and_then(|v| v.as_str())
+                        == Some("hue_bridge")
+            })
+            .map(|d| d.device_id.clone())
+            .collect::<Vec<_>>()
     }
 
     fn event_matches_filter(&self, entry: &EventEntry) -> bool {
@@ -1695,6 +1749,8 @@ fn snapshot_is_empty(snapshot: &CacheSnapshot) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::Map;
+    use serde_json::Value;
     use std::path::PathBuf;
 
     fn test_app() -> App {
@@ -1724,6 +1780,31 @@ mod tests {
             created_at: "2026-03-21T00:00:00Z".to_string(),
         });
         app.authenticated = true;
+    }
+
+    fn make_user(app: &mut App) {
+        app.current_user = Some(UserInfo {
+            id: "u2".to_string(),
+            username: "user".to_string(),
+            role: Role::User,
+            created_at: "2026-03-21T00:00:00Z".to_string(),
+        });
+        app.authenticated = true;
+    }
+
+    fn mk_device(device_id: &str, plugin_id: &str, kind: &str) -> DeviceState {
+        let mut attributes = Map::new();
+        attributes.insert("kind".to_string(), Value::String(kind.to_string()));
+
+        DeviceState {
+            device_id: device_id.to_string(),
+            name: device_id.to_string(),
+            plugin_id: plugin_id.to_string(),
+            area: None,
+            available: true,
+            attributes,
+            last_seen: "2026-03-21T00:00:00Z".to_string(),
+        }
     }
 
     #[test]
@@ -1820,5 +1901,49 @@ mod tests {
             .await;
         assert!(!app.plugin_detail_open);
         assert!(app.plugin_detail_plugin_id.is_none());
+    }
+
+    #[test]
+    fn selected_plugin_hue_bridge_ids_filters_by_plugin_and_kind() {
+        let mut app = test_app();
+        app.devices = vec![
+            mk_device("bridge-1", "plugin.hue", "hue_bridge"),
+            mk_device("bridge-2", "plugin.hue", "hue_bridge"),
+            mk_device("light-1", "plugin.hue", "light"),
+            mk_device("bridge-other", "plugin.other", "hue_bridge"),
+        ];
+
+        let ids = app.selected_plugin_hue_bridge_ids("plugin.hue");
+        assert_eq!(ids, vec!["bridge-1".to_string(), "bridge-2".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn pairing_key_shows_no_bridge_error_when_none_found() {
+        let mut app = test_app();
+        make_user(&mut app);
+        app.plugin_detail_open = true;
+        app.plugin_detail_plugin_id = Some("plugin.hue".to_string());
+        app.devices = vec![mk_device("light-1", "plugin.hue", "light")];
+
+        app.on_key_authenticated(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE))
+            .await;
+
+        assert_eq!(app.error.as_deref(), Some("No Hue bridges found for selected plugin"));
+    }
+
+    #[tokio::test]
+    async fn pairing_key_preserves_pairing_error_when_refresh_fails() {
+        let mut app = test_app();
+        make_user(&mut app);
+        app.plugin_detail_open = true;
+        app.plugin_detail_plugin_id = Some("plugin.hue".to_string());
+        app.devices = vec![mk_device("bridge-1", "plugin.hue", "hue_bridge")];
+
+        app.on_key_authenticated(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE))
+            .await;
+
+        let error = app.error.unwrap_or_default();
+        assert!(error.starts_with("Pairing request errors:"));
+        assert!(error.contains("bridge-1: not authenticated"));
     }
 }
