@@ -5,7 +5,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, Borders, Clear, Gauge, List, ListItem, Paragraph, Tabs, Wrap,
+        Block, Borders, Cell, Clear, Gauge, List, ListItem, Paragraph, Row, Table, Tabs, Wrap,
     },
     Frame,
 };
@@ -223,18 +223,17 @@ fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
         draw_dashboard(frame, app, area);
         return;
     }
+    if matches!(app.active_tab(), Tab::Scenes) {
+        draw_scenes_table(frame, app, area);
+        return;
+    }
     if matches!(app.active_tab(), Tab::Plugins) && app.plugin_detail_open {
         draw_plugin_detail(frame, app, area);
         return;
     }
 
     let items = match app.active_tab() {
-        Tab::Devices => Vec::new(),
-        Tab::Scenes => app
-            .scenes
-            .iter()
-            .map(|s| ListItem::new(format!("{} ({})", s.name, s.id)))
-            .collect::<Vec<_>>(),
+        Tab::Devices | Tab::Scenes => Vec::new(),
         Tab::Areas => app
             .areas
             .iter()
@@ -357,6 +356,80 @@ fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
         state.select(Some(app.selected));
     }
     frame.render_stateful_widget(list, area, &mut state);
+}
+
+fn draw_scenes_table(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let highlight = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+
+    let header_cells = ["  Scene", "Plugin", "Area / Room", "Status"]
+        .iter()
+        .map(|h| Cell::from(*h).style(
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        ));
+    let header = Row::new(header_cells).height(1).bottom_margin(0);
+
+    let rows: Vec<Row> = app
+        .scenes
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let is_sel = i == app.selected;
+
+            let plugin = s.plugin_id.as_deref()
+                .map(|p| p.trim_start_matches("plugin.").to_string())
+                .unwrap_or_else(|| "-".to_string());
+            let area_str = s.area.clone().unwrap_or_else(|| "-".to_string());
+
+            let (status_str, status_color) = match s.active {
+                Some(true)  => ("● Active",   Color::Green),
+                Some(false) => ("○ Inactive", Color::DarkGray),
+                None        => ("-",          Color::DarkGray),
+            };
+
+            if is_sel {
+                Row::new(vec![
+                    Cell::from(format!("  {}", s.name)).style(highlight),
+                    Cell::from(plugin).style(highlight),
+                    Cell::from(area_str).style(highlight),
+                    Cell::from(status_str).style(highlight),
+                ])
+            } else {
+                Row::new(vec![
+                    Cell::from(format!("  {}", s.name))
+                        .style(Style::default().fg(Color::White)),
+                    Cell::from(plugin)
+                        .style(Style::default().fg(Color::DarkGray)),
+                    Cell::from(area_str)
+                        .style(Style::default().fg(Color::Gray)),
+                    Cell::from(status_str)
+                        .style(Style::default().fg(status_color)),
+                ])
+            }
+        })
+        .collect();
+
+    let title = format!("Scenes [{}]", app.scenes.len());
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Min(30),
+            Constraint::Length(16),
+            Constraint::Length(20),
+            Constraint::Length(12),
+        ],
+    )
+    .header(header)
+    .block(Block::default().borders(Borders::ALL).title(title))
+    .row_highlight_style(highlight);
+
+    let mut state = ratatui::widgets::TableState::default();
+    if !app.scenes.is_empty() {
+        state.select(Some(app.selected));
+    }
+    frame.render_stateful_widget(table, area, &mut state);
 }
 
 fn draw_plugin_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
@@ -576,7 +649,7 @@ fn draw_device_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
     };
 
     let mode_label = if app.view_mode == DeviceViewMode::Grouped { "Grouped" } else { "Flat" };
-    let title = format!("Devices ({mode_label}) [{}]", app.devices.len());
+    let title = format!("Devices ({mode_label}) [{}]", app.visible_devices().len());
 
     let list = List::new(items).block(Block::default().borders(Borders::ALL).title(title));
 
@@ -586,6 +659,7 @@ fn draw_device_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
 }
 
 fn build_grouped_list(app: &App) -> (Vec<ListItem<'static>>, Option<usize>) {
+    let visible = app.visible_devices();
     let groups = app.grouped_devices();
     let mut items: Vec<ListItem<'static>> = Vec::new();
     let mut render_selected: Option<usize> = None;
@@ -604,11 +678,12 @@ fn build_grouped_list(app: &App) -> (Vec<ListItem<'static>>, Option<usize>) {
         render_idx += 1;
 
         for &dev_idx in indices {
-            let Some(device) = app.devices.get(dev_idx) else {
+            let Some(device) = visible.get(dev_idx) else {
                 flat_idx += 1;
                 render_idx += 1;
                 continue;
             };
+            let device = *device;
 
             let is_selected = flat_idx == app.selected;
             if is_selected {
@@ -625,13 +700,13 @@ fn build_grouped_list(app: &App) -> (Vec<ListItem<'static>>, Option<usize>) {
 }
 
 fn build_flat_list(app: &App) -> (Vec<ListItem<'static>>, Option<usize>) {
-    let items = app
-        .devices
+    let visible = app.visible_devices();
+    let items = visible
         .iter()
         .enumerate()
         .map(|(i, device)| device_list_row(app, device, i == app.selected, false))
         .collect();
-    let selected = if app.devices.is_empty() { None } else { Some(app.selected) };
+    let selected = if visible.is_empty() { None } else { Some(app.selected) };
     (items, selected)
 }
 

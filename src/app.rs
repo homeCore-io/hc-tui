@@ -709,11 +709,16 @@ impl App {
     }
 
     /// Returns devices grouped by area, sorted alphabetically. Unassigned devices last.
+    /// Devices that should appear in the Devices tab (scene devices are shown in Scenes tab).
+    pub fn visible_devices(&self) -> Vec<&DeviceState> {
+        self.devices.iter().filter(|d| !is_scene_device(d)).collect()
+    }
+
     pub fn grouped_devices(&self) -> Vec<(String, Vec<usize>)> {
         let mut map: std::collections::BTreeMap<String, Vec<usize>> =
             std::collections::BTreeMap::new();
         let mut unassigned: Vec<usize> = Vec::new();
-        for (i, device) in self.devices.iter().enumerate() {
+        for (i, device) in self.visible_devices().iter().enumerate() {
             match &device.area {
                 Some(area) if !area.is_empty() => {
                     map.entry(area.clone()).or_default().push(i);
@@ -730,20 +735,21 @@ impl App {
 
     /// Resolves `self.selected` to a device, accounting for view mode.
     pub fn selected_device(&self) -> Option<&DeviceState> {
+        let visible = self.visible_devices();
         if self.view_mode == DeviceViewMode::Grouped {
             let groups = self.grouped_devices();
             let mut flat = 0usize;
             for (_, indices) in &groups {
                 for &idx in indices {
                     if flat == self.selected {
-                        return self.devices.get(idx);
+                        return visible.get(idx).copied();
                     }
                     flat += 1;
                 }
             }
             None
         } else {
-            self.devices.get(self.selected)
+            visible.get(self.selected).copied()
         }
     }
 
@@ -1091,7 +1097,7 @@ impl App {
 
     fn active_items_len(&self) -> usize {
         match self.active_tab() {
-            Tab::Devices => self.devices.len(),
+            Tab::Devices => self.visible_devices().len(),
             Tab::Scenes => self.scenes.len(),
             Tab::Areas => self.areas.len(),
             Tab::Automations => self.automations.len(),
@@ -1521,21 +1527,31 @@ impl App {
     }
 }
 
+/// Returns true if this device is a hue_scene and should be excluded from the device list.
+pub fn is_scene_device(device: &DeviceState) -> bool {
+    device.attributes.get("kind").and_then(Value::as_str) == Some("hue_scene")
+}
+
 /// Extract hue scene devices from the device list and convert them to Scene entries.
-/// The display name is "{group_name}: {name}" when group_name is available.
 fn hue_scenes_from_devices(devices: &[DeviceState]) -> Vec<Scene> {
     devices
         .iter()
-        .filter(|d| d.attributes.get("kind").and_then(Value::as_str) == Some("hue_scene"))
+        .filter(|d| is_scene_device(d))
         .map(|d| {
-            let base_name = d.attributes.get("name")
+            let scene_name = d.attributes.get("name")
                 .and_then(Value::as_str)
-                .unwrap_or(&d.name);
-            let display_name = match d.attributes.get("group_name").and_then(Value::as_str) {
-                Some(group) => format!("{group}: {base_name}"),
-                None        => base_name.to_string(),
-            };
-            Scene { id: d.device_id.clone(), name: display_name }
+                .unwrap_or(&d.name)
+                .to_string();
+            let area = d.area.clone()
+                .or_else(|| d.attributes.get("group_name").and_then(Value::as_str).map(str::to_string));
+            let active = d.attributes.get("active").and_then(Value::as_bool);
+            Scene {
+                id:        d.device_id.clone(),
+                name:      scene_name,
+                plugin_id: Some(d.plugin_id.clone()),
+                area,
+                active,
+            }
         })
         .collect()
 }

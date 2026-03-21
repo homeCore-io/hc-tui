@@ -56,6 +56,13 @@ pub struct DeviceState {
 pub struct Scene {
     pub id: String,
     pub name: String,
+    /// Populated for device-backed (e.g. hue) scenes only.
+    #[serde(skip)]
+    pub plugin_id: Option<String>,
+    #[serde(skip)]
+    pub area: Option<String>,
+    #[serde(skip)]
+    pub active: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
