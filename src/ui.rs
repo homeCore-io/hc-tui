@@ -1,4 +1,4 @@
-use crate::app::{App, AreaEditor, DeviceEditField, DeviceViewMode, FocusField, LoginPhase, Tab, UserEditField, UserEditMode, UserEditor};
+use crate::app::{App, AreaEditor, DeviceEditField, DeviceViewMode, FocusField, LoginPhase, PluginDetailPanel, Tab, UserEditField, UserEditMode, UserEditor};
 use crate::api::DeviceState;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -89,6 +89,7 @@ fn draw_status_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
             hints.push("d delete");
         }
         Tab::Scenes => { hints.push("a activate"); }
+        Tab::Events => { hints.push("f filter"); }
         Tab::Areas => {
             hints.push("n new");
             hints.push("Enter rename");
@@ -111,6 +112,9 @@ fn draw_status_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
     }
     if app.user_editor.is_some() {
         hints = vec!["Tab field", "Space cycle role", "Enter save", "Esc cancel"];
+    }
+    if app.plugin_detail_open {
+        hints = vec!["1/2/3 panel", "Esc close", "r refresh", "q quit"];
     }
 
     let hint_str = hints.join(" | ");
@@ -219,6 +223,10 @@ fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
         draw_dashboard(frame, app, area);
         return;
     }
+    if matches!(app.active_tab(), Tab::Plugins) && app.plugin_detail_open {
+        draw_plugin_detail(frame, app, area);
+        return;
+    }
 
     let items = match app.active_tab() {
         Tab::Devices => Vec::new(),
@@ -256,7 +264,7 @@ fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
             })
             .collect::<Vec<_>>(),
         Tab::Events => app
-            .events
+            .filtered_events()
             .iter()
             .map(|e| {
                 let mut extra = String::new();
@@ -267,7 +275,22 @@ fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
                 } else if let Some(custom) = &e.event_type_custom {
                     extra = format!(" event={custom}");
                 }
-                ListItem::new(format!("{} | {}{}", e.timestamp, e.event_type, extra))
+                if let Some(detail) = &e.event_detail {
+                    extra.push_str(&format!(" detail={detail}"));
+                }
+
+                let (tag, tag_color) = match e.event_type.as_str() {
+                    "device_button" => ("BTN", Color::LightBlue),
+                    "device_rotary" => ("ROT", Color::Cyan),
+                    "entertainment_action_applied" => ("ENT", Color::Magenta),
+                    "plugin_metrics" => ("MET", Color::Yellow),
+                    _ => ("EVT", Color::DarkGray),
+                };
+
+                ListItem::new(Line::from(vec![
+                    Span::styled(format!("[{tag}] "), Style::default().fg(tag_color)),
+                    Span::raw(format!("{} | {}{}", e.timestamp, e.event_type, extra)),
+                ]))
             })
             .collect::<Vec<_>>(),
         Tab::Users => app
@@ -317,8 +340,13 @@ fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
         .fg(Color::Black)
         .bg(Color::Cyan)
         .add_modifier(Modifier::BOLD);
+    let title = match app.active_tab() {
+        Tab::Events => format!("Events [{}]", app.events_filter_mode.title()),
+        other => other.title().to_string(),
+    };
+
     let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(app.active_tab().title()))
+        .block(Block::default().borders(Borders::ALL).title(title))
         .highlight_style(highlight)
         .highlight_symbol(">> ");
 
@@ -327,6 +355,116 @@ fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
         state.select(Some(app.selected));
     }
     frame.render_stateful_widget(list, area, &mut state);
+}
+
+fn draw_plugin_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let Some(plugin_id) = app.plugin_detail_plugin_id.as_deref() else {
+        let msg = Paragraph::new("No plugin selected")
+            .block(Block::default().borders(Borders::ALL).title("Plugin Detail"));
+        frame.render_widget(msg, area);
+        return;
+    };
+
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(5)])
+        .split(area);
+
+    let panel_labels = [
+        PluginDetailPanel::Overview.title(),
+        PluginDetailPanel::Diagnostics.title(),
+        PluginDetailPanel::Metrics.title(),
+    ]
+    .into_iter()
+    .map(Line::from)
+    .collect::<Vec<_>>();
+
+    let panel_idx = match app.plugin_detail_panel {
+        PluginDetailPanel::Overview => 0,
+        PluginDetailPanel::Diagnostics => 1,
+        PluginDetailPanel::Metrics => 2,
+    };
+
+    let tabs = Tabs::new(panel_labels)
+        .select(panel_idx)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(format!("Plugin Detail: {}", plugin_id)),
+        )
+        .style(Style::default().fg(Color::Gray))
+        .highlight_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+    frame.render_widget(tabs, layout[0]);
+
+    match app.plugin_detail_panel {
+        PluginDetailPanel::Overview => {
+            let plugin = app.plugins.iter().find(|p| p.plugin_id == plugin_id);
+            let plugin_events = app.plugin_events(plugin_id);
+            let event_total = plugin_events.len();
+            let count_type = |name: &str| {
+                plugin_events
+                    .iter()
+                    .filter(|e| e.event_type == name)
+                    .count()
+            };
+            let button_events = count_type("device_button");
+            let rotary_events = count_type("device_rotary");
+            let entertainment_events = count_type("entertainment_action_applied");
+            let metrics_events = count_type("plugin_metrics");
+            let body = if let Some(p) = plugin {
+                format!(
+                    "plugin_id: {}\nstatus: {}\nregistered_at: {}\nws_connected: {}\n\nrecent_event_total: {}\nbutton_events: {}\nrotary_events: {}\nentertainment_events: {}\nmetrics_events: {}",
+                    p.plugin_id,
+                    p.status,
+                    p.registered_at,
+                    app.ws_connected,
+                    event_total,
+                    button_events,
+                    rotary_events,
+                    entertainment_events,
+                    metrics_events,
+                )
+            } else {
+                format!("Plugin '{}' is not present in current plugin list.", plugin_id)
+            };
+            let widget = Paragraph::new(body)
+                .block(Block::default().borders(Borders::ALL).title("Overview"))
+                .wrap(Wrap { trim: true });
+            frame.render_widget(widget, layout[1]);
+        }
+        PluginDetailPanel::Diagnostics => {
+            let rows = app
+                .plugin_events(plugin_id)
+                .into_iter()
+                .take(20)
+                .map(|e| {
+                    let detail = e.event_detail.as_deref().unwrap_or("");
+                    ListItem::new(format!("{} | {} {}", e.timestamp, e.event_type, detail))
+                })
+                .collect::<Vec<_>>();
+            let list = List::new(rows)
+                .block(Block::default().borders(Borders::ALL).title("Diagnostics Events"));
+            frame.render_widget(list, layout[1]);
+        }
+        PluginDetailPanel::Metrics => {
+            let latest = app
+                .plugin_events(plugin_id)
+                .into_iter()
+                .find(|e| e.event_type == "plugin_metrics");
+
+            let body = if let Some(m) = latest {
+                let detail = m.event_detail.as_deref().unwrap_or("no metric detail");
+                format!("timestamp: {}\n{}", m.timestamp, detail)
+            } else {
+                "No plugin_metrics event found for this plugin yet.".to_string()
+            };
+
+            let widget = Paragraph::new(body)
+                .block(Block::default().borders(Borders::ALL).title("Metrics Snapshot"))
+                .wrap(Wrap { trim: true });
+            frame.render_widget(widget, layout[1]);
+        }
+    }
 }
 
 fn draw_dashboard(frame: &mut Frame<'_>, app: &App, area: Rect) {
@@ -627,7 +765,7 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
             };
             lines.push(detail_row("Latch", vec![Span::styled(s, Style::default().fg(c))]));
         }
-        // Door open/closed sensor
+        // Door open/closed sensor — string variant (ZWave)
         if let Some(door) = device.attributes.get("door_status").and_then(|v| v.as_str()) {
             let (s, c) = if door == "closed" {
                 ("Closed", Color::Green)
@@ -636,7 +774,26 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
             };
             lines.push(detail_row("Door", vec![Span::styled(s, Style::default().fg(c))]));
         }
-        // Operation type: 1=Constant, 2=Timed
+        // Door open/closed sensor — bool variant (YoLink)
+        if let Some(door_open) = device.attributes.get("door_open").and_then(|v| v.as_bool()) {
+            let (s, c) = if door_open {
+                ("Open", Color::Yellow)
+            } else {
+                ("Closed", Color::Green)
+            };
+            lines.push(detail_row("Door", vec![Span::styled(s, Style::default().fg(c))]));
+        }
+        // Last alert (e.g. UnLockFailed, DoorOpenAlarm)
+        if let Some(alert) = device.attributes.get("last_alert").and_then(|v| v.as_str()) {
+            lines.push(detail_row("Last Alert", vec![Span::styled(alert.to_string(), Style::default().fg(Color::Yellow))]));
+        }
+        // Auto-lock timeout (YoLink attributes.autoLock)
+        if let Some(secs) = device.attributes.get("auto_lock_secs").and_then(|v| v.as_u64()) {
+            if secs > 0 {
+                lines.push(detail_row("Auto-lock", vec![Span::raw(format!("{secs}s"))]));
+            }
+        }
+        // Operation type: 1=Constant, 2=Timed (ZWave)
         if let Some(op_type) = device.attributes.get("lock_operation_type").and_then(|v| v.as_f64()) {
             let label = match op_type as u64 {
                 1 => "Constant",
@@ -741,8 +898,9 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
         "smoke", "co", "water_detected", "tamper", "vibration",
         "color_rgb", "color_temp",
         // Door lock physical sensors + config
-        "bolt_status", "latch_status", "door_status",
+        "bolt_status", "latch_status", "door_status", "door_open",
         "lock_operation_type", "lock_timeout_secs", "lock_auto_relock_secs",
+        "last_alert", "auto_lock_secs", "sound_level",
     ];
     // ZWave internal / write-echo properties with no useful display value.
     // Also includes raw nodeInfo keys that survived field_map (shouldn't normally
@@ -1100,7 +1258,7 @@ fn list_is_empty(app: &App) -> bool {
         Tab::Scenes => app.scenes.is_empty(),
         Tab::Areas => app.areas.is_empty(),
         Tab::Automations => app.automations.is_empty(),
-        Tab::Events => app.events.is_empty(),
+        Tab::Events => app.filtered_events().is_empty(),
         Tab::Users => app.users.is_empty(),
         Tab::Plugins => app.plugins.is_empty(),
     }
