@@ -330,7 +330,9 @@ impl App {
     pub async fn refresh_all(&mut self) -> Result<()> {
         self.status = "Refreshing...".to_string();
         self.devices = self.client.list_devices().await?;
-        self.scenes = self.client.list_scenes().await?;
+        let mut scenes = self.client.list_scenes().await?;
+        scenes.extend(hue_scenes_from_devices(&self.devices));
+        self.scenes = scenes;
         self.areas = self.client.list_areas().await?;
         self.automations = self.client.list_automations().await?;
         self.events = self.client.list_events(50).await?;
@@ -1494,9 +1496,20 @@ impl App {
         let Some(scene) = self.scenes.get(self.selected) else {
             return;
         };
-        match self.client.activate_scene(&scene.id).await {
+        let scene_id   = scene.id.clone();
+        let scene_name = scene.name.clone();
+        let is_device_scene = self.devices.iter().any(|d| {
+            d.device_id == scene_id
+                && d.attributes.get("kind").and_then(Value::as_str) == Some("hue_scene")
+        });
+        let result = if is_device_scene {
+            self.client.activate_device_scene(&scene_id).await
+        } else {
+            self.client.activate_scene(&scene_id).await
+        };
+        match result {
             Ok(_) => {
-                self.status = format!("Activated scene '{}'", scene.name);
+                self.status = format!("Activated scene '{scene_name}'");
                 if let Err(err) = self.refresh_all().await {
                     self.error = Some(err.to_string());
                 }
@@ -1506,6 +1519,25 @@ impl App {
             }
         }
     }
+}
+
+/// Extract hue scene devices from the device list and convert them to Scene entries.
+/// The display name is "{group_name}: {name}" when group_name is available.
+fn hue_scenes_from_devices(devices: &[DeviceState]) -> Vec<Scene> {
+    devices
+        .iter()
+        .filter(|d| d.attributes.get("kind").and_then(Value::as_str) == Some("hue_scene"))
+        .map(|d| {
+            let base_name = d.attributes.get("name")
+                .and_then(Value::as_str)
+                .unwrap_or(&d.name);
+            let display_name = match d.attributes.get("group_name").and_then(Value::as_str) {
+                Some(group) => format!("{group}: {base_name}"),
+                None        => base_name.to_string(),
+            };
+            Scene { id: d.device_id.clone(), name: display_name }
+        })
+        .collect()
 }
 
 fn summarize_live_event_detail(event: &Value) -> Option<String> {
@@ -1742,7 +1774,8 @@ pub async fn login_workflow_from_auth(
 
 async fn fetch_remote_snapshot(client: &HomeCoreClient, role: Role) -> Result<CacheSnapshot> {
     let devices = client.list_devices().await.unwrap_or_default();
-    let scenes = client.list_scenes().await.unwrap_or_default();
+    let mut scenes = client.list_scenes().await.unwrap_or_default();
+    scenes.extend(hue_scenes_from_devices(&devices));
     let areas = client.list_areas().await.unwrap_or_default();
     let automations = client.list_automations().await.unwrap_or_default();
     let events = client.list_events(50).await.unwrap_or_default();
