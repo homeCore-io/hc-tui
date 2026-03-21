@@ -1,0 +1,23 @@
+# HomeCore TUI configuration
+# Copy this file to config/config.toml and fill in your values.
+# config/config.toml is gitignored — it may contain credentials.
+
+[server]
+# HomeCore API base URL (without /api/v1)
+base_url = "http://127.0.0.1:8080"
+
+[cache]
+# Directory for local state snapshots and session token
+dir = "./cache"
+
+[session]
+# Save the JWT to disk after login and reuse it on the next startup.
+# While the token is valid the login screen is skipped entirely.
+# Set to false to require credentials on every startup.
+persist_token = true
+
+# Optional: log in automatically when the saved token is missing or expired.
+# Remove this section to show the login screen instead.
+# [auto_login]
+# username = "admin"
+# password = "your-password-here"

@@ -22,6 +22,7 @@ target
 
 
 cache/
+config/config.toml
 # Added by cargo
 
 /target

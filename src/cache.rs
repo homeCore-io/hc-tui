@@ -3,6 +3,17 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+// ---------------------------------------------------------------------------
+// Session persistence
+// ---------------------------------------------------------------------------
+
+/// A saved JWT session — stored at `{cache_dir}/session.json`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SavedSession {
+    pub username: String,
+    pub token: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CacheSnapshot {
     pub devices: Vec<DeviceState>,
@@ -55,6 +66,38 @@ impl CacheStore {
             users: self.read_json_or_default(dir.join("users.json")).await?,
             plugins: self.read_json_or_default(dir.join("plugins.json")).await?,
         })
+    }
+
+    // ── Session token ─────────────────────────────────────────────────────────
+
+    pub async fn save_session(&self, username: &str, token: &str) -> Result<()> {
+        tokio::fs::create_dir_all(&self.root)
+            .await
+            .with_context(|| format!("failed to create cache dir {}", self.root.display()))?;
+        let session = SavedSession { username: username.to_string(), token: token.to_string() };
+        self.write_json(self.root.join("session.json"), &session).await
+    }
+
+    pub async fn load_session(&self) -> Result<Option<SavedSession>> {
+        let path = self.root.join("session.json");
+        if !path.exists() {
+            return Ok(None);
+        }
+        let bytes = tokio::fs::read(&path)
+            .await
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        let session: SavedSession = serde_json::from_slice(&bytes)
+            .with_context(|| format!("failed to parse {}", path.display()))?;
+        Ok(Some(session))
+    }
+
+    #[allow(dead_code)]
+    pub async fn clear_session(&self) -> Result<()> {
+        let path = self.root.join("session.json");
+        if path.exists() {
+            tokio::fs::remove_file(&path).await?;
+        }
+        Ok(())
     }
 
     fn user_dir(&self, username: &str) -> PathBuf {

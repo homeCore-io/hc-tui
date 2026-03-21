@@ -7,7 +7,6 @@ use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use serde_json::Value;
 use std::cmp::min;
-use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FocusField {
@@ -141,10 +140,10 @@ pub enum LoginPhase {
 }
 
 impl App {
-    pub fn new(base_url: String, cache_dir: PathBuf) -> Self {
+    pub fn new(base_url: String, cache: CacheStore) -> Self {
         Self {
             client: HomeCoreClient::new(base_url),
-            cache: CacheStore::new(cache_dir),
+            cache,
             username: String::new(),
             password: String::new(),
             focus: FocusField::Username,
@@ -252,6 +251,36 @@ impl App {
         self.login_in_progress = false;
         self.error = Some(error);
         self.status = "Authentication failed".to_string();
+    }
+
+    /// Called before the event loop when auto-login is firing in the background.
+    pub fn begin_auto_login(&mut self, username: String) {
+        self.login_in_progress = true;
+        self.login_animation_step = 0;
+        self.login_phase = LoginPhase::Authenticating;
+        self.status = format!("Auto-logging in as {}…", username);
+    }
+
+    /// Pre-fill the username field on the login screen (focus moves to password).
+    #[allow(dead_code)]
+    pub fn pre_fill_username(&mut self, username: String) {
+        self.username = username;
+        self.focus = FocusField::Password;
+        self.status = "Enter password and press Enter".to_string();
+    }
+
+    /// Validate a saved JWT token.  Returns a `LoginWorkflowResult` when the
+    /// token is still valid; returns `None` if the server rejects it.
+    pub async fn try_restore_session(
+        client: HomeCoreClient,
+        cache: CacheStore,
+        token: String,
+    ) -> Option<LoginWorkflowResult> {
+        let mut c = client.clone();
+        c.set_token(token.clone());
+        let user = c.me().await.ok()?;
+        let auth = LoginResponse { token, user };
+        login_workflow_from_auth(c, cache, auth).await.ok()
     }
 
     pub async fn refresh_all(&mut self) -> Result<()> {

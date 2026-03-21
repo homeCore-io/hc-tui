@@ -1,19 +1,22 @@
 mod api;
 mod app;
 mod cache;
+mod config;
 mod ui;
 mod ws;
 
 use anyhow::Result;
 use app::{login_workflow_from_auth, App, LoginWorkflowResult};
+use cache::CacheStore;
 use clap::Parser;
+use config::Config;
 use crossterm::{
     event::{self, Event},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
-use std::{io, time::Duration};
+use std::{io, path::PathBuf, time::Duration};
 use tokio::sync::mpsc;
 use ws::{spawn_events_stream, WsAppMsg};
 
@@ -25,21 +28,56 @@ enum AsyncMsg {
 #[derive(Debug, Parser)]
 #[command(name = "hc-tui", about = "Terminal UI client for HomeCore")]
 struct Args {
-    /// HomeCore API base URL (without /api/v1)
-    #[arg(long, default_value = "http://127.0.0.1:8080")]
-    base_url: String,
-    /// Local cache directory for HomeCore state/config snapshots
-    #[arg(long, default_value = "./cache")]
-    cache_dir: std::path::PathBuf,
+    /// Path to config file
+    #[arg(long, default_value = "config/config.toml")]
+    config: PathBuf,
+    /// HomeCore API base URL — overrides config file value
+    #[arg(long)]
+    base_url: Option<String>,
+    /// Local cache directory — overrides config file value
+    #[arg(long)]
+    cache_dir: Option<PathBuf>,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    let mut terminal = setup_terminal()?;
-    let mut app = App::new(args.base_url, args.cache_dir);
 
-    let run_result = run_app(&mut terminal, &mut app).await;
+    // Load config file (optional; defaults apply if missing)
+    let cfg = Config::load(&args.config)?;
+
+    // CLI overrides take priority over config file
+    let base_url = args.base_url.unwrap_or(cfg.server.base_url);
+    let cache_dir = args.cache_dir.unwrap_or_else(|| PathBuf::from(&cfg.cache.dir));
+    let persist_token = cfg.session.persist_token;
+    let auto_login = cfg.auto_login;
+
+    let cache = CacheStore::new(cache_dir);
+
+    // Try to restore a previously saved session token
+    let restored: Option<LoginWorkflowResult> = if persist_token {
+        if let Ok(Some(saved)) = cache.load_session().await {
+            let client = api::HomeCoreClient::new(base_url.clone());
+            App::try_restore_session(client, cache.clone(), saved.token).await
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let mut terminal = setup_terminal()?;
+    let mut app = App::new(base_url, cache);
+
+    if let Some(result) = restored {
+        // Token is valid — skip login screen entirely
+        app.apply_login_success(result);
+    } else if let Some(ref al) = auto_login {
+        // Pre-fill username; spawn auto-login in the background
+        app.begin_auto_login(al.username.clone());
+    }
+
+    let run_result = run_app(&mut terminal, &mut app, auto_login, persist_token).await;
     restore_terminal(&mut terminal)?;
 
     if let Err(err) = run_result {
@@ -51,10 +89,21 @@ async fn main() -> Result<()> {
 async fn run_app(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut App,
+    auto_login: Option<config::AutoLoginConfig>,
+    persist_token: bool,
 ) -> Result<()> {
     let (ws_tx, mut ws_rx) = mpsc::unbounded_channel::<WsAppMsg>();
     let (async_tx, mut async_rx) = mpsc::unbounded_channel::<AsyncMsg>();
     let mut ws_started = false;
+    let mut auto_login_fired = false;
+
+    // If already authenticated (restored session), start WS immediately
+    if app.authenticated {
+        if let Some(token) = app.ws_token() {
+            spawn_events_stream(app.ws_endpoint(), token, ws_tx.clone());
+            ws_started = true;
+        }
+    }
 
     loop {
         app.tick_login_animation();
@@ -62,6 +111,30 @@ async fn run_app(
 
         if app.should_quit {
             break;
+        }
+
+        // Fire auto-login on first iteration if configured and not yet authenticated
+        if !app.authenticated && !auto_login_fired {
+            if let Some(ref al) = auto_login {
+                auto_login_fired = true;
+                let username = al.username.clone();
+                let password = al.password.clone();
+                let tx = async_tx.clone();
+                let client = app.client.clone();
+                let cache = app.cache.clone();
+                tokio::spawn(async move {
+                    let result = match client.login(&username, &password).await {
+                        Ok(auth) => {
+                            let _ = tx.send(AsyncMsg::LoginPhaseSynthesizing);
+                            login_workflow_from_auth(client, cache, auth)
+                                .await
+                                .map_err(|e| e.to_string())
+                        }
+                        Err(e) => Err(e.to_string()),
+                    };
+                    let _ = tx.send(AsyncMsg::LoginFinished(result));
+                });
+            }
         }
 
         while let Ok(msg) = ws_rx.try_recv() {
@@ -75,6 +148,13 @@ async fn run_app(
         while let Ok(msg) = async_rx.try_recv() {
             match msg {
                 AsyncMsg::LoginFinished(Ok(result)) => {
+                    // Save the session token before applying the result
+                    if persist_token {
+                        let _ = app
+                            .cache
+                            .save_session(&result.auth.user.username, &result.auth.token)
+                            .await;
+                    }
                     app.apply_login_success(result);
                     if app.authenticated && !ws_started {
                         if let Some(token) = app.ws_token() {
@@ -118,6 +198,9 @@ async fn run_app(
             }
         }
     }
+
+    // Clear the persisted session on clean exit (Esc/q) only if the user
+    // explicitly logged out; for now we keep it so next startup is seamless.
     Ok(())
 }
 
