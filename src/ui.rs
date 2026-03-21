@@ -570,6 +570,15 @@ fn device_list_row(app: &App, device: &DeviceState, is_selected: bool, indent: b
     if let Some(h) = App::device_humidity(device) {
         suffix.push_str(&format!(" {h:.0}%"));
     }
+    // Timer countdown suffix
+    if device.plugin_id == "core.timer" {
+        let timer_state = device.attributes.get("state").and_then(|v| v.as_str()).unwrap_or("idle");
+        if matches!(timer_state, "running" | "paused") {
+            let remaining_ms = device.attributes.get("remaining_ms").and_then(|v| v.as_u64()).unwrap_or(0);
+            let icon = if timer_state == "running" { "▶" } else { "⏸" };
+            suffix.push_str(&format!(" {icon} {}", format_duration_ms(remaining_ms)));
+        }
+    }
 
     if is_selected {
         let sel_style = Style::default()
@@ -680,6 +689,75 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
     }
 
     lines.push(Line::from(""));
+
+    // Timer detail (core.timer devices)
+    if device.plugin_id == "core.timer" {
+        let timer_state = device.attributes.get("state").and_then(|v| v.as_str()).unwrap_or("idle");
+        let duration_ms = device.attributes.get("duration_ms").and_then(|v| v.as_u64()).unwrap_or(0);
+        let remaining_ms = device.attributes.get("remaining_ms").and_then(|v| v.as_u64()).unwrap_or(0);
+        let repeat = device.attributes.get("repeat").and_then(|v| v.as_bool()).unwrap_or(false);
+
+        let state_color = match timer_state {
+            "running"   => Color::Green,
+            "paused"    => Color::Yellow,
+            "fired"     => Color::Cyan,
+            "cancelled" => Color::DarkGray,
+            _           => Color::DarkGray,
+        };
+        lines.push(detail_row(
+            "Timer State",
+            vec![Span::styled(
+                normalize_label(timer_state),
+                Style::default().fg(state_color).add_modifier(Modifier::BOLD),
+            )],
+        ));
+
+        if duration_ms > 0 {
+            lines.push(detail_row("Duration", vec![Span::raw(format_duration_ms(duration_ms))]));
+        }
+
+        if matches!(timer_state, "running" | "paused") && duration_ms > 0 {
+            let progress = 1.0 - (remaining_ms as f64 / duration_ms as f64).clamp(0.0, 1.0);
+            let bar = make_bar(progress, 10);
+            lines.push(detail_row(
+                "Remaining",
+                vec![
+                    Span::styled(
+                        format!("{} ", format_duration_ms(remaining_ms)),
+                        Style::default().fg(state_color),
+                    ),
+                    Span::styled(bar, Style::default().fg(state_color)),
+                ],
+            ));
+        }
+
+        if repeat {
+            lines.push(detail_row("Repeat", vec![Span::styled("Yes", Style::default().fg(Color::Yellow))]));
+        }
+
+        if let Some(lbl) = device.attributes.get("label").and_then(|v| v.as_str()) {
+            if !lbl.is_empty() {
+                lines.push(detail_row("Label", vec![Span::raw(lbl.to_string())]));
+            }
+        }
+
+        if let Some(started) = device.attributes.get("started_at").and_then(|v| v.as_str()) {
+            lines.push(detail_row(
+                "Started",
+                vec![Span::styled(started.to_string(), Style::default().fg(Color::DarkGray))],
+            ));
+        }
+
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "Commands: start {duration_ms:N}  pause  resume  cancel  restart",
+            Style::default().fg(Color::DarkGray),
+        )));
+        lines.push(Line::from(Span::styled(
+            "Via: PATCH /api/v1/devices/{id}/state",
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
 
     // Battery
     if let Some(battery) = App::device_battery(device) {
@@ -902,6 +980,8 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
         "bolt_status", "latch_status", "door_status", "door_open",
         "lock_operation_type", "lock_timeout_secs", "lock_auto_relock_secs",
         "last_alert", "auto_lock_secs", "sound_level",
+        // Timer device attributes
+        "duration_ms", "remaining_ms", "repeat", "started_at", "label",
     ];
     // ZWave internal / write-echo properties with no useful display value.
     // Also includes raw nodeInfo keys that survived field_map (shouldn't normally
@@ -1191,6 +1271,20 @@ fn make_bar(ratio: f64, width: usize) -> String {
     let filled = (ratio.clamp(0.0, 1.0) * width as f64).round() as usize;
     let empty = width.saturating_sub(filled);
     format!("[{}{}]", "█".repeat(filled), "░".repeat(empty))
+}
+
+fn format_duration_ms(ms: u64) -> String {
+    let total_secs = ms / 1000;
+    let hours = total_secs / 3600;
+    let mins = (total_secs % 3600) / 60;
+    let secs = total_secs % 60;
+    if hours > 0 {
+        format!("{hours}h {mins:02}m {secs:02}s")
+    } else if mins > 0 {
+        format!("{mins}:{secs:02}")
+    } else {
+        format!("0:{secs:02}")
+    }
 }
 
 fn format_timestamp(ts: &str) -> String {
