@@ -953,7 +953,12 @@ impl App {
         if let Some(online) = attrs.get("online").and_then(|v| v.as_bool()) {
             return if online { "Online".to_string() } else { "Offline".to_string() };
         }
-        "Unknown".to_string()
+        // Occupancy sensor (Lutron occupancy groups)
+        if let Some(occupied) = attrs.get("occupied").and_then(|v| v.as_bool()) {
+            return if occupied { "Occupied".to_string() } else { "Vacant".to_string() };
+        }
+        // No recognisable state — device is read-only or state not yet received
+        "—".to_string()
     }
 
     pub fn filtered_events(&self) -> Vec<&EventEntry> {
@@ -1513,12 +1518,15 @@ impl App {
         };
         let scene_id   = scene.id.clone();
         let scene_name = scene.name.clone();
-        let is_device_scene = self.devices.iter().any(|d| {
+        let is_hue_scene = self.devices.iter().any(|d| {
             d.device_id == scene_id
                 && d.attributes.get("kind").and_then(Value::as_str) == Some("hue_scene")
         });
-        let result = if is_device_scene {
+        let is_lutron_scene = scene_id.starts_with("lutron_scene_");
+        let result = if is_hue_scene {
             self.client.activate_device_scene(&scene_id).await
+        } else if is_lutron_scene {
+            self.client.activate_lutron_device_scene(&scene_id).await
         } else {
             self.client.activate_scene(&scene_id).await
         };
@@ -1536,9 +1544,15 @@ impl App {
     }
 }
 
-/// Returns true if this device is a hue_scene and should be excluded from the device list.
+/// Returns true if this device is a scene and should be excluded from the device list.
+/// Scenes are shown in the Scenes tab instead.
 pub fn is_scene_device(device: &DeviceState) -> bool {
-    device.attributes.get("kind").and_then(Value::as_str) == Some("hue_scene")
+    // Hue scenes have a kind attribute set by hc-hue
+    if device.attributes.get("kind").and_then(Value::as_str) == Some("hue_scene") {
+        return true;
+    }
+    // Lutron scene devices: phantom buttons, keypad phantom buttons, etc.
+    device.device_id.starts_with("lutron_scene_")
 }
 
 /// Extract hue scene devices from the device list and convert them to Scene entries.

@@ -1415,9 +1415,9 @@ fn status_color(status: &str, available: bool) -> Color {
         return Color::DarkGray;
     }
     match status {
-        "On" | "Open" | "Unlocked" | "Online" => Color::Green,
-        "Off" | "Closed" | "Locked" | "Offline" => Color::Red,
-        "Unknown" => Color::DarkGray,
+        "On" | "Open" | "Unlocked" | "Online" | "Occupied" => Color::Green,
+        "Off" | "Closed" | "Locked" | "Offline" | "Vacant" => Color::Red,
+        "Unknown" | "—" => Color::DarkGray,
         _ => Color::White,
     }
 }

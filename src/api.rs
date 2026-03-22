@@ -302,6 +302,13 @@ impl HomeCoreClient {
         Self::parse_empty(resp).await
     }
 
+    pub async fn activate_lutron_device_scene(&self, device_id: &str) -> Result<()> {
+        let path = format!("/devices/{device_id}/state");
+        let body = json!({ "activate": true });
+        let resp = self.request_with_json(Method::PATCH, &path, body).await?;
+        Self::parse_empty(resp).await
+    }
+
     pub async fn set_device_on(&self, device_id: &str, on: bool) -> Result<()> {
         let path = format!("/devices/{device_id}/state");
         let body = json!({ "on": on });
