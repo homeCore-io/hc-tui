@@ -1,5 +1,6 @@
 use crate::app::{App, AreaEditor, DeviceEditField, DeviceViewMode, FocusField, LoginPhase, PluginDetailPanel, Tab, UserEditField, UserEditMode, UserEditor};
 use crate::api::DeviceState;
+use chrono::Utc;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -739,7 +740,7 @@ fn device_list_row(app: &App, device: &DeviceState, is_selected: bool, indent: b
     if device.plugin_id == "core.timer" {
         let timer_state = device.attributes.get("state").and_then(|v| v.as_str()).unwrap_or("idle");
         if matches!(timer_state, "running" | "paused") {
-            let remaining_ms = device.attributes.get("remaining_secs").and_then(|v| v.as_u64()).unwrap_or(0) * 1000;
+            let remaining_ms = timer_remaining_secs(device) * 1000;
             let icon = if timer_state == "running" { "▶" } else { "⏸" };
             suffix.push_str(&format!(" {icon} {}", format_duration_ms(remaining_ms)));
         }
@@ -859,13 +860,13 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
     if device.plugin_id == "core.timer" {
         let timer_state = device.attributes.get("state").and_then(|v| v.as_str()).unwrap_or("idle");
         let duration_ms = device.attributes.get("duration_secs").and_then(|v| v.as_u64()).unwrap_or(0) * 1000;
-        let remaining_ms = device.attributes.get("remaining_secs").and_then(|v| v.as_u64()).unwrap_or(0) * 1000;
+        let remaining_ms = timer_remaining_secs(device) * 1000;
         let repeat = device.attributes.get("repeat").and_then(|v| v.as_bool()).unwrap_or(false);
 
         let state_color = match timer_state {
             "running"   => Color::Green,
             "paused"    => Color::Yellow,
-            "fired"     => Color::Cyan,
+            "finished"  => Color::Cyan,
             "cancelled" => Color::DarkGray,
             _           => Color::DarkGray,
         };
@@ -1450,6 +1451,27 @@ fn format_duration_ms(ms: u64) -> String {
     } else {
         format!("0:{secs:02}")
     }
+}
+
+/// Compute a running timer's remaining seconds locally from started_at + duration_secs
+/// so the countdown ticks on every redraw without a network request.
+/// For paused/idle/finished timers falls back to the stored remaining_secs.
+fn timer_remaining_secs(device: &DeviceState) -> u64 {
+    let is_running = device.attributes.get("state").and_then(|v| v.as_str()) == Some("running");
+    if is_running {
+        let duration = device.attributes.get("duration_secs").and_then(|v| v.as_u64()).unwrap_or(0);
+        let started_at = device
+            .attributes
+            .get("started_at")
+            .and_then(|v| v.as_str())
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.with_timezone(&Utc));
+        if let Some(started) = started_at {
+            let elapsed = (Utc::now() - started).num_seconds().max(0) as u64;
+            return duration.saturating_sub(elapsed);
+        }
+    }
+    device.attributes.get("remaining_secs").and_then(|v| v.as_u64()).unwrap_or(0)
 }
 
 fn format_timestamp(ts: &str) -> String {
