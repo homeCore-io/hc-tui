@@ -316,6 +316,13 @@ impl HomeCoreClient {
         Self::parse_empty(resp).await
     }
 
+    pub async fn set_device_brightness_pct(&self, device_id: &str, brightness: f64) -> Result<()> {
+        let path = format!("/devices/{device_id}/state");
+        let body = json!({ "brightness_pct": brightness });
+        let resp = self.request_with_json(Method::PATCH, &path, body).await?;
+        Self::parse_empty(resp).await
+    }
+
     pub async fn set_device_locked(&self, device_id: &str, locked: bool) -> Result<()> {
         let path = format!("/devices/{device_id}/state");
         let body = json!({ "locked": locked });

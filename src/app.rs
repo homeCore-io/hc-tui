@@ -912,8 +912,12 @@ impl App {
         if let Some(state) = attrs.get("state").and_then(|v| v.as_str()) {
             return normalize_label(state);
         }
-        // Dimmer — derive on/off from brightness (ZWave CC 38, no explicit `on`)
-        if let Some(b) = attrs.get("brightness").and_then(|v| v.as_f64()) {
+        // Dimmer — derive on/off from brightness_pct (Hue) or brightness (ZWave CC 38)
+        if let Some(b) = attrs
+            .get("brightness_pct")
+            .or_else(|| attrs.get("brightness"))
+            .and_then(|v| v.as_f64())
+        {
             return if b > 0.0 { "On".to_string() } else { "Off".to_string() };
         }
         // Contact sensor (open/closed bool)
@@ -1117,47 +1121,59 @@ impl App {
     }
 
     async fn toggle_selected_device(&mut self) {
-        let (device_id, current_on) = {
+        let (device_id, device_name, current_on) = {
             let Some(device) = self.selected_device() else { return };
             let on = device.attributes.get("on").and_then(|v| v.as_bool()).unwrap_or(false);
-            (device.device_id.clone(), on)
+            (device.device_id.clone(), device.name.clone(), on)
         };
         match self.client.set_device_on(&device_id, !current_on).await {
-            Ok(_) => self.status = format!("Toggled {} → on={}", device_id, !current_on),
+            Ok(_) => self.status = format!("{} → {}", device_name, if !current_on { "On" } else { "Off" }),
             Err(err) => self.error = Some(err.to_string()),
         }
     }
 
     async fn adjust_brightness(&mut self, direction: i64) {
-        let (device_id, raw) = {
+        let (device_id, device_name, raw_pct, raw_abs) = {
             let Some(device) = self.selected_device() else { return };
-            let raw = device.attributes.get("brightness").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            (device.device_id.clone(), raw)
+            let pct = device.attributes.get("brightness_pct").and_then(|v| v.as_f64());
+            let abs = device.attributes.get("brightness").and_then(|v| v.as_f64());
+            (device.device_id.clone(), device.name.clone(), pct, abs)
         };
-        // Determine scale and step (10% of range)
-        let (max, step) = if raw <= 1.0 && raw >= 0.0 {
-            (1.0_f64, 0.1)
-        } else if raw <= 100.0 {
-            (100.0_f64, 10.0)
+
+        if let Some(raw) = raw_pct {
+            // Hue-style 0–100% brightness
+            let new_val = ((raw + direction as f64 * 10.0).clamp(0.0, 100.0) * 10.0).round() / 10.0;
+            match self.client.set_device_brightness_pct(&device_id, new_val).await {
+                Ok(_) => self.status = format!("{device_name} brightness → {new_val:.0}%"),
+                Err(err) => self.error = Some(err.to_string()),
+            }
         } else {
-            (255.0_f64, 25.0)
-        };
-        let new_val = ((raw + direction as f64 * step).clamp(0.0, max) * 10.0).round() / 10.0;
-        let new_val_i = new_val as i64;
-        match self.client.set_device_brightness(&device_id, new_val_i).await {
-            Ok(_) => self.status = format!("Brightness → {new_val_i}"),
-            Err(err) => self.error = Some(err.to_string()),
+            // ZWave / generic 0–255 or 0.0–1.0 brightness
+            let raw = raw_abs.unwrap_or(0.0);
+            let (max, step) = if raw <= 1.0 {
+                (1.0_f64, 0.1)
+            } else if raw <= 100.0 {
+                (100.0_f64, 10.0)
+            } else {
+                (255.0_f64, 25.0)
+            };
+            let new_val = ((raw + direction as f64 * step).clamp(0.0, max) * 10.0).round() / 10.0;
+            let new_val_i = new_val as i64;
+            match self.client.set_device_brightness(&device_id, new_val_i).await {
+                Ok(_) => self.status = format!("{device_name} brightness → {new_val_i}"),
+                Err(err) => self.error = Some(err.to_string()),
+            }
         }
     }
 
     async fn lock_device(&mut self, locked: bool) {
-        let device_id = {
+        let (device_id, device_name) = {
             let Some(device) = self.selected_device() else { return };
-            device.device_id.clone()
+            (device.device_id.clone(), device.name.clone())
         };
         match self.client.set_device_locked(&device_id, locked).await {
             Ok(_) => {
-                self.status = format!("{} {}", if locked { "Locked" } else { "Unlocked" }, device_id);
+                self.status = format!("{} → {}", device_name, if locked { "Locked" } else { "Unlocked" });
             }
             Err(err) => self.error = Some(err.to_string()),
         }
@@ -1166,22 +1182,23 @@ impl App {
     /// Space bar: toggle lock state for lock devices, or on/off for switches.
     async fn toggle_lock_or_switch(&mut self) {
         let Some(device) = self.selected_device() else { return };
-        let device_id = device.device_id.clone();
+        let device_id   = device.device_id.clone();
+        let device_name = device.name.clone();
 
         if let Some(locked) = Self::device_lock_state(device) {
             let new_locked = !locked;
             match self.client.set_device_locked(&device_id, new_locked).await {
                 Ok(_) => self.status = format!(
-                    "{} {}",
-                    if new_locked { "Locked" } else { "Unlocked" },
-                    device_id
+                    "{} → {}",
+                    device_name,
+                    if new_locked { "Locked" } else { "Unlocked" }
                 ),
                 Err(err) => self.error = Some(err.to_string()),
             }
         } else {
             let on = device.attributes.get("on").and_then(|v| v.as_bool()).unwrap_or(false);
             match self.client.set_device_on(&device_id, !on).await {
-                Ok(_) => self.status = format!("Toggled {} → on={}", device_id, !on),
+                Ok(_) => self.status = format!("{} → {}", device_name, if !on { "On" } else { "Off" }),
                 Err(err) => self.error = Some(err.to_string()),
             }
         }
