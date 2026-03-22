@@ -457,6 +457,9 @@ impl App {
             events: self.events.clone(),
             users: self.users.clone(),
             plugins: self.plugins.clone(),
+            switches: self.switches.clone(),
+            timers: self.timers.clone(),
+            modes: self.modes.clone(),
         }
     }
 
@@ -468,6 +471,9 @@ impl App {
         self.events = snapshot.events;
         self.users = snapshot.users;
         self.plugins = snapshot.plugins;
+        self.switches = snapshot.switches;
+        self.timers = snapshot.timers;
+        self.modes = snapshot.modes;
         self.clamp_selection();
     }
 
@@ -2165,6 +2171,9 @@ async fn fetch_remote_snapshot(client: &HomeCoreClient, role: Role) -> Result<Ca
     let areas = client.list_areas().await.unwrap_or_default();
     let automations = client.list_automations().await.unwrap_or_default();
     let events = client.list_events(50).await.unwrap_or_default();
+    let switches = client.list_switches().await.unwrap_or_default();
+    let timers = client.list_timers().await.unwrap_or_default();
+    let modes = client.list_modes().await.unwrap_or_default();
     let (users, plugins) = if role.is_admin() {
         (
             client.list_users().await.unwrap_or_default(),
@@ -2182,6 +2191,9 @@ async fn fetch_remote_snapshot(client: &HomeCoreClient, role: Role) -> Result<Ca
         events,
         users,
         plugins,
+        switches,
+        timers,
+        modes,
     })
 }
 

@@ -1,4 +1,4 @@
-use crate::api::{Area, DeviceState, EventEntry, PluginRecord, Rule, UserInfo};
+use crate::api::{Area, DeviceState, EventEntry, ModeRecord, PluginRecord, Rule, UserInfo};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -23,6 +23,12 @@ pub struct CacheSnapshot {
     pub events: Vec<EventEntry>,
     pub users: Vec<UserInfo>,
     pub plugins: Vec<PluginRecord>,
+    #[serde(default)]
+    pub switches: Vec<DeviceState>,
+    #[serde(default)]
+    pub timers: Vec<DeviceState>,
+    #[serde(default)]
+    pub modes: Vec<ModeRecord>,
 }
 
 #[derive(Clone)]
@@ -48,6 +54,9 @@ impl CacheStore {
         self.write_json(dir.join("events.json"), &snapshot.events).await?;
         self.write_json(dir.join("users.json"), &snapshot.users).await?;
         self.write_json(dir.join("plugins.json"), &snapshot.plugins).await?;
+        self.write_json(dir.join("switches.json"), &snapshot.switches).await?;
+        self.write_json(dir.join("timers.json"), &snapshot.timers).await?;
+        self.write_json(dir.join("modes.json"), &snapshot.modes).await?;
         Ok(())
     }
 
@@ -65,6 +74,9 @@ impl CacheStore {
             events: self.read_json_or_default(dir.join("events.json")).await?,
             users: self.read_json_or_default(dir.join("users.json")).await?,
             plugins: self.read_json_or_default(dir.join("plugins.json")).await?,
+            switches: self.read_json_or_default(dir.join("switches.json")).await?,
+            timers: self.read_json_or_default(dir.join("timers.json")).await?,
+            modes: self.read_json_or_default(dir.join("modes.json")).await?,
         })
     }
 
