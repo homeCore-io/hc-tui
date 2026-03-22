@@ -1348,22 +1348,14 @@ impl App {
     }
 
     fn open_user_editor_password(&mut self) {
-        // Admins can change any user's password; non-admins change their own.
-        let (id, username) = if self.is_admin() {
-            if let Some(user) = self.users.get(self.selected) {
-                (Some(user.id.clone()), user.username.clone())
-            } else {
-                return;
-            }
-        } else {
-            let u = self.current_user.clone().unwrap();
-            (Some(u.id.clone()), u.username.clone())
-        };
+        // The backend change-password endpoint always operates on the JWT user
+        // (the currently logged-in account). Always change your own password here.
+        let Some(u) = self.current_user.clone() else { return };
         self.user_editor = Some(UserEditor {
             mode:             UserEditMode::ChangePassword,
-            id,
+            id:               Some(u.id.clone()),
             field:            UserEditField::CurrentPassword,
-            username,
+            username:         u.username.clone(),
             current_password: String::new(),
             password:         String::new(),
             confirm_password: String::new(),
