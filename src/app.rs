@@ -1,6 +1,6 @@
 use crate::api::{
-    Area, DeviceState, EventEntry, HomeCoreClient, LoginResponse, PluginRecord, Role, Rule, Scene,
-    UserInfo,
+    Area, DeviceState, EventEntry, HomeCoreClient, LoginResponse, ModeRecord,
+    PluginRecord, Role, Rule, Scene, UserInfo,
 };
 use crate::cache::{CacheSnapshot, CacheStore};
 use anyhow::Result;
@@ -109,6 +109,75 @@ impl PluginDetailPanel {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdminSubPanel {
+    Switches,
+    Timers,
+    Modes,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SwitchEditField {
+    Id,
+    Label,
+}
+
+#[derive(Debug, Clone)]
+pub struct SwitchEditor {
+    pub id: String,
+    pub label: String,
+    pub field: SwitchEditField,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimerEditField {
+    Id,
+    Label,
+}
+
+#[derive(Debug, Clone)]
+pub struct TimerEditor {
+    pub id: String,
+    pub label: String,
+    pub field: TimerEditField,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModeEditField {
+    Id,
+    Name,
+    Kind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModeKind {
+    Solar,
+    Manual,
+}
+
+impl ModeKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Solar => "solar",
+            Self::Manual => "manual",
+        }
+    }
+    pub fn next(self) -> Self {
+        match self {
+            Self::Solar => Self::Manual,
+            Self::Manual => Self::Solar,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ModeEditor {
+    pub id: String,
+    pub name: String,
+    pub kind: ModeKind,
+    pub field: ModeEditField,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Devices,
     Scenes,
@@ -117,6 +186,7 @@ pub enum Tab {
     Events,
     Users,
     Plugins,
+    Manage,
 }
 
 impl Tab {
@@ -129,6 +199,7 @@ impl Tab {
             Self::Events => "Events",
             Self::Users => "Users",
             Self::Plugins => "Plugins",
+            Self::Manage => "Manage",
         }
     }
 }
@@ -165,6 +236,13 @@ pub struct App {
     pub device_editor: Option<DeviceEditor>,
     pub area_editor: Option<AreaEditor>,
     pub user_editor: Option<UserEditor>,
+    pub admin_sub: AdminSubPanel,
+    pub switches: Vec<DeviceState>,
+    pub timers: Vec<DeviceState>,
+    pub modes: Vec<ModeRecord>,
+    pub switch_editor: Option<SwitchEditor>,
+    pub timer_editor: Option<TimerEditor>,
+    pub mode_editor: Option<ModeEditor>,
 }
 
 pub struct LoginWorkflowResult {
@@ -213,6 +291,13 @@ impl App {
             device_editor: None,
             area_editor: None,
             user_editor: None,
+            admin_sub: AdminSubPanel::Switches,
+            switches: Vec::new(),
+            timers: Vec::new(),
+            modes: Vec::new(),
+            switch_editor: None,
+            timer_editor: None,
+            mode_editor: None,
         }
     }
 
@@ -228,6 +313,7 @@ impl App {
             tabs.push(Tab::Users);
             tabs.push(Tab::Plugins);
         }
+        tabs.push(Tab::Manage);
         tabs
     }
 
@@ -336,6 +422,9 @@ impl App {
         self.areas = self.client.list_areas().await?;
         self.automations = self.client.list_automations().await?;
         self.events = self.client.list_events(50).await?;
+        self.switches = self.client.list_switches().await.unwrap_or_default();
+        self.timers = self.client.list_timers().await.unwrap_or_default();
+        self.modes = self.client.list_modes().await.unwrap_or_default();
         if self.is_admin() {
             self.users = self.client.list_users().await?;
             self.plugins = self.client.list_plugins().await?;
@@ -585,6 +674,28 @@ impl App {
             self.on_key_user_editor(key).await;
             return;
         }
+        if self.switch_editor.is_some() {
+            self.on_key_switch_editor(key).await;
+            return;
+        }
+        if self.timer_editor.is_some() {
+            self.on_key_timer_editor(key).await;
+            return;
+        }
+        if self.mode_editor.is_some() {
+            self.on_key_mode_editor(key).await;
+            return;
+        }
+
+        // Sub-panel switching within the Manage tab.
+        if matches!(self.active_tab(), Tab::Manage) {
+            match key.code {
+                KeyCode::Char('1') => { self.admin_sub = AdminSubPanel::Switches; self.selected = 0; self.error = None; return; }
+                KeyCode::Char('2') => { self.admin_sub = AdminSubPanel::Timers;   self.selected = 0; self.error = None; return; }
+                KeyCode::Char('3') => { self.admin_sub = AdminSubPanel::Modes;    self.selected = 0; self.error = None; return; }
+                _ => {}
+            }
+        }
 
         match key.code {
             KeyCode::Char('q') => self.should_quit = true,
@@ -627,6 +738,7 @@ impl App {
                 match self.active_tab() {
                     Tab::Areas => self.open_area_editor_create(),
                     Tab::Users if self.is_admin() => self.open_user_editor_create(),
+                    Tab::Manage => self.open_manage_editor(),
                     _ => {}
                 }
             }
@@ -636,6 +748,7 @@ impl App {
                     Tab::Areas   => self.delete_selected_area().await,
                     Tab::Users   => self.delete_selected_user().await,
                     Tab::Plugins => self.deregister_selected_plugin().await,
+                    Tab::Manage  => self.delete_selected_manage_item().await,
                     _ => {}
                 }
             }
@@ -1113,6 +1226,11 @@ impl App {
             Tab::Events => self.filtered_events().len(),
             Tab::Users => self.users.len(),
             Tab::Plugins => self.plugins.len(),
+            Tab::Manage => match self.admin_sub {
+                AdminSubPanel::Switches => self.switches.len(),
+                AdminSubPanel::Timers => self.timers.len(),
+                AdminSubPanel::Modes => self.modes.len(),
+            },
         }
     }
 
@@ -1540,6 +1658,235 @@ impl App {
             Err(err) => {
                 self.error = Some(err.to_string());
             }
+        }
+    }
+
+    // ── Manage tab ────────────────────────────────────────────────────────────
+
+    fn open_manage_editor(&mut self) {
+        self.error = None;
+        match self.admin_sub {
+            AdminSubPanel::Switches => {
+                self.switch_editor = Some(SwitchEditor {
+                    id: String::new(),
+                    label: String::new(),
+                    field: SwitchEditField::Id,
+                });
+            }
+            AdminSubPanel::Timers => {
+                self.timer_editor = Some(TimerEditor {
+                    id: String::new(),
+                    label: String::new(),
+                    field: TimerEditField::Id,
+                });
+            }
+            AdminSubPanel::Modes => {
+                self.mode_editor = Some(ModeEditor {
+                    id: String::new(),
+                    name: String::new(),
+                    kind: ModeKind::Solar,
+                    field: ModeEditField::Id,
+                });
+            }
+        }
+    }
+
+    async fn delete_selected_manage_item(&mut self) {
+        match self.admin_sub {
+            AdminSubPanel::Switches => {
+                let Some(sw) = self.switches.get(self.selected).cloned() else { return };
+                let id = sw.device_id.clone();
+                match self.client.delete_device(&id).await {
+                    Ok(_) => {
+                        self.switches.retain(|s| s.device_id != id);
+                        self.devices.retain(|d| d.device_id != id);
+                        self.clamp_selection();
+                        self.status = format!("Deleted {id}");
+                    }
+                    Err(e) => self.error = Some(e.to_string()),
+                }
+            }
+            AdminSubPanel::Timers => {
+                let Some(t) = self.timers.get(self.selected).cloned() else { return };
+                let id = t.device_id.clone();
+                match self.client.delete_device(&id).await {
+                    Ok(_) => {
+                        self.timers.retain(|ti| ti.device_id != id);
+                        self.devices.retain(|d| d.device_id != id);
+                        self.clamp_selection();
+                        self.status = format!("Deleted {id}");
+                    }
+                    Err(e) => self.error = Some(e.to_string()),
+                }
+            }
+            AdminSubPanel::Modes => {
+                let Some(m) = self.modes.get(self.selected).cloned() else { return };
+                let id = m.config.id.clone();
+                match self.client.delete_mode(&id).await {
+                    Ok(_) => {
+                        self.modes.retain(|mo| mo.config.id != id);
+                        self.clamp_selection();
+                        self.status = format!("Deleted {id}");
+                    }
+                    Err(e) => self.error = Some(e.to_string()),
+                }
+            }
+        }
+    }
+
+    async fn on_key_switch_editor(&mut self, key: KeyEvent) {
+        let Some(editor) = self.switch_editor.as_mut() else { return };
+        match key.code {
+            KeyCode::Esc => {
+                self.switch_editor = None;
+                self.status = "Cancelled".to_string();
+            }
+            KeyCode::Tab | KeyCode::BackTab => {
+                editor.field = match editor.field {
+                    SwitchEditField::Id    => SwitchEditField::Label,
+                    SwitchEditField::Label => SwitchEditField::Id,
+                };
+            }
+            KeyCode::Backspace => match editor.field {
+                SwitchEditField::Id    => { editor.id.pop(); }
+                SwitchEditField::Label => { editor.label.pop(); }
+            },
+            KeyCode::Enter => { self.save_switch_editor().await; }
+            KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                match editor.field {
+                    SwitchEditField::Id    => editor.id.push(ch),
+                    SwitchEditField::Label => editor.label.push(ch),
+                }
+            }
+            _ => {}
+        }
+    }
+
+    async fn save_switch_editor(&mut self) {
+        let Some(editor) = self.switch_editor.clone() else { return };
+        let id = editor.id.trim().to_string();
+        if id.is_empty() {
+            self.error = Some("switch id cannot be empty".to_string());
+            return;
+        }
+        let label = if editor.label.trim().is_empty() { editor.id.trim() } else { editor.label.trim() };
+        match self.client.create_switch(&id, label).await {
+            Ok(dev) => {
+                let device_id = dev.device_id.clone();
+                self.switches.push(dev.clone());
+                self.devices.push(dev);
+                self.switch_editor = None;
+                self.error = None;
+                self.status = format!("Created {device_id}");
+            }
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    async fn on_key_timer_editor(&mut self, key: KeyEvent) {
+        let Some(editor) = self.timer_editor.as_mut() else { return };
+        match key.code {
+            KeyCode::Esc => {
+                self.timer_editor = None;
+                self.status = "Cancelled".to_string();
+            }
+            KeyCode::Tab | KeyCode::BackTab => {
+                editor.field = match editor.field {
+                    TimerEditField::Id    => TimerEditField::Label,
+                    TimerEditField::Label => TimerEditField::Id,
+                };
+            }
+            KeyCode::Backspace => match editor.field {
+                TimerEditField::Id    => { editor.id.pop(); }
+                TimerEditField::Label => { editor.label.pop(); }
+            },
+            KeyCode::Enter => { self.save_timer_editor().await; }
+            KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                match editor.field {
+                    TimerEditField::Id    => editor.id.push(ch),
+                    TimerEditField::Label => editor.label.push(ch),
+                }
+            }
+            _ => {}
+        }
+    }
+
+    async fn save_timer_editor(&mut self) {
+        let Some(editor) = self.timer_editor.clone() else { return };
+        let id = editor.id.trim().to_string();
+        if id.is_empty() {
+            self.error = Some("timer id cannot be empty".to_string());
+            return;
+        }
+        let label = if editor.label.trim().is_empty() { editor.id.trim() } else { editor.label.trim() };
+        match self.client.create_timer(&id, label).await {
+            Ok(dev) => {
+                let device_id = dev.device_id.clone();
+                self.timers.push(dev.clone());
+                self.devices.push(dev);
+                self.timer_editor = None;
+                self.error = None;
+                self.status = format!("Created {device_id}");
+            }
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    async fn on_key_mode_editor(&mut self, key: KeyEvent) {
+        let Some(editor) = self.mode_editor.as_mut() else { return };
+        match key.code {
+            KeyCode::Esc => {
+                self.mode_editor = None;
+                self.status = "Cancelled".to_string();
+            }
+            KeyCode::Tab | KeyCode::BackTab => {
+                editor.field = match editor.field {
+                    ModeEditField::Id   => ModeEditField::Name,
+                    ModeEditField::Name => ModeEditField::Kind,
+                    ModeEditField::Kind => ModeEditField::Id,
+                };
+            }
+            KeyCode::Char(' ') if editor.field == ModeEditField::Kind => {
+                editor.kind = editor.kind.next();
+            }
+            KeyCode::Backspace => match editor.field {
+                ModeEditField::Id   => { editor.id.pop(); }
+                ModeEditField::Name => { editor.name.pop(); }
+                ModeEditField::Kind => {}
+            },
+            KeyCode::Enter => { self.save_mode_editor().await; }
+            KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                match editor.field {
+                    ModeEditField::Id   => editor.id.push(ch),
+                    ModeEditField::Name => editor.name.push(ch),
+                    ModeEditField::Kind => {}
+                }
+            }
+            _ => {}
+        }
+    }
+
+    async fn save_mode_editor(&mut self) {
+        let Some(editor) = self.mode_editor.clone() else { return };
+        let id = editor.id.trim().to_string();
+        if id.is_empty() {
+            self.error = Some("mode id cannot be empty".to_string());
+            return;
+        }
+        if !id.starts_with("mode_") {
+            self.error = Some("mode id must start with 'mode_'".to_string());
+            return;
+        }
+        let name = if editor.name.trim().is_empty() { editor.id.trim() } else { editor.name.trim() };
+        match self.client.create_mode(&id, name, editor.kind.as_str()).await {
+            Ok(cfg) => {
+                let cfg_id = cfg.id.clone();
+                self.modes.push(ModeRecord { config: cfg, state: None });
+                self.mode_editor = None;
+                self.error = None;
+                self.status = format!("Created {cfg_id}");
+            }
+            Err(e) => self.error = Some(e.to_string()),
         }
     }
 }

@@ -104,6 +104,27 @@ pub struct EventEntry {
     pub event_detail: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModeConfig {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+    #[serde(default)]
+    pub on_event: Option<String>,
+    #[serde(default)]
+    pub off_event: Option<String>,
+    #[serde(default)]
+    pub on_offset_minutes: Option<i32>,
+    #[serde(default)]
+    pub off_offset_minutes: Option<i32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModeRecord {
+    pub config: ModeConfig,
+    pub state: Option<DeviceState>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct LoginBody<'a> {
     pub username: &'a str,
@@ -222,6 +243,45 @@ impl HomeCoreClient {
 
     pub async fn delete_device(&self, device_id: &str) -> Result<()> {
         let path = format!("/devices/{device_id}");
+        let resp = self.request(Method::DELETE, &path).await?;
+        Self::parse_empty(resp).await
+    }
+
+    pub async fn list_switches(&self) -> Result<Vec<DeviceState>> {
+        let resp = self.request(Method::GET, "/switches").await?;
+        Self::parse_json(resp).await
+    }
+
+    pub async fn create_switch(&self, id: &str, label: &str) -> Result<DeviceState> {
+        let body = json!({ "id": id, "label": label });
+        let resp = self.request_with_json(Method::POST, "/switches", body).await?;
+        Self::parse_json(resp).await
+    }
+
+    pub async fn list_timers(&self) -> Result<Vec<DeviceState>> {
+        let resp = self.request(Method::GET, "/timers").await?;
+        Self::parse_json(resp).await
+    }
+
+    pub async fn create_timer(&self, id: &str, label: &str) -> Result<DeviceState> {
+        let body = json!({ "id": id, "label": label });
+        let resp = self.request_with_json(Method::POST, "/timers", body).await?;
+        Self::parse_json(resp).await
+    }
+
+    pub async fn list_modes(&self) -> Result<Vec<ModeRecord>> {
+        let resp = self.request(Method::GET, "/modes").await?;
+        Self::parse_json(resp).await
+    }
+
+    pub async fn create_mode(&self, id: &str, name: &str, kind: &str) -> Result<ModeConfig> {
+        let body = json!({ "id": id, "name": name, "kind": kind });
+        let resp = self.request_with_json(Method::POST, "/modes", body).await?;
+        Self::parse_json(resp).await
+    }
+
+    pub async fn delete_mode(&self, id: &str) -> Result<()> {
+        let path = format!("/modes/{id}");
         let resp = self.request(Method::DELETE, &path).await?;
         Self::parse_empty(resp).await
     }

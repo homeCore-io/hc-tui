@@ -1,4 +1,8 @@
-use crate::app::{App, AreaEditor, DeviceEditField, DeviceViewMode, FocusField, LoginPhase, PluginDetailPanel, Tab, UserEditField, UserEditMode, UserEditor};
+use crate::app::{
+    AdminSubPanel, App, AreaEditor, DeviceEditField, DeviceViewMode, FocusField, LoginPhase,
+    ModeEditField, ModeEditor, ModeKind, PluginDetailPanel, SwitchEditField, SwitchEditor,
+    Tab, TimerEditField, TimerEditor, UserEditField, UserEditMode, UserEditor,
+};
 use crate::api::DeviceState;
 use chrono::Utc;
 use ratatui::{
@@ -55,6 +59,15 @@ pub fn draw(frame: &mut Frame<'_>, app: &App) {
     if let Some(editor) = app.user_editor.as_ref() {
         draw_user_editor(frame, app, editor);
     }
+    if let Some(editor) = app.switch_editor.as_ref() {
+        draw_switch_editor(frame, editor);
+    }
+    if let Some(editor) = app.timer_editor.as_ref() {
+        draw_timer_editor(frame, editor);
+    }
+    if let Some(editor) = app.mode_editor.as_ref() {
+        draw_mode_editor(frame, editor);
+    }
 }
 
 fn draw_status_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
@@ -103,6 +116,11 @@ fn draw_status_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
             hints.push("d delete");
         }
         Tab::Plugins => { hints.push("d deregister"); }
+        Tab::Manage => {
+            hints.push("1/2/3 panel");
+            hints.push("n new");
+            hints.push("d delete");
+        }
         _ => {}
     }
     if app.device_editor.is_some() {
@@ -116,6 +134,15 @@ fn draw_status_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
     }
     if app.plugin_detail_open {
         hints = vec!["1/2/3 or ←/→ panel", "b discover bridges", "p pair bridges", "r refresh", "Esc close", "q quit"];
+    }
+    if app.switch_editor.is_some() {
+        hints = vec!["Tab field", "Enter create", "Esc cancel"];
+    }
+    if app.timer_editor.is_some() {
+        hints = vec!["Tab field", "Enter create", "Esc cancel"];
+    }
+    if app.mode_editor.is_some() {
+        hints = vec!["Tab field", "Space kind", "Enter create", "Esc cancel"];
     }
 
     let hint_str = hints.join(" | ");
@@ -232,9 +259,13 @@ fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
         draw_plugin_detail(frame, app, area);
         return;
     }
+    if matches!(app.active_tab(), Tab::Manage) {
+        draw_manage_tab(frame, app, area);
+        return;
+    }
 
     let items = match app.active_tab() {
-        Tab::Devices | Tab::Scenes => Vec::new(),
+        Tab::Devices | Tab::Scenes | Tab::Manage => Vec::new(),
         Tab::Areas => app
             .areas
             .iter()
@@ -1543,7 +1574,233 @@ fn list_is_empty(app: &App) -> bool {
         Tab::Events => app.filtered_events().is_empty(),
         Tab::Users => app.users.is_empty(),
         Tab::Plugins => app.plugins.is_empty(),
+        Tab::Manage => false,
     }
+}
+
+fn draw_manage_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(0)])
+        .split(area);
+
+    let active_idx = match app.admin_sub {
+        AdminSubPanel::Switches => 0,
+        AdminSubPanel::Timers   => 1,
+        AdminSubPanel::Modes    => 2,
+    };
+    let sub_tabs = Tabs::new(vec![
+        Line::from("1 Switches"),
+        Line::from("2 Timers"),
+        Line::from("3 Modes"),
+    ])
+    .select(active_idx)
+    .block(Block::default().borders(Borders::ALL).title("Manage"))
+    .style(Style::default().fg(Color::Gray))
+    .highlight_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+    frame.render_widget(sub_tabs, layout[0]);
+
+    let highlight = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+
+    let (items, title, len): (Vec<ListItem<'_>>, &str, usize) = match app.admin_sub {
+        AdminSubPanel::Switches => {
+            let items = app.switches.iter().map(|s| {
+                let on = s.attributes.get("on").and_then(|v| v.as_bool()).unwrap_or(false);
+                let (dot, dot_color) = if on { ("●", Color::Green) } else { ("○", Color::DarkGray) };
+                let label = if s.name != s.device_id { format!("  {}", s.name) } else { String::new() };
+                ListItem::new(Line::from(vec![
+                    Span::styled(format!("  {dot} "), Style::default().fg(dot_color)),
+                    Span::styled(format!("{:<36}", s.device_id), Style::default().fg(Color::White)),
+                    Span::styled(label, Style::default().fg(Color::DarkGray)),
+                ]))
+            }).collect();
+            let len = app.switches.len();
+            (items, "Switches", len)
+        }
+        AdminSubPanel::Timers => {
+            let items = app.timers.iter().map(|t| {
+                let state = t.attributes.get("state").and_then(|v| v.as_str()).unwrap_or("idle");
+                let state_color = match state {
+                    "running"  => Color::Green,
+                    "finished" => Color::Yellow,
+                    "paused"   => Color::Cyan,
+                    _          => Color::DarkGray,
+                };
+                let label = if t.name != t.device_id { format!("  {}", t.name) } else { String::new() };
+                ListItem::new(Line::from(vec![
+                    Span::styled(format!("  {:<36}", t.device_id), Style::default().fg(Color::White)),
+                    Span::styled(format!("{:<10}", state), Style::default().fg(state_color)),
+                    Span::styled(label, Style::default().fg(Color::DarkGray)),
+                ]))
+            }).collect();
+            let len = app.timers.len();
+            (items, "Timers", len)
+        }
+        AdminSubPanel::Modes => {
+            let items = app.modes.iter().map(|m| {
+                let on = m.state.as_ref()
+                    .and_then(|s| s.attributes.get("on"))
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let (dot, dot_color) = if on { ("●", Color::Green) } else { ("○", Color::DarkGray) };
+                let kind_color = match m.config.kind.as_str() {
+                    "solar"  => Color::Yellow,
+                    "manual" => Color::Cyan,
+                    _        => Color::White,
+                };
+                ListItem::new(Line::from(vec![
+                    Span::styled(format!("  {dot} "), Style::default().fg(dot_color)),
+                    Span::styled(format!("{:<28}", m.config.id), Style::default().fg(Color::White)),
+                    Span::styled(format!("  {:<8}", m.config.kind), Style::default().fg(kind_color)),
+                    Span::styled(format!("  {}", m.config.name), Style::default().fg(Color::DarkGray)),
+                ]))
+            }).collect();
+            let len = app.modes.len();
+            (items, "Modes", len)
+        }
+    };
+
+    let list = List::new(items)
+        .block(Block::default().borders(Borders::ALL).title(title))
+        .highlight_style(highlight)
+        .highlight_symbol(">> ");
+    let mut state = ratatui::widgets::ListState::default();
+    if len > 0 {
+        state.select(Some(app.selected.min(len - 1)));
+    }
+    frame.render_stateful_widget(list, layout[1], &mut state);
+}
+
+fn draw_switch_editor(frame: &mut Frame<'_>, editor: &SwitchEditor) {
+    let popup = centered_rect(64, 40, frame.area());
+    frame.render_widget(Clear, popup);
+    let outer = Block::default().borders(Borders::ALL).title("New Switch");
+    let inner = outer.inner(popup);
+    frame.render_widget(outer, popup);
+
+    let focused = Style::default().fg(Color::Yellow);
+    let normal  = Style::default();
+
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Length(3), Constraint::Min(1)])
+        .split(inner);
+
+    frame.render_widget(
+        Paragraph::new(editor.id.as_str()).block(
+            Block::default().borders(Borders::ALL)
+                .title("ID  (switch_ prefix added automatically)")
+                .border_style(if editor.field == SwitchEditField::Id { focused } else { normal })
+        ),
+        layout[0],
+    );
+    frame.render_widget(
+        Paragraph::new(editor.label.as_str()).block(
+            Block::default().borders(Borders::ALL).title("Label  (optional)")
+                .border_style(if editor.field == SwitchEditField::Label { focused } else { normal })
+        ),
+        layout[1],
+    );
+    frame.render_widget(
+        Paragraph::new("Tab field  |  Enter create  |  Esc cancel")
+            .alignment(Alignment::Center),
+        layout[2],
+    );
+}
+
+fn draw_timer_editor(frame: &mut Frame<'_>, editor: &TimerEditor) {
+    let popup = centered_rect(64, 40, frame.area());
+    frame.render_widget(Clear, popup);
+    let outer = Block::default().borders(Borders::ALL).title("New Timer");
+    let inner = outer.inner(popup);
+    frame.render_widget(outer, popup);
+
+    let focused = Style::default().fg(Color::Yellow);
+    let normal  = Style::default();
+
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Length(3), Constraint::Min(1)])
+        .split(inner);
+
+    frame.render_widget(
+        Paragraph::new(editor.id.as_str()).block(
+            Block::default().borders(Borders::ALL)
+                .title("ID  (timer_ prefix added automatically)")
+                .border_style(if editor.field == TimerEditField::Id { focused } else { normal })
+        ),
+        layout[0],
+    );
+    frame.render_widget(
+        Paragraph::new(editor.label.as_str()).block(
+            Block::default().borders(Borders::ALL).title("Label  (optional)")
+                .border_style(if editor.field == TimerEditField::Label { focused } else { normal })
+        ),
+        layout[1],
+    );
+    frame.render_widget(
+        Paragraph::new("Tab field  |  Enter create  |  Esc cancel")
+            .alignment(Alignment::Center),
+        layout[2],
+    );
+}
+
+fn draw_mode_editor(frame: &mut Frame<'_>, editor: &ModeEditor) {
+    let popup = centered_rect(64, 50, frame.area());
+    frame.render_widget(Clear, popup);
+    let outer = Block::default().borders(Borders::ALL).title("New Mode");
+    let inner = outer.inner(popup);
+    frame.render_widget(outer, popup);
+
+    let focused = Style::default().fg(Color::Yellow);
+    let normal  = Style::default();
+
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Min(1),
+        ])
+        .split(inner);
+
+    frame.render_widget(
+        Paragraph::new(editor.id.as_str()).block(
+            Block::default().borders(Borders::ALL).title("ID  (must start with mode_)")
+                .border_style(if editor.field == ModeEditField::Id { focused } else { normal })
+        ),
+        layout[0],
+    );
+    frame.render_widget(
+        Paragraph::new(editor.name.as_str()).block(
+            Block::default().borders(Borders::ALL).title("Name")
+                .border_style(if editor.field == ModeEditField::Name { focused } else { normal })
+        ),
+        layout[1],
+    );
+    let kind_color = match editor.kind {
+        ModeKind::Solar  => Color::Yellow,
+        ModeKind::Manual => Color::Cyan,
+    };
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            format!("{}  (Space to toggle)", editor.kind.as_str()),
+            Style::default().fg(kind_color),
+        )).block(
+            Block::default().borders(Borders::ALL).title("Kind")
+                .border_style(if editor.field == ModeEditField::Kind { focused } else { normal })
+        ),
+        layout[2],
+    );
+    frame.render_widget(
+        Paragraph::new("Tab field  |  Space cycle kind  |  Enter create  |  Esc cancel")
+            .alignment(Alignment::Center),
+        layout[3],
+    );
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
