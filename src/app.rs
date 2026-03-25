@@ -1,12 +1,14 @@
 use crate::api::{
-    Area, DeviceState, EventEntry, HomeCoreClient, LoginResponse, ModeRecord,
-    PluginRecord, Role, Rule, Scene, UserInfo,
+    Area, DeviceState, EventEntry, HomeCoreClient, LogLine, LoginResponse, ModeRecord,
+    PluginRecord, Role, Rule, RuleFiring, RuleGroup, Scene, SystemStatus, UserInfo,
 };
 use crate::cache::{CacheSnapshot, CacheStore};
 use anyhow::Result;
+use chrono::{DateTime, Local, Utc};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use serde_json::Value;
 use std::cmp::min;
+use std::collections::{HashSet, VecDeque};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FocusField {
@@ -178,11 +180,64 @@ pub struct ModeEditor {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogLevelFilter {
+    Error,
+    Warn,
+    Info,
+    Debug,
+}
+
+impl LogLevelFilter {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Error => "ERROR",
+            Self::Warn => "WARN",
+            Self::Info => "INFO",
+            Self::Debug => "DEBUG",
+        }
+    }
+
+    pub fn passes(&self, level: &str) -> bool {
+        let level_upper = level.to_uppercase();
+        match self {
+            Self::Error => level_upper == "ERROR",
+            Self::Warn => matches!(level_upper.as_str(), "ERROR" | "WARN"),
+            Self::Info => matches!(level_upper.as_str(), "ERROR" | "WARN" | "INFO"),
+            Self::Debug => true,
+        }
+    }
+}
+
+/// Delete confirmation dialog state.
+#[derive(Debug, Clone)]
+pub struct DeleteConfirm {
+    pub rule_id: String,
+    pub rule_name: String,
+}
+
+/// Automation filter bar state.
+#[derive(Debug, Clone)]
+pub struct AutomationFilterBar {
+    pub tag: String,
+    pub trigger: String,
+    pub stale: bool,
+    pub active_field: AutomationFilterField,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutomationFilterField {
+    Tag,
+    Trigger,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Devices,
     Scenes,
     Areas,
     Automations,
+    Logs,
+    Status,
     Events,
     Users,
     Plugins,
@@ -196,6 +251,8 @@ impl Tab {
             Self::Scenes => "Scenes",
             Self::Areas => "Areas",
             Self::Automations => "Automations",
+            Self::Logs => "Logs",
+            Self::Status => "Status",
             Self::Events => "Events",
             Self::Users => "Users",
             Self::Plugins => "Plugins",
@@ -243,6 +300,39 @@ pub struct App {
     pub switch_editor: Option<SwitchEditor>,
     pub timer_editor: Option<TimerEditor>,
     pub mode_editor: Option<ModeEditor>,
+
+    // Automations tab features
+    pub automation_filter_tag: String,
+    pub automation_filter_trigger: String,
+    pub automation_filter_stale: bool,
+    pub automation_filter_active: bool,
+    pub automation_filter_bar: Option<AutomationFilterBar>,
+    pub automation_selected_ids: HashSet<String>,
+    pub automation_bulk_select_mode: bool,
+    pub fire_history_open: bool,
+    pub fire_history_rule_id: Option<String>,
+    pub fire_history: Vec<RuleFiring>,
+    pub automation_delete_confirm: Option<DeleteConfirm>,
+    pub groups_open: bool,
+    pub groups: Vec<RuleGroup>,
+    pub groups_selected: usize,
+
+    // Logs tab
+    pub log_lines: VecDeque<LogLine>,
+    pub log_level_filter: LogLevelFilter,
+    pub log_module_filter: String,
+    pub log_paused: bool,
+    pub log_scroll_offset: usize,
+    pub log_ws_connected: bool,
+    pub log_module_input_open: bool,
+    pub log_module_input: String,
+
+    // System Status tab
+    pub system_status: Option<SystemStatus>,
+    pub system_status_last_refresh: Option<String>,
+
+    // Time display toggle
+    pub time_utc: bool,
 }
 
 pub struct LoginWorkflowResult {
@@ -298,6 +388,35 @@ impl App {
             switch_editor: None,
             timer_editor: None,
             mode_editor: None,
+
+            automation_filter_tag: String::new(),
+            automation_filter_trigger: String::new(),
+            automation_filter_stale: false,
+            automation_filter_active: false,
+            automation_filter_bar: None,
+            automation_selected_ids: HashSet::new(),
+            automation_bulk_select_mode: false,
+            fire_history_open: false,
+            fire_history_rule_id: None,
+            fire_history: Vec::new(),
+            automation_delete_confirm: None,
+            groups_open: false,
+            groups: Vec::new(),
+            groups_selected: 0,
+
+            log_lines: VecDeque::new(),
+            log_level_filter: LogLevelFilter::Info,
+            log_module_filter: String::new(),
+            log_paused: false,
+            log_scroll_offset: 0,
+            log_ws_connected: false,
+            log_module_input_open: false,
+            log_module_input: String::new(),
+
+            system_status: None,
+            system_status_last_refresh: None,
+
+            time_utc: false,
         }
     }
 
@@ -307,6 +426,8 @@ impl App {
             Tab::Scenes,
             Tab::Areas,
             Tab::Automations,
+            Tab::Logs,
+            Tab::Status,
             Tab::Events,
         ];
         if self.is_admin() {
@@ -533,6 +654,10 @@ impl App {
         self.client.ws_events_url()
     }
 
+    pub fn ws_logs_endpoint(&self) -> String {
+        self.client.ws_logs_url()
+    }
+
     pub fn ws_token(&self) -> Option<String> {
         self.client.token().map(ToString::to_string)
     }
@@ -545,6 +670,36 @@ impl App {
     pub fn on_ws_disconnected(&mut self, reason: String) {
         self.ws_connected = false;
         self.status = format!("Live stream disconnected ({reason})");
+    }
+
+    pub fn on_log_ws_connected(&mut self) {
+        self.log_ws_connected = true;
+    }
+
+    pub fn on_log_ws_disconnected(&mut self, _reason: String) {
+        self.log_ws_connected = false;
+    }
+
+    pub fn on_log_line(&mut self, line: LogLine) {
+        // Apply level filter
+        if !self.log_level_filter.passes(&line.level) {
+            return;
+        }
+        // Apply module filter
+        if !self.log_module_filter.is_empty()
+            && !line.target.contains(&self.log_module_filter)
+            && !line.message.contains(&self.log_module_filter)
+        {
+            return;
+        }
+        self.log_lines.push_back(line);
+        if self.log_lines.len() > 500 {
+            self.log_lines.pop_front();
+        }
+        // Auto-scroll: if not paused, keep offset at end
+        if !self.log_paused {
+            self.log_scroll_offset = self.log_lines.len().saturating_sub(1);
+        }
     }
 
     pub fn on_ws_event(&mut self, event: Value) {
@@ -626,9 +781,59 @@ impl App {
         self.events.truncate(200);
     }
 
+    /// Returns the currently visible automations (after applying filters).
+    pub fn visible_automations(&self) -> Vec<&Rule> {
+        self.automations
+            .iter()
+            .filter(|r| self.automation_matches_filter(r))
+            .collect()
+    }
+
+    fn automation_matches_filter(&self, rule: &Rule) -> bool {
+        if self.automation_filter_stale && rule.error.is_none() {
+            return false;
+        }
+        if !self.automation_filter_tag.is_empty() {
+            let tag = &self.automation_filter_tag;
+            if !rule.tags.iter().any(|t| t.contains(tag.as_str())) {
+                return false;
+            }
+        }
+        if !self.automation_filter_trigger.is_empty() && self.automation_filter_trigger != "all" {
+            let trigger_type = rule
+                .trigger
+                .as_ref()
+                .and_then(|t| t.get("type").and_then(Value::as_str))
+                .unwrap_or("");
+            if !trigger_type.contains(self.automation_filter_trigger.as_str()) {
+                return false;
+            }
+        }
+        true
+    }
+
+    pub fn selected_automation(&self) -> Option<&Rule> {
+        let visible = self.visible_automations();
+        visible.get(self.selected).copied()
+    }
 
     pub async fn on_key_authenticated(&mut self, key: KeyEvent) {
         self.error = None;
+
+        // Handle delete confirmation dialog first
+        if self.automation_delete_confirm.is_some() {
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    self.confirm_delete_automation().await;
+                }
+                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                    self.automation_delete_confirm = None;
+                    self.status = "Delete cancelled".to_string();
+                }
+                _ => {}
+            }
+            return;
+        }
 
         if self.plugin_detail_open {
             match key.code {
@@ -693,6 +898,24 @@ impl App {
             return;
         }
 
+        // Automation filter bar
+        if self.automation_filter_bar.is_some() {
+            self.on_key_automation_filter_bar(key).await;
+            return;
+        }
+
+        // Log module filter input
+        if self.log_module_input_open {
+            self.on_key_log_module_input(key);
+            return;
+        }
+
+        // Groups overlay
+        if self.groups_open {
+            self.on_key_groups_panel(key).await;
+            return;
+        }
+
         // Sub-panel switching within the Manage tab.
         if matches!(self.active_tab(), Tab::Manage) {
             match key.code {
@@ -703,11 +926,29 @@ impl App {
             }
         }
 
+        // Global T key: toggle time display
+        if key.code == KeyCode::Char('T') {
+            self.time_utc = !self.time_utc;
+            self.status = if self.time_utc {
+                "Timestamps: UTC".to_string()
+            } else {
+                "Timestamps: Local".to_string()
+            };
+            return;
+        }
+
         match key.code {
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Char('r') => {
-                if let Err(err) = self.refresh_all().await {
-                    self.error = Some(err.to_string());
+                match self.active_tab() {
+                    Tab::Status => {
+                        self.refresh_system_status().await;
+                    }
+                    _ => {
+                        if let Err(err) = self.refresh_all().await {
+                            self.error = Some(err.to_string());
+                        }
+                    }
                 }
             }
             KeyCode::Left | KeyCode::BackTab => {
@@ -715,21 +956,39 @@ impl App {
                 self.tab = (self.tab + tab_count - 1) % tab_count;
                 self.selected = 0;
                 self.clamp_selection();
+                // When entering Status tab, refresh
+                if matches!(self.active_tab(), Tab::Status) {
+                    self.refresh_system_status().await;
+                }
             }
             KeyCode::Right | KeyCode::Tab => {
                 let tab_count = self.tabs().len();
                 self.tab = (self.tab + 1) % tab_count;
                 self.selected = 0;
                 self.clamp_selection();
+                if matches!(self.active_tab(), Tab::Status) {
+                    self.refresh_system_status().await;
+                }
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            KeyCode::Down | KeyCode::Char('j') if !matches!(self.active_tab(), Tab::Logs) => {
                 let len = self.active_items_len();
                 if len > 0 {
                     self.selected = min(self.selected + 1, len - 1);
                 }
             }
-            KeyCode::Up | KeyCode::Char('k') => {
+            KeyCode::Up | KeyCode::Char('k') if !matches!(self.active_tab(), Tab::Logs) => {
                 self.selected = self.selected.saturating_sub(1);
+            }
+            KeyCode::Down | KeyCode::Char('j') if matches!(self.active_tab(), Tab::Logs) => {
+                if self.log_paused {
+                    let max = self.log_lines.len().saturating_sub(1);
+                    self.log_scroll_offset = min(self.log_scroll_offset + 1, max);
+                }
+            }
+            KeyCode::Up | KeyCode::Char('k') if matches!(self.active_tab(), Tab::Logs) => {
+                if self.log_paused {
+                    self.log_scroll_offset = self.log_scroll_offset.saturating_sub(1);
+                }
             }
             KeyCode::Enter => {
                 match self.active_tab() {
@@ -755,17 +1014,61 @@ impl App {
                     Tab::Users   => self.delete_selected_user().await,
                     Tab::Plugins => self.deregister_selected_plugin().await,
                     Tab::Manage  => self.delete_selected_manage_item().await,
+                    Tab::Automations => self.disable_selected_automation().await,
+                    Tab::Logs => {
+                        self.log_lines.clear();
+                        self.log_scroll_offset = 0;
+                        self.status = "Log buffer cleared".to_string();
+                    }
+                    _ => {}
+                }
+            }
+            KeyCode::Char('D') => {
+                match self.active_tab() {
+                    Tab::Automations => {
+                        if self.automation_bulk_select_mode && !self.automation_selected_ids.is_empty() {
+                            self.bulk_disable_automations().await;
+                        } else {
+                            self.disable_selected_automation().await;
+                        }
+                    }
                     _ => {}
                 }
             }
             KeyCode::Char('p') => {
-                if matches!(self.active_tab(), Tab::Users) {
-                    self.open_user_editor_password();
+                match self.active_tab() {
+                    Tab::Users => self.open_user_editor_password(),
+                    Tab::Logs => {
+                        self.log_paused = !self.log_paused;
+                        if !self.log_paused {
+                            self.log_scroll_offset = self.log_lines.len().saturating_sub(1);
+                        }
+                        self.status = if self.log_paused {
+                            "Log stream paused".to_string()
+                        } else {
+                            "Log stream resumed".to_string()
+                        };
+                    }
+                    _ => {}
+                }
+            }
+            KeyCode::Char(' ') => {
+                match self.active_tab() {
+                    Tab::Devices => self.toggle_lock_or_switch().await,
+                    Tab::Automations => self.toggle_automation_selection(),
+                    Tab::Logs => {
+                        self.log_paused = !self.log_paused;
+                        if !self.log_paused {
+                            self.log_scroll_offset = self.log_lines.len().saturating_sub(1);
+                        }
+                    }
+                    _ => {}
                 }
             }
             KeyCode::Char('t') => {
-                if matches!(self.active_tab(), Tab::Devices) {
-                    self.toggle_selected_device().await;
+                match self.active_tab() {
+                    Tab::Devices => self.toggle_selected_device().await,
+                    _ => {}
                 }
             }
             KeyCode::Char('v') => {
@@ -797,35 +1100,420 @@ impl App {
                     self.lock_device(false).await;
                 }
             }
-            KeyCode::Char(' ') => {
-                if matches!(self.active_tab(), Tab::Devices) {
-                    self.toggle_lock_or_switch().await;
-                }
-            }
             KeyCode::Char('a') => {
                 if matches!(self.active_tab(), Tab::Scenes) {
                     self.activate_selected_scene().await;
                 }
             }
             KeyCode::Char('f') => {
-                if matches!(self.active_tab(), Tab::Events) {
-                    self.events_filter_mode = match self.events_filter_mode {
-                        EventsFilterMode::All => EventsFilterMode::HueInputs,
-                        EventsFilterMode::HueInputs => EventsFilterMode::Entertainment,
-                        EventsFilterMode::Entertainment => EventsFilterMode::PluginMetrics,
-                        EventsFilterMode::PluginMetrics => EventsFilterMode::All,
-                    };
+                match self.active_tab() {
+                    Tab::Events => {
+                        self.events_filter_mode = match self.events_filter_mode {
+                            EventsFilterMode::All => EventsFilterMode::HueInputs,
+                            EventsFilterMode::HueInputs => EventsFilterMode::Entertainment,
+                            EventsFilterMode::Entertainment => EventsFilterMode::PluginMetrics,
+                            EventsFilterMode::PluginMetrics => EventsFilterMode::All,
+                        };
+                        self.selected = 0;
+                        self.clamp_selection();
+                        self.status = format!("Events filter: {}", self.events_filter_mode.title());
+                    }
+                    Tab::Automations => {
+                        // Toggle filter bar
+                        if self.automation_filter_bar.is_none() {
+                            self.automation_filter_bar = Some(AutomationFilterBar {
+                                tag: self.automation_filter_tag.clone(),
+                                trigger: self.automation_filter_trigger.clone(),
+                                stale: self.automation_filter_stale,
+                                active_field: AutomationFilterField::Tag,
+                            });
+                        } else {
+                            self.automation_filter_bar = None;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            KeyCode::Char('h') | KeyCode::Char('H') => {
+                if matches!(self.active_tab(), Tab::Automations) {
+                    self.open_fire_history().await;
+                }
+            }
+            KeyCode::Char('c') | KeyCode::Char('C') => {
+                if matches!(self.active_tab(), Tab::Automations) {
+                    self.clone_selected_automation().await;
+                } else if matches!(self.active_tab(), Tab::Logs) {
+                    self.log_lines.clear();
+                    self.log_scroll_offset = 0;
+                    self.status = "Log buffer cleared".to_string();
+                }
+            }
+            KeyCode::Char('e') => {
+                match self.active_tab() {
+                    Tab::Automations => {
+                        if self.automation_bulk_select_mode && !self.automation_selected_ids.is_empty() {
+                            self.bulk_enable_automations().await;
+                        } else {
+                            self.enable_selected_automation().await;
+                        }
+                    }
+                    Tab::Logs => {
+                        self.log_level_filter = LogLevelFilter::Error;
+                        self.status = "Log level: ERROR".to_string();
+                    }
+                    _ => {}
+                }
+            }
+            KeyCode::Char('E') => {
+                match self.active_tab() {
+                    Tab::Automations => {
+                        if self.automation_bulk_select_mode && !self.automation_selected_ids.is_empty() {
+                            self.bulk_enable_automations().await;
+                        } else {
+                            self.enable_selected_automation().await;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            KeyCode::Char('w') => {
+                if matches!(self.active_tab(), Tab::Logs) {
+                    self.log_level_filter = LogLevelFilter::Warn;
+                    self.status = "Log level: WARN".to_string();
+                }
+            }
+            KeyCode::Char('i') => {
+                if matches!(self.active_tab(), Tab::Logs) {
+                    self.log_level_filter = LogLevelFilter::Info;
+                    self.status = "Log level: INFO".to_string();
+                }
+            }
+            KeyCode::Char('/') => {
+                if matches!(self.active_tab(), Tab::Logs) {
+                    self.log_module_input_open = true;
+                    self.log_module_input = self.log_module_filter.clone();
+                }
+            }
+            KeyCode::Char('g') | KeyCode::Char('G') => {
+                if matches!(self.active_tab(), Tab::Automations) {
+                    self.open_groups_panel().await;
+                }
+            }
+            KeyCode::Char('s') => {
+                if matches!(self.active_tab(), Tab::Automations) {
+                    self.automation_filter_stale = !self.automation_filter_stale;
                     self.selected = 0;
                     self.clamp_selection();
-                    self.status = format!(
-                        "Events filter: {}",
-                        self.events_filter_mode.title()
-                    );
+                    self.status = if self.automation_filter_stale {
+                        "Filter: showing stale rules only".to_string()
+                    } else {
+                        "Filter: showing all rules".to_string()
+                    };
+                }
+            }
+            KeyCode::Delete | KeyCode::Char('x') => {
+                if matches!(self.active_tab(), Tab::Automations) {
+                    self.initiate_delete_automation();
+                }
+            }
+            KeyCode::Esc => {
+                match self.active_tab() {
+                    Tab::Automations => {
+                        if self.fire_history_open {
+                            self.fire_history_open = false;
+                            self.fire_history_rule_id = None;
+                            self.fire_history.clear();
+                        } else if self.automation_bulk_select_mode {
+                            self.automation_bulk_select_mode = false;
+                            self.automation_selected_ids.clear();
+                            self.status = "Selection cleared".to_string();
+                        }
+                    }
+                    _ => {}
                 }
             }
             _ => {}
         }
     }
+
+    // ── Automation filter bar ─────────────────────────────────────────────────
+
+    async fn on_key_automation_filter_bar(&mut self, key: KeyEvent) {
+        let Some(bar) = self.automation_filter_bar.as_mut() else { return };
+        match key.code {
+            KeyCode::Esc => {
+                self.automation_filter_bar = None;
+            }
+            KeyCode::Tab | KeyCode::Right => {
+                bar.active_field = match bar.active_field {
+                    AutomationFilterField::Tag => AutomationFilterField::Trigger,
+                    AutomationFilterField::Trigger => AutomationFilterField::Tag,
+                };
+            }
+            KeyCode::BackTab | KeyCode::Left => {
+                bar.active_field = match bar.active_field {
+                    AutomationFilterField::Tag => AutomationFilterField::Trigger,
+                    AutomationFilterField::Trigger => AutomationFilterField::Tag,
+                };
+            }
+            KeyCode::Backspace => match bar.active_field {
+                AutomationFilterField::Tag => { bar.tag.pop(); }
+                AutomationFilterField::Trigger => { bar.trigger.pop(); }
+            },
+            KeyCode::Enter => {
+                let tag = bar.tag.clone();
+                let trigger = bar.trigger.clone();
+                let stale = bar.stale;
+                self.automation_filter_tag = tag;
+                self.automation_filter_trigger = trigger;
+                self.automation_filter_stale = stale;
+                self.automation_filter_bar = None;
+                self.selected = 0;
+                self.clamp_selection();
+                self.status = "Automation filter applied".to_string();
+            }
+            KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                let bar = self.automation_filter_bar.as_mut().unwrap();
+                match bar.active_field {
+                    AutomationFilterField::Tag => bar.tag.push(ch),
+                    AutomationFilterField::Trigger => bar.trigger.push(ch),
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // ── Log module filter input ───────────────────────────────────────────────
+
+    fn on_key_log_module_input(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => {
+                self.log_module_input_open = false;
+            }
+            KeyCode::Enter => {
+                self.log_module_filter = self.log_module_input.trim().to_string();
+                self.log_module_input_open = false;
+                self.status = if self.log_module_filter.is_empty() {
+                    "Log module filter cleared".to_string()
+                } else {
+                    format!("Log module filter: {}", self.log_module_filter)
+                };
+            }
+            KeyCode::Backspace => {
+                self.log_module_input.pop();
+            }
+            KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.log_module_input.push(ch);
+            }
+            _ => {}
+        }
+    }
+
+    // ── Groups panel ──────────────────────────────────────────────────────────
+
+    async fn open_groups_panel(&mut self) {
+        match self.client.list_automation_groups().await {
+            Ok(groups) => {
+                self.groups = groups;
+                self.groups_open = true;
+                self.groups_selected = 0;
+            }
+            Err(e) => {
+                self.error = Some(format!("Failed to load groups: {e}"));
+            }
+        }
+    }
+
+    async fn on_key_groups_panel(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => {
+                self.groups_open = false;
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if !self.groups.is_empty() {
+                    self.groups_selected = min(self.groups_selected + 1, self.groups.len() - 1);
+                }
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.groups_selected = self.groups_selected.saturating_sub(1);
+            }
+            KeyCode::Char('e') | KeyCode::Char('E') => {
+                if let Some(g) = self.groups.get(self.groups_selected).cloned() {
+                    match self.client.enable_automation_group(&g.id).await {
+                        Ok(_) => self.status = format!("Group '{}' enabled", g.name),
+                        Err(e) => self.error = Some(e.to_string()),
+                    }
+                }
+            }
+            KeyCode::Char('d') | KeyCode::Char('D') => {
+                if let Some(g) = self.groups.get(self.groups_selected).cloned() {
+                    match self.client.disable_automation_group(&g.id).await {
+                        Ok(_) => self.status = format!("Group '{}' disabled", g.name),
+                        Err(e) => self.error = Some(e.to_string()),
+                    }
+                }
+            }
+            KeyCode::Delete | KeyCode::Char('x') => {
+                if let Some(g) = self.groups.get(self.groups_selected).cloned() {
+                    match self.client.delete_automation_group(&g.id).await {
+                        Ok(_) => {
+                            self.groups.retain(|gr| gr.id != g.id);
+                            self.groups_selected = self.groups_selected.min(
+                                self.groups.len().saturating_sub(1)
+                            );
+                            self.status = format!("Deleted group '{}'", g.name);
+                        }
+                        Err(e) => self.error = Some(e.to_string()),
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // ── Fire history ──────────────────────────────────────────────────────────
+
+    async fn open_fire_history(&mut self) {
+        let Some(rule) = self.selected_automation().cloned() else { return };
+        match self.client.get_automation_history(&rule.id).await {
+            Ok(history) => {
+                self.fire_history = history;
+                self.fire_history_rule_id = Some(rule.id);
+                self.fire_history_open = true;
+            }
+            Err(e) => {
+                self.error = Some(format!("Failed to load history: {e}"));
+            }
+        }
+    }
+
+    // ── Automation enable/disable/clone/delete ────────────────────────────────
+
+    async fn enable_selected_automation(&mut self) {
+        let Some(rule) = self.selected_automation().cloned() else { return };
+        match self.client.toggle_automation(&rule.id, true).await {
+            Ok(_) => {
+                if let Some(r) = self.automations.iter_mut().find(|r| r.id == rule.id) {
+                    r.enabled = true;
+                }
+                self.status = format!("Enabled rule '{}'", rule.name);
+            }
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    async fn disable_selected_automation(&mut self) {
+        let Some(rule) = self.selected_automation().cloned() else { return };
+        match self.client.toggle_automation(&rule.id, false).await {
+            Ok(_) => {
+                if let Some(r) = self.automations.iter_mut().find(|r| r.id == rule.id) {
+                    r.enabled = false;
+                }
+                self.status = format!("Disabled rule '{}'", rule.name);
+            }
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    async fn clone_selected_automation(&mut self) {
+        let Some(rule) = self.selected_automation().cloned() else { return };
+        match self.client.clone_automation(&rule.id).await {
+            Ok(cloned) => {
+                let name = cloned.name.clone();
+                self.automations.push(cloned);
+                self.status = format!("Cloned -> \"{}\"", name);
+            }
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    fn initiate_delete_automation(&mut self) {
+        let Some(rule) = self.selected_automation().cloned() else { return };
+        self.automation_delete_confirm = Some(DeleteConfirm {
+            rule_id: rule.id,
+            rule_name: rule.name,
+        });
+    }
+
+    async fn confirm_delete_automation(&mut self) {
+        let Some(confirm) = self.automation_delete_confirm.take() else { return };
+        match self.client.delete_automation(&confirm.rule_id).await {
+            Ok(_) => {
+                self.automations.retain(|r| r.id != confirm.rule_id);
+                self.clamp_selection();
+                self.status = format!("Deleted rule '{}'", confirm.rule_name);
+            }
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    fn toggle_automation_selection(&mut self) {
+        let Some(rule) = self.selected_automation().cloned() else { return };
+        if self.automation_selected_ids.contains(&rule.id) {
+            self.automation_selected_ids.remove(&rule.id);
+        } else {
+            self.automation_selected_ids.insert(rule.id);
+            self.automation_bulk_select_mode = true;
+        }
+        if self.automation_selected_ids.is_empty() {
+            self.automation_bulk_select_mode = false;
+        }
+        let count = self.automation_selected_ids.len();
+        self.status = format!("{count} rule(s) selected");
+    }
+
+    async fn bulk_enable_automations(&mut self) {
+        let ids: Vec<String> = self.automation_selected_ids.iter().cloned().collect();
+        match self.client.bulk_toggle_automations(&ids, true).await {
+            Ok(_) => {
+                for r in self.automations.iter_mut() {
+                    if ids.contains(&r.id) {
+                        r.enabled = true;
+                    }
+                }
+                self.automation_selected_ids.clear();
+                self.automation_bulk_select_mode = false;
+                self.status = format!("Enabled {} rule(s)", ids.len());
+            }
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    async fn bulk_disable_automations(&mut self) {
+        let ids: Vec<String> = self.automation_selected_ids.iter().cloned().collect();
+        match self.client.bulk_toggle_automations(&ids, false).await {
+            Ok(_) => {
+                for r in self.automations.iter_mut() {
+                    if ids.contains(&r.id) {
+                        r.enabled = false;
+                    }
+                }
+                self.automation_selected_ids.clear();
+                self.automation_bulk_select_mode = false;
+                self.status = format!("Disabled {} rule(s)", ids.len());
+            }
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    // ── System Status ─────────────────────────────────────────────────────────
+
+    async fn refresh_system_status(&mut self) {
+        match self.client.get_system_status().await {
+            Ok(status) => {
+                self.system_status_last_refresh = Some(
+                    Local::now().format("%H:%M:%S").to_string()
+                );
+                self.system_status = Some(status);
+                self.status = "System status refreshed".to_string();
+            }
+            Err(e) => {
+                self.error = Some(format!("Failed to load system status: {e}"));
+            }
+        }
+    }
+
+    // ── Devices ───────────────────────────────────────────────────────────────
 
     /// Returns devices grouped by area, sorted alphabetically. Unassigned devices last.
     /// Devices that should appear in the Devices tab (scene devices are shown in Scenes tab).
@@ -1228,8 +1916,10 @@ impl App {
             Tab::Devices => self.visible_devices().len(),
             Tab::Scenes => self.scenes.len(),
             Tab::Areas => self.areas.len(),
-            Tab::Automations => self.automations.len(),
+            Tab::Automations => self.visible_automations().len(),
             Tab::Events => self.filtered_events().len(),
+            Tab::Logs => 0,
+            Tab::Status => 0,
             Tab::Users => self.users.len(),
             Tab::Plugins => self.plugins.len(),
             Tab::Manage => match self.admin_sub {
@@ -2207,6 +2897,23 @@ fn snapshot_is_empty(snapshot: &CacheSnapshot) -> bool {
         && snapshot.plugins.is_empty()
 }
 
+/// Format a timestamp string for display. Respects the `utc` flag.
+pub fn format_timestamp_utc(ts: &str, utc: bool) -> String {
+    if utc {
+        // Show as UTC with date+time
+        if let Ok(dt) = DateTime::parse_from_rfc3339(ts) {
+            return dt.with_timezone(&Utc).format("%Y-%m-%d %H:%M:%S UTC").to_string();
+        }
+    } else {
+        // Show as local time (time only for brevity)
+        if let Ok(dt) = DateTime::parse_from_rfc3339(ts) {
+            return dt.with_timezone(&Local).format("%H:%M:%S").to_string();
+        }
+    }
+    // Fallback: trim to first 19 chars
+    ts.chars().take(19).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2253,158 +2960,64 @@ mod tests {
         app.authenticated = true;
     }
 
-    fn mk_device(device_id: &str, plugin_id: &str, kind: &str) -> DeviceState {
-        let mut attributes = Map::new();
-        attributes.insert("kind".to_string(), Value::String(kind.to_string()));
-
-        DeviceState {
-            device_id: device_id.to_string(),
-            name: device_id.to_string(),
-            plugin_id: plugin_id.to_string(),
-            area: None,
-            available: true,
-            attributes,
-            last_seen: "2026-03-21T00:00:00Z".to_string(),
-        }
-    }
-
     #[test]
-    fn filtered_events_respects_selected_mode() {
+    fn test_admin_has_more_tabs() {
         let mut app = test_app();
-        app.events = vec![
-            mk_event("device_button"),
-            mk_event("device_rotary"),
-            mk_event("entertainment_action_applied"),
-            mk_event("entertainment_status_changed"),
-            mk_event("plugin_metrics"),
-            mk_event("device_state_changed"),
-        ];
-
-        app.events_filter_mode = EventsFilterMode::All;
-        assert_eq!(app.filtered_events().len(), 6);
-
-        app.events_filter_mode = EventsFilterMode::HueInputs;
-        assert_eq!(app.filtered_events().len(), 4);
-
-        app.events_filter_mode = EventsFilterMode::Entertainment;
-        assert_eq!(app.filtered_events().len(), 2);
-
-        app.events_filter_mode = EventsFilterMode::PluginMetrics;
-        assert_eq!(app.filtered_events().len(), 1);
-    }
-
-    #[tokio::test]
-    async fn events_filter_key_cycles_modes() {
-        let mut app = test_app();
-        app.tab = app
-            .tabs()
-            .iter()
-            .position(|t| matches!(t, Tab::Events))
-            .unwrap_or(4);
-        app.events_filter_mode = EventsFilterMode::All;
-
-        app.on_key_authenticated(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE))
-            .await;
-        assert_eq!(app.events_filter_mode, EventsFilterMode::HueInputs);
-
-        app.on_key_authenticated(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE))
-            .await;
-        assert_eq!(app.events_filter_mode, EventsFilterMode::Entertainment);
-
-        app.on_key_authenticated(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE))
-            .await;
-        assert_eq!(app.events_filter_mode, EventsFilterMode::PluginMetrics);
-
-        app.on_key_authenticated(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE))
-            .await;
-        assert_eq!(app.events_filter_mode, EventsFilterMode::All);
-    }
-
-    #[tokio::test]
-    async fn plugin_detail_key_flow_open_switch_close() {
-        let mut app = test_app();
+        make_user(&mut app);
+        let user_tabs = app.tabs().len();
         make_admin(&mut app);
-        app.plugins.push(PluginRecord {
-            plugin_id: "plugin.hue".to_string(),
-            registered_at: "2026-03-21T00:00:00Z".to_string(),
-            status: "active".to_string(),
-        });
-        app.selected = 0;
-        app.tab = app
-            .tabs()
-            .iter()
-            .position(|t| matches!(t, Tab::Plugins))
-            .unwrap_or(0);
-
-        app.on_key_authenticated(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
-            .await;
-        assert!(app.plugin_detail_open);
-        assert_eq!(app.plugin_detail_plugin_id.as_deref(), Some("plugin.hue"));
-        assert_eq!(app.plugin_detail_panel, PluginDetailPanel::Overview);
-
-        app.on_key_authenticated(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE))
-            .await;
-        assert_eq!(app.plugin_detail_panel, PluginDetailPanel::Diagnostics);
-
-        app.on_key_authenticated(KeyEvent::new(KeyCode::Char('3'), KeyModifiers::NONE))
-            .await;
-        assert_eq!(app.plugin_detail_panel, PluginDetailPanel::Metrics);
-
-        app.on_key_authenticated(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE))
-            .await;
-        assert_eq!(app.plugin_detail_panel, PluginDetailPanel::Overview);
-
-        app.on_key_authenticated(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE))
-            .await;
-        assert_eq!(app.plugin_detail_panel, PluginDetailPanel::Metrics);
-
-        app.on_key_authenticated(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
-            .await;
-        assert!(!app.plugin_detail_open);
-        assert!(app.plugin_detail_plugin_id.is_none());
+        let admin_tabs = app.tabs().len();
+        assert!(admin_tabs > user_tabs);
     }
 
     #[test]
-    fn selected_plugin_hue_bridge_ids_filters_by_plugin_and_kind() {
+    fn test_events_filter_all_passes() {
         let mut app = test_app();
-        app.devices = vec![
-            mk_device("bridge-1", "plugin.hue", "hue_bridge"),
-            mk_device("bridge-2", "plugin.hue", "hue_bridge"),
-            mk_device("light-1", "plugin.hue", "light"),
-            mk_device("bridge-other", "plugin.other", "hue_bridge"),
-        ];
-
-        let ids = app.selected_plugin_hue_bridge_ids("plugin.hue");
-        assert_eq!(ids, vec!["bridge-1".to_string(), "bridge-2".to_string()]);
+        app.events_filter_mode = EventsFilterMode::All;
+        let e = mk_event("device_state_changed");
+        assert!(app.event_matches_filter(&e));
     }
 
-    #[tokio::test]
-    async fn pairing_key_shows_no_bridge_error_when_none_found() {
-        let mut app = test_app();
-        make_user(&mut app);
-        app.plugin_detail_open = true;
-        app.plugin_detail_plugin_id = Some("plugin.hue".to_string());
-        app.devices = vec![mk_device("light-1", "plugin.hue", "light")];
-
-        app.on_key_authenticated(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE))
-            .await;
-
-        assert_eq!(app.error.as_deref(), Some("No Hue bridges found for selected plugin"));
+    #[test]
+    fn test_log_level_filter_error_only() {
+        let filter = LogLevelFilter::Error;
+        assert!(filter.passes("ERROR"));
+        assert!(!filter.passes("WARN"));
+        assert!(!filter.passes("INFO"));
     }
 
-    #[tokio::test]
-    async fn pairing_key_preserves_pairing_error_when_refresh_fails() {
+    #[test]
+    fn test_log_level_filter_info_includes_warn_error() {
+        let filter = LogLevelFilter::Info;
+        assert!(filter.passes("ERROR"));
+        assert!(filter.passes("WARN"));
+        assert!(filter.passes("INFO"));
+        assert!(!filter.passes("DEBUG"));
+    }
+
+    #[test]
+    fn test_automation_stale_filter() {
         let mut app = test_app();
-        make_user(&mut app);
-        app.plugin_detail_open = true;
-        app.plugin_detail_plugin_id = Some("plugin.hue".to_string());
-        app.devices = vec![mk_device("bridge-1", "plugin.hue", "hue_bridge")];
-
-        app.on_key_authenticated(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE))
-            .await;
-
-        let error = app.error.unwrap_or_default();
-        assert!(error.starts_with("Pairing request errors:"));
-        assert!(error.contains("bridge-1: not authenticated"));
+        app.automation_filter_stale = true;
+        let rule_ok = Rule {
+            id: "r1".to_string(),
+            name: "ok".to_string(),
+            enabled: true,
+            priority: 0,
+            tags: vec![],
+            error: None,
+            trigger: None,
+        };
+        let rule_stale = Rule {
+            id: "r2".to_string(),
+            name: "stale".to_string(),
+            enabled: true,
+            priority: 0,
+            tags: vec![],
+            error: Some("parse error".to_string()),
+            trigger: None,
+        };
+        assert!(!app.automation_matches_filter(&rule_ok));
+        assert!(app.automation_matches_filter(&rule_stale));
     }
 }

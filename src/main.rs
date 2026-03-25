@@ -18,7 +18,7 @@ use crossterm::{
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::{io, path::PathBuf, time::Duration};
 use tokio::sync::mpsc;
-use ws::{spawn_events_stream, WsAppMsg};
+use ws::{spawn_events_stream, spawn_log_stream, WsAppMsg};
 
 enum AsyncMsg {
     LoginFinished(Result<LoginWorkflowResult, String>),
@@ -96,12 +96,17 @@ async fn run_app(
     let (async_tx, mut async_rx) = mpsc::unbounded_channel::<AsyncMsg>();
     let mut ws_started = false;
     let mut auto_login_fired = false;
+    let mut log_ws_started = false;
 
     // If already authenticated (restored session), start WS immediately
     if app.authenticated {
         if let Some(token) = app.ws_token() {
-            spawn_events_stream(app.ws_endpoint(), token, ws_tx.clone());
+            spawn_events_stream(app.ws_endpoint(), token.clone(), ws_tx.clone());
             ws_started = true;
+            // Start log stream too
+            let log_url = app.ws_logs_endpoint();
+            spawn_log_stream(log_url, token, "INFO".to_string(), String::new(), ws_tx.clone());
+            log_ws_started = true;
         }
     }
 
@@ -142,6 +147,9 @@ async fn run_app(
                 WsAppMsg::Connected => app.on_ws_connected(),
                 WsAppMsg::Disconnected(reason) => app.on_ws_disconnected(reason),
                 WsAppMsg::Event(event) => app.on_ws_event(event),
+                WsAppMsg::LogConnected => app.on_log_ws_connected(),
+                WsAppMsg::LogDisconnected(reason) => app.on_log_ws_disconnected(reason),
+                WsAppMsg::LogLine(line) => app.on_log_line(line),
             }
         }
 
@@ -158,8 +166,16 @@ async fn run_app(
                     app.apply_login_success(result);
                     if app.authenticated && !ws_started {
                         if let Some(token) = app.ws_token() {
-                            spawn_events_stream(app.ws_endpoint(), token, ws_tx.clone());
+                            spawn_events_stream(app.ws_endpoint(), token.clone(), ws_tx.clone());
                             ws_started = true;
+                        }
+                    }
+                    if app.authenticated && !log_ws_started {
+                        if let Some(token) = app.ws_token() {
+                            let log_url = app.ws_logs_endpoint();
+                            let level = app.log_level_filter.as_str().to_string();
+                            spawn_log_stream(log_url, token, level, String::new(), ws_tx.clone());
+                            log_ws_started = true;
                         }
                     }
                 }

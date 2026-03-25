@@ -1,5 +1,6 @@
 use crate::app::{
-    AdminSubPanel, App, AreaEditor, DeviceEditField, DeviceViewMode, FocusField, LoginPhase,
+    AdminSubPanel, App, AreaEditor, AutomationFilterBar, AutomationFilterField, DeleteConfirm,
+    DeviceEditField, DeviceViewMode, FocusField, LogLevelFilter, LoginPhase,
     ModeEditField, ModeEditor, ModeKind, PluginDetailPanel, SwitchEditField, SwitchEditor,
     Tab, TimerEditField, TimerEditor, UserEditField, UserEditMode, UserEditor,
 };
@@ -68,6 +69,19 @@ pub fn draw(frame: &mut Frame<'_>, app: &App) {
     if let Some(editor) = app.mode_editor.as_ref() {
         draw_mode_editor(frame, editor);
     }
+    // Automation overlays (drawn on top of everything)
+    if let Some(confirm) = app.automation_delete_confirm.as_ref() {
+        draw_delete_confirm(frame, confirm);
+    }
+    if app.groups_open {
+        draw_groups_overlay(frame, app);
+    }
+    if let Some(filter_bar) = app.automation_filter_bar.as_ref() {
+        draw_filter_bar(frame, filter_bar);
+    }
+    if app.log_module_input_open {
+        draw_log_module_input(frame, app);
+    }
 }
 
 fn draw_status_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
@@ -91,7 +105,7 @@ fn draw_status_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
         .map(|u| u.username.as_str())
         .unwrap_or("n/a");
 
-    let mut hints = vec!["Tab/← → tab", "j/k move", "r refresh", "q quit"];
+    let mut hints = vec!["Tab/← → tab", "j/k move", "r refresh", "q quit", "T UTC toggle"];
     match app.active_tab() {
         Tab::Devices => {
             hints.push("Spc toggle");
@@ -121,7 +135,27 @@ fn draw_status_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
             hints.push("n new");
             hints.push("d delete");
         }
-        _ => {}
+        Tab::Automations => {
+            hints.push("e enable");
+            hints.push("d disable");
+            hints.push("c clone");
+            hints.push("x delete");
+            hints.push("h history");
+            hints.push("f filter");
+            hints.push("s stale");
+            hints.push("g groups");
+            hints.push("Spc select");
+        }
+        Tab::Logs => {
+            hints.push("p pause");
+            hints.push("Spc pause");
+            hints.push("e/w/i level");
+            hints.push("/ module");
+            hints.push("c clear");
+        }
+        Tab::Status => {
+            hints.push("r refresh");
+        }
     }
     if app.device_editor.is_some() {
         hints = vec!["Tab field", "Enter save", "Esc cancel"];
@@ -255,6 +289,18 @@ fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
         draw_scenes_table(frame, app, area);
         return;
     }
+    if matches!(app.active_tab(), Tab::Automations) {
+        draw_automations_tab(frame, app, area);
+        return;
+    }
+    if matches!(app.active_tab(), Tab::Logs) {
+        draw_logs_tab(frame, app, area);
+        return;
+    }
+    if matches!(app.active_tab(), Tab::Status) {
+        draw_status_tab(frame, app, area);
+        return;
+    }
     if matches!(app.active_tab(), Tab::Plugins) && app.plugin_detail_open {
         draw_plugin_detail(frame, app, area);
         return;
@@ -265,7 +311,7 @@ fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
     }
 
     let items = match app.active_tab() {
-        Tab::Devices | Tab::Scenes | Tab::Manage => Vec::new(),
+        Tab::Devices | Tab::Scenes | Tab::Automations | Tab::Logs | Tab::Status | Tab::Manage => Vec::new(),
         Tab::Areas => app
             .areas
             .iter()
@@ -282,16 +328,6 @@ fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
                         Style::default().fg(Color::DarkGray),
                     ),
                 ]))
-            })
-            .collect::<Vec<_>>(),
-        Tab::Automations => app
-            .automations
-            .iter()
-            .map(|r| {
-                ListItem::new(format!(
-                    "{} ({}) enabled={} priority={}",
-                    r.name, r.id, r.enabled, r.priority
-                ))
             })
             .collect::<Vec<_>>(),
         Tab::Events => app
@@ -462,6 +498,557 @@ fn draw_scenes_table(frame: &mut Frame<'_>, app: &App, area: Rect) {
         state.select(Some(app.selected));
     }
     frame.render_stateful_widget(table, area, &mut state);
+}
+
+// ── Automations tab ───────────────────────────────────────────────────────────
+
+fn draw_automations_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    // Split: if history pane is open, divide horizontally 60/40
+    let (list_area, history_area) = if app.fire_history_open {
+        let panes = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+            .split(area);
+        (panes[0], Some(panes[1]))
+    } else {
+        (area, None)
+    };
+
+    draw_automations_list(frame, app, list_area);
+
+    if let Some(ha) = history_area {
+        draw_automation_history(frame, app, ha);
+    }
+}
+
+fn draw_automations_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let visible = app.visible_automations();
+    let total = app.automations.len();
+    let filtered = visible.len();
+    let filter_active = app.automation_filter_stale
+        || !app.automation_filter_tag.is_empty()
+        || !app.automation_filter_trigger.is_empty();
+    let bulk_count = app.automation_selected_ids.len();
+
+    let title = if filter_active {
+        format!("Automations [{}/{}]", filtered, total)
+    } else if bulk_count > 0 {
+        format!("Automations [{}] ({} selected)", total, bulk_count)
+    } else {
+        format!("Automations [{}]", total)
+    };
+
+    let highlight_sel = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+    let highlight_bulk = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
+
+    let header_cells = ["Sel", "●", "Name", "Trigger", "Tags", "Pri"]
+        .iter()
+        .map(|h| Cell::from(*h).style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)));
+    let header = Row::new(header_cells).height(1).bottom_margin(0);
+
+    let rows: Vec<Row> = visible
+        .iter()
+        .enumerate()
+        .map(|(i, r)| {
+            let is_sel = i == app.selected;
+            let is_bulk = app.automation_selected_ids.contains(&r.id);
+            let is_stale = r.error.is_some();
+
+            let sel_mark = if is_bulk { "[✓]" } else { "[ ]" };
+            let dot = if r.enabled { "●" } else { "○" };
+            let name_prefix = if is_stale { "⚠ " } else { "  " };
+            let name_display: String = format!("{}{}", name_prefix, r.name).chars().take(32).collect();
+            let trigger_str = r.trigger
+                .as_ref()
+                .and_then(|t| t.get("type").and_then(|v| v.as_str()))
+                .unwrap_or("-")
+                .to_string();
+            let tags_str: String = r.tags.join(",").chars().take(20).collect();
+            let pri_str = r.priority.to_string();
+
+            let base_style = if is_stale {
+                Style::default().fg(Color::Red)
+            } else if r.enabled {
+                Style::default().fg(Color::White)
+            } else {
+                Style::default().fg(Color::DarkGray)
+            };
+            let dot_color = if r.enabled { Color::Green } else { Color::DarkGray };
+
+            if is_sel {
+                Row::new(vec![
+                    Cell::from(sel_mark).style(highlight_sel),
+                    Cell::from(dot).style(highlight_sel),
+                    Cell::from(name_display).style(highlight_sel),
+                    Cell::from(trigger_str).style(highlight_sel),
+                    Cell::from(tags_str).style(highlight_sel),
+                    Cell::from(pri_str).style(highlight_sel),
+                ])
+            } else if is_bulk {
+                Row::new(vec![
+                    Cell::from(sel_mark).style(highlight_bulk),
+                    Cell::from(dot).style(Style::default().fg(dot_color)),
+                    Cell::from(name_display).style(base_style.add_modifier(Modifier::BOLD)),
+                    Cell::from(trigger_str).style(base_style),
+                    Cell::from(tags_str).style(base_style),
+                    Cell::from(pri_str).style(base_style),
+                ])
+            } else {
+                Row::new(vec![
+                    Cell::from(sel_mark).style(Style::default().fg(Color::DarkGray)),
+                    Cell::from(dot).style(Style::default().fg(dot_color)),
+                    Cell::from(name_display).style(base_style),
+                    Cell::from(trigger_str).style(Style::default().fg(Color::DarkGray)),
+                    Cell::from(tags_str).style(Style::default().fg(Color::Cyan)),
+                    Cell::from(pri_str).style(Style::default().fg(Color::DarkGray)),
+                ])
+            }
+        })
+        .collect();
+
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(5),
+            Constraint::Length(3),
+            Constraint::Min(30),
+            Constraint::Length(16),
+            Constraint::Length(20),
+            Constraint::Length(4),
+        ],
+    )
+    .header(header)
+    .block(Block::default().borders(Borders::ALL).title(title))
+    .row_highlight_style(highlight_sel);
+
+    let mut state = ratatui::widgets::TableState::default();
+    if !visible.is_empty() {
+        state.select(Some(app.selected));
+    }
+    frame.render_stateful_widget(table, area, &mut state);
+}
+
+fn draw_automation_history(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let rule_name = app
+        .fire_history_rule_id
+        .as_deref()
+        .and_then(|id| app.automations.iter().find(|r| r.id == id))
+        .map(|r| r.name.as_str())
+        .unwrap_or("?");
+
+    let title = format!("Fire History: {}", rule_name);
+
+    if app.fire_history.is_empty() {
+        let msg = Paragraph::new("No fire history found.")
+            .block(Block::default().borders(Borders::ALL).title(title))
+            .alignment(Alignment::Center);
+        frame.render_widget(msg, area);
+        return;
+    }
+
+    let items: Vec<ListItem> = app
+        .fire_history
+        .iter()
+        .map(|f| {
+            let ts: String = f.timestamp.chars().take(19).collect::<String>().replace('T', " ");
+            let pass_str = if f.conditions_passed { "✓" } else { "✗" };
+            let pass_color = if f.conditions_passed { Color::Green } else { Color::Red };
+            let eval_str = format!("{}ms", f.eval_ms);
+            ListItem::new(Line::from(vec![
+                Span::styled(format!("{pass_str} "), Style::default().fg(pass_color)),
+                Span::styled(format!("{ts} "), Style::default().fg(Color::DarkGray)),
+                Span::styled(format!("act={} ", f.actions_ran), Style::default().fg(Color::Cyan)),
+                Span::styled(eval_str, Style::default().fg(Color::DarkGray)),
+            ]))
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(Block::default().borders(Borders::ALL).title(title));
+    frame.render_widget(list, area);
+}
+
+fn draw_delete_confirm(frame: &mut Frame<'_>, confirm: &DeleteConfirm) {
+    let popup = centered_rect(60, 25, frame.area());
+    frame.render_widget(Clear, popup);
+
+    let outer = Block::default()
+        .borders(Borders::ALL)
+        .title("Confirm Delete")
+        .border_style(Style::default().fg(Color::Red));
+    let inner = outer.inner(popup);
+    frame.render_widget(outer, popup);
+
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(2), Constraint::Length(1), Constraint::Min(1)])
+        .split(inner);
+
+    let msg = Paragraph::new(format!("Delete rule: \"{}\"?", confirm.rule_name))
+        .style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD))
+        .alignment(Alignment::Center);
+    frame.render_widget(msg, layout[0]);
+
+    let sub = Paragraph::new(format!("ID: {}", confirm.rule_id))
+        .style(Style::default().fg(Color::DarkGray))
+        .alignment(Alignment::Center);
+    frame.render_widget(sub, layout[1]);
+
+    let help = Paragraph::new("Y confirm  |  N/Esc cancel")
+        .style(Style::default().fg(Color::Yellow))
+        .alignment(Alignment::Center);
+    frame.render_widget(help, layout[2]);
+}
+
+fn draw_groups_overlay(frame: &mut Frame<'_>, app: &App) {
+    let popup = centered_rect(60, 60, frame.area());
+    frame.render_widget(Clear, popup);
+
+    let outer = Block::default()
+        .borders(Borders::ALL)
+        .title("Automation Groups")
+        .border_style(Style::default().fg(Color::Cyan));
+    let inner = outer.inner(popup);
+    frame.render_widget(outer, popup);
+
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(3), Constraint::Length(1)])
+        .split(inner);
+
+    let highlight = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+
+    if app.groups.is_empty() {
+        let msg = Paragraph::new("No groups defined.")
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(Color::DarkGray));
+        frame.render_widget(msg, layout[0]);
+    } else {
+        let items: Vec<ListItem> = app
+            .groups
+            .iter()
+            .map(|g| {
+                let rule_count = g.rule_ids.len();
+                ListItem::new(Line::from(vec![
+                    Span::styled(format!("  {:<28}", g.name), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                    Span::styled(format!("{} rule(s)", rule_count), Style::default().fg(Color::DarkGray)),
+                ]))
+            })
+            .collect();
+
+        let list = List::new(items)
+            .block(Block::default())
+            .highlight_style(highlight)
+            .highlight_symbol(">> ");
+        let mut state = ratatui::widgets::ListState::default();
+        if !app.groups.is_empty() {
+            state.select(Some(app.groups_selected));
+        }
+        frame.render_stateful_widget(list, layout[0], &mut state);
+    }
+
+    let help = Paragraph::new("e enable  |  d disable  |  x delete  |  Esc close")
+        .style(Style::default().fg(Color::DarkGray))
+        .alignment(Alignment::Center);
+    frame.render_widget(help, layout[1]);
+}
+
+fn draw_filter_bar(frame: &mut Frame<'_>, filter_bar: &AutomationFilterBar) {
+    let area = frame.area();
+    // Draw a small bar at the bottom of the screen (above the status bar)
+    let bar_area = Rect {
+        x: area.x,
+        y: area.height.saturating_sub(6).max(area.y),
+        width: area.width,
+        height: 3,
+    };
+    frame.render_widget(Clear, bar_area);
+
+    let layout = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(40), Constraint::Percentage(40), Constraint::Percentage(20)])
+        .split(bar_area);
+
+    let tag_style = if filter_bar.active_field == AutomationFilterField::Tag {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default().fg(Color::Gray)
+    };
+    let trigger_style = if filter_bar.active_field == AutomationFilterField::Trigger {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default().fg(Color::Gray)
+    };
+
+    let tag_field = Paragraph::new(filter_bar.tag.as_str())
+        .block(Block::default().borders(Borders::ALL).title("Tag filter").border_style(tag_style));
+    frame.render_widget(tag_field, layout[0]);
+
+    let trigger_field = Paragraph::new(filter_bar.trigger.as_str())
+        .block(Block::default().borders(Borders::ALL).title("Trigger filter").border_style(trigger_style));
+    frame.render_widget(trigger_field, layout[1]);
+
+    let stale_str = if filter_bar.stale { "ON " } else { "off" };
+    let stale_color = if filter_bar.stale { Color::Red } else { Color::DarkGray };
+    let stale_field = Paragraph::new(Span::styled(stale_str, Style::default().fg(stale_color)))
+        .block(Block::default().borders(Borders::ALL).title("Stale only"));
+    frame.render_widget(stale_field, layout[2]);
+}
+
+fn draw_log_module_input(frame: &mut Frame<'_>, app: &App) {
+    let popup = centered_rect(60, 20, frame.area());
+    frame.render_widget(Clear, popup);
+
+    let outer = Block::default()
+        .borders(Borders::ALL)
+        .title("Module / Target Filter")
+        .border_style(Style::default().fg(Color::Yellow));
+    let inner = outer.inner(popup);
+    frame.render_widget(outer, popup);
+
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(1)])
+        .split(inner);
+
+    let input = Paragraph::new(app.log_module_input.as_str())
+        .block(Block::default().borders(Borders::ALL).title("Filter string").border_style(Style::default().fg(Color::Yellow)));
+    frame.render_widget(input, layout[0]);
+
+    let help = Paragraph::new("Enter apply  |  Esc cancel")
+        .style(Style::default().fg(Color::DarkGray))
+        .alignment(Alignment::Center);
+    frame.render_widget(help, layout[1]);
+}
+
+// ── Logs tab ──────────────────────────────────────────────────────────────────
+
+fn draw_logs_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(3)])
+        .split(area);
+
+    // Header: level filter tabs + status
+    draw_logs_header(frame, app, layout[0]);
+    draw_logs_body(frame, app, layout[1]);
+}
+
+fn draw_logs_header(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let level_labels: Vec<Line> = vec![
+        Line::from(Span::styled("e ERROR", if app.log_level_filter == LogLevelFilter::Error {
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        })),
+        Line::from(Span::styled("w WARN", if app.log_level_filter == LogLevelFilter::Warn {
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        })),
+        Line::from(Span::styled("i INFO", if app.log_level_filter == LogLevelFilter::Info {
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        })),
+        Line::from(Span::styled("d DEBUG", if app.log_level_filter == LogLevelFilter::Debug {
+            Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        })),
+    ];
+
+    let selected_idx = match app.log_level_filter {
+        LogLevelFilter::Error => 0,
+        LogLevelFilter::Warn  => 1,
+        LogLevelFilter::Info  => 2,
+        LogLevelFilter::Debug => 3,
+    };
+
+    let live_dot = if app.log_ws_connected { "●" } else { "○" };
+    let live_color = if app.log_ws_connected { Color::Green } else { Color::Red };
+    let pause_str = if app.log_paused { " [PAUSED]" } else { " [LIVE]" };
+    let module_str = if app.log_module_filter.is_empty() {
+        String::new()
+    } else {
+        format!(" module={}", app.log_module_filter)
+    };
+
+    let title = format!(
+        "Logs {} | {} lines{}{}",
+        Span::styled(live_dot, Style::default().fg(live_color)).content,
+        app.log_lines.len(),
+        pause_str,
+        module_str
+    );
+
+    let tabs = Tabs::new(level_labels)
+        .select(selected_idx)
+        .block(Block::default().borders(Borders::ALL).title(title))
+        .style(Style::default().fg(Color::Gray))
+        .highlight_style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD));
+    frame.render_widget(tabs, area);
+}
+
+fn draw_logs_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let height = area.height.saturating_sub(2) as usize;
+    let total = app.log_lines.len();
+
+    // Calculate visible window
+    let start = if total > height {
+        let max_start = total - height;
+        app.log_scroll_offset.min(max_start)
+    } else {
+        0
+    };
+    let end = (start + height).min(total);
+
+    let items: Vec<ListItem> = app
+        .log_lines
+        .iter()
+        .skip(start)
+        .take(end.saturating_sub(start))
+        .map(|line| {
+            let level_upper = line.level.to_uppercase();
+            let (level_color, level_mod) = match level_upper.as_str() {
+                "ERROR" => (Color::Red, Modifier::BOLD),
+                "WARN"  => (Color::Yellow, Modifier::empty()),
+                "INFO"  => (Color::Cyan, Modifier::empty()),
+                _       => (Color::DarkGray, Modifier::empty()),
+            };
+            let ts: String = line.timestamp.chars().skip(11).take(8).collect();
+            let target_short: String = line.target.chars().take(24).collect();
+
+            ListItem::new(Line::from(vec![
+                Span::styled(
+                    format!("[{:<5}] ", &level_upper),
+                    Style::default().fg(level_color).add_modifier(level_mod),
+                ),
+                Span::styled(format!("{ts} "), Style::default().fg(Color::DarkGray)),
+                Span::styled(format!("{:<24} ", target_short), Style::default().fg(Color::Blue)),
+                Span::raw(line.message.clone()),
+            ]))
+        })
+        .collect();
+
+    let block_title = if total > height {
+        format!("Log lines (scroll: {}/{})", start + 1, total.saturating_sub(height - 1))
+    } else {
+        "Log lines".to_string()
+    };
+
+    let list = List::new(items)
+        .block(Block::default().borders(Borders::ALL).title(block_title));
+    frame.render_widget(list, area);
+}
+
+// ── System Status tab ─────────────────────────────────────────────────────────
+
+fn draw_status_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let block = Block::default().borders(Borders::ALL).title("System Status");
+
+    let Some(status) = app.system_status.as_ref() else {
+        let loading_msg = if app.system_status_last_refresh.is_none() {
+            "Press r to load system status."
+        } else {
+            "Loading..."
+        };
+        let msg = Paragraph::new(loading_msg)
+            .block(block)
+            .alignment(Alignment::Center);
+        frame.render_widget(msg, area);
+        return;
+    };
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    // Two-column layout
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(inner);
+
+    // Left column: core stats
+    let uptime_secs = status.uptime_seconds;
+    let uptime_str = format_uptime(uptime_secs);
+    let started_at_str: String = status.started_at.chars().take(19).collect::<String>().replace('T', " ");
+
+    let left_refresh = app.system_status_last_refresh.as_deref().unwrap_or("never");
+    let time_label = if app.time_utc { "(UTC)" } else { "(local)" };
+
+    let mut left_lines: Vec<Line> = vec![
+        Line::from(Span::styled("System", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD | Modifier::UNDERLINED))),
+        Line::from(""),
+        status_detail_row("Version", &status.version),
+        status_detail_row("Started", &started_at_str),
+        status_detail_row("Uptime", &uptime_str),
+        status_detail_row("Last refresh", &format!("{} {}", left_refresh, time_label)),
+        Line::from(""),
+        Line::from(Span::styled("Automations", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD | Modifier::UNDERLINED))),
+        Line::from(""),
+        status_detail_row("Total rules", &status.rules_total.to_string()),
+        status_detail_row("Enabled", &status.rules_enabled.to_string()),
+    ];
+
+    if status.rules_total > 0 {
+        let disabled = status.rules_total.saturating_sub(status.rules_enabled);
+        left_lines.push(status_detail_row("Disabled", &disabled.to_string()));
+    }
+
+    let left = Paragraph::new(left_lines).wrap(Wrap { trim: false });
+    frame.render_widget(left, cols[0]);
+
+    // Right column: devices, plugins, storage
+    let state_db_kb = status.state_db_bytes / 1024;
+    let history_db_kb = status.history_db_bytes / 1024;
+
+    let right_lines: Vec<Line> = vec![
+        Line::from(Span::styled("Devices & Plugins", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD | Modifier::UNDERLINED))),
+        Line::from(""),
+        status_detail_row("Total devices", &status.devices_total.to_string()),
+        status_detail_row("Active plugins", &status.plugins_active.to_string()),
+        Line::from(""),
+        Line::from(Span::styled("Storage", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD | Modifier::UNDERLINED))),
+        Line::from(""),
+        status_detail_row("State DB", &format!("{} KB", state_db_kb)),
+        status_detail_row("History DB", &format!("{} KB", history_db_kb)),
+    ];
+
+    let right = Paragraph::new(right_lines).wrap(Wrap { trim: false });
+    frame.render_widget(right, cols[1]);
+}
+
+fn status_detail_row(label: &str, value: &str) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(
+            format!("  {:<16}", label),
+            Style::default().fg(Color::DarkGray),
+        ),
+        Span::styled(value.to_string(), Style::default().fg(Color::White)),
+    ])
+}
+
+fn format_uptime(secs: u64) -> String {
+    let days = secs / 86400;
+    let hours = (secs % 86400) / 3600;
+    let mins = (secs % 3600) / 60;
+    if days > 0 {
+        format!("{}d {}h {}m", days, hours, mins)
+    } else if hours > 0 {
+        format!("{}h {}m", hours, mins)
+    } else {
+        format!("{}m", mins)
+    }
 }
 
 fn draw_plugin_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
@@ -1570,11 +2157,13 @@ fn list_is_empty(app: &App) -> bool {
         Tab::Devices => app.devices.is_empty(),
         Tab::Scenes => app.scenes.is_empty(),
         Tab::Areas => app.areas.is_empty(),
-        Tab::Automations => app.automations.is_empty(),
+        Tab::Automations => app.visible_automations().is_empty(),
         Tab::Events => app.filtered_events().is_empty(),
         Tab::Users => app.users.is_empty(),
         Tab::Plugins => app.plugins.is_empty(),
         Tab::Manage => false,
+        Tab::Logs => true,
+        Tab::Status => true,
     }
 }
 

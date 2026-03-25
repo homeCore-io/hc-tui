@@ -78,6 +78,53 @@ pub struct Rule {
     pub name: String,
     pub enabled: bool,
     pub priority: i32,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub trigger: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuleFiring {
+    pub timestamp: String,
+    pub conditions_passed: bool,
+    pub actions_ran: usize,
+    pub eval_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuleGroup {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub rule_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemStatus {
+    pub version: String,
+    pub uptime_seconds: u64,
+    pub started_at: String,
+    pub rules_total: usize,
+    pub rules_enabled: usize,
+    pub devices_total: usize,
+    pub plugins_active: usize,
+    pub state_db_bytes: u64,
+    pub history_db_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogLine {
+    pub timestamp: String,
+    pub level: String,
+    pub target: String,
+    pub message: String,
+    #[serde(default)]
+    pub fields: Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -169,6 +216,16 @@ impl HomeCoreClient {
         format!("{}/api/v1/events/stream", ws_base.trim_end_matches('/'))
     }
 
+    pub fn ws_logs_url(&self) -> String {
+        let mut ws_base = self.base_url.clone();
+        if ws_base.starts_with("https://") {
+            ws_base = ws_base.replacen("https://", "wss://", 1);
+        } else if ws_base.starts_with("http://") {
+            ws_base = ws_base.replacen("http://", "ws://", 1);
+        }
+        format!("{}/api/v1/logs/stream", ws_base.trim_end_matches('/'))
+    }
+
     pub async fn login(&self, username: &str, password: &str) -> Result<LoginResponse> {
         let url = self.endpoint("/auth/login");
         let resp = self
@@ -203,6 +260,100 @@ impl HomeCoreClient {
 
     pub async fn list_automations(&self) -> Result<Vec<Rule>> {
         let resp = self.request(Method::GET, "/automations").await?;
+        Self::parse_json(resp).await
+    }
+
+    pub async fn list_automations_filtered(
+        &self,
+        tag: Option<&str>,
+        trigger: Option<&str>,
+        stale: bool,
+    ) -> Result<Vec<Rule>> {
+        let mut params: Vec<String> = Vec::new();
+        if let Some(t) = tag {
+            if !t.is_empty() {
+                params.push(format!("tag={}", urlencoding::encode(t)));
+            }
+        }
+        if let Some(tr) = trigger {
+            if !tr.is_empty() && tr != "all" {
+                params.push(format!("trigger={}", urlencoding::encode(tr)));
+            }
+        }
+        if stale {
+            params.push("stale=true".to_string());
+        }
+        let path = if params.is_empty() {
+            "/automations".to_string()
+        } else {
+            format!("/automations?{}", params.join("&"))
+        };
+        let resp = self.request(Method::GET, &path).await?;
+        Self::parse_json(resp).await
+    }
+
+    pub async fn get_automation_history(&self, id: &str) -> Result<Vec<RuleFiring>> {
+        let path = format!("/automations/{id}/history");
+        let resp = self.request(Method::GET, &path).await?;
+        Self::parse_json(resp).await
+    }
+
+    pub async fn clone_automation(&self, id: &str) -> Result<Rule> {
+        let path = format!("/automations/{id}/clone");
+        let resp = self.request(Method::POST, &path).await?;
+        Self::parse_json(resp).await
+    }
+
+    pub async fn delete_automation(&self, id: &str) -> Result<()> {
+        let path = format!("/automations/{id}");
+        let resp = self.request(Method::DELETE, &path).await?;
+        Self::parse_empty(resp).await
+    }
+
+    pub async fn toggle_automation(&self, id: &str, enabled: bool) -> Result<()> {
+        let path = format!("/automations/{id}");
+        let body = json!({ "enabled": enabled });
+        let resp = self.request_with_json(Method::PATCH, &path, body).await?;
+        Self::parse_empty(resp).await
+    }
+
+    pub async fn bulk_toggle_automations(&self, ids: &[String], enabled: bool) -> Result<()> {
+        let body = json!({ "ids": ids, "enabled": enabled });
+        let resp = self.request_with_json(Method::PATCH, "/automations", body).await?;
+        Self::parse_empty(resp).await
+    }
+
+    pub async fn list_automation_groups(&self) -> Result<Vec<RuleGroup>> {
+        let resp = self.request(Method::GET, "/automations/groups").await?;
+        Self::parse_json(resp).await
+    }
+
+    pub async fn create_automation_group(&self, name: &str) -> Result<RuleGroup> {
+        let body = json!({ "name": name, "rule_ids": [] });
+        let resp = self.request_with_json(Method::POST, "/automations/groups", body).await?;
+        Self::parse_json(resp).await
+    }
+
+    pub async fn delete_automation_group(&self, id: &str) -> Result<()> {
+        let path = format!("/automations/groups/{id}");
+        let resp = self.request(Method::DELETE, &path).await?;
+        Self::parse_empty(resp).await
+    }
+
+    pub async fn enable_automation_group(&self, id: &str) -> Result<()> {
+        let path = format!("/automations/groups/{id}/enable");
+        let resp = self.request(Method::POST, &path).await?;
+        Self::parse_empty(resp).await
+    }
+
+    pub async fn disable_automation_group(&self, id: &str) -> Result<()> {
+        let path = format!("/automations/groups/{id}/disable");
+        let resp = self.request(Method::POST, &path).await?;
+        Self::parse_empty(resp).await
+    }
+
+    pub async fn get_system_status(&self) -> Result<SystemStatus> {
+        let resp = self.request(Method::GET, "/system/status").await?;
         Self::parse_json(resp).await
     }
 
