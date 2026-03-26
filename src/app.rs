@@ -930,8 +930,9 @@ impl App {
             return;
         }
 
-        // Areas tab two-pane navigation
-        if matches!(self.active_tab(), Tab::Areas) {
+        // Areas tab two-pane navigation (but allow Tab/Shift+Tab and other global keys)
+        if matches!(self.active_tab(), Tab::Areas) 
+            && !matches!(key.code, KeyCode::Tab | KeyCode::BackTab | KeyCode::Char('q') | KeyCode::Char('r') | KeyCode::Char('T')) {
             self.on_key_areas_pane(key).await;
             return;
         }
