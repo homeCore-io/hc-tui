@@ -117,9 +117,24 @@ impl PluginDetailPanel {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AdminSubPanel {
+pub enum DeviceSubPanel {
+    All,
     Switches,
     Timers,
+}
+
+impl DeviceSubPanel {
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::Switches => "Switches",
+            Self::Timers => "Timers",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdminSubPanel {
     Modes,
     Status,
     Users,
@@ -302,6 +317,7 @@ pub struct App {
     pub areas_list_selected: usize, // selection index for areas list pane
     pub areas_devices_selected: usize, // selection index for devices list pane
     pub user_editor: Option<UserEditor>,
+    pub device_sub: DeviceSubPanel,
     pub admin_sub: AdminSubPanel,
     pub switches: Vec<DeviceState>,
     pub timers: Vec<DeviceState>,
@@ -394,7 +410,8 @@ impl App {
             areas_list_selected: 0,
             areas_devices_selected: 0,
             user_editor: None,
-            admin_sub: AdminSubPanel::Switches,
+            device_sub: DeviceSubPanel::All,
+            admin_sub: AdminSubPanel::Modes,
             switches: Vec::new(),
             timers: Vec::new(),
             modes: Vec::new(),
@@ -972,11 +989,27 @@ impl App {
                     }
                 }
             }
+            KeyCode::Left if matches!(self.active_tab(), Tab::Devices) => {
+                self.device_sub = match self.device_sub {
+                    DeviceSubPanel::All => DeviceSubPanel::Timers,
+                    DeviceSubPanel::Switches => DeviceSubPanel::All,
+                    DeviceSubPanel::Timers => DeviceSubPanel::Switches,
+                };
+                self.selected = 0;
+                self.error = None;
+            }
+            KeyCode::Right if matches!(self.active_tab(), Tab::Devices) => {
+                self.device_sub = match self.device_sub {
+                    DeviceSubPanel::All => DeviceSubPanel::Switches,
+                    DeviceSubPanel::Switches => DeviceSubPanel::Timers,
+                    DeviceSubPanel::Timers => DeviceSubPanel::All,
+                };
+                self.selected = 0;
+                self.error = None;
+            }
             KeyCode::Left if matches!(self.active_tab(), Tab::Manage) => {
                 self.admin_sub = match self.admin_sub {
-                    AdminSubPanel::Switches => AdminSubPanel::Users,
-                    AdminSubPanel::Timers => AdminSubPanel::Switches,
-                    AdminSubPanel::Modes => AdminSubPanel::Timers,
+                    AdminSubPanel::Modes => AdminSubPanel::Users,
                     AdminSubPanel::Status => AdminSubPanel::Modes,
                     AdminSubPanel::Users => AdminSubPanel::Status,
                 };
@@ -988,11 +1021,9 @@ impl App {
             }
             KeyCode::Right if matches!(self.active_tab(), Tab::Manage) => {
                 self.admin_sub = match self.admin_sub {
-                    AdminSubPanel::Switches => AdminSubPanel::Timers,
-                    AdminSubPanel::Timers => AdminSubPanel::Modes,
                     AdminSubPanel::Modes => AdminSubPanel::Status,
                     AdminSubPanel::Status => AdminSubPanel::Users,
-                    AdminSubPanel::Users => AdminSubPanel::Switches,
+                    AdminSubPanel::Users => AdminSubPanel::Modes,
                 };
                 self.selected = 0;
                 self.error = None;
@@ -1072,7 +1103,29 @@ impl App {
             }
             KeyCode::Enter => {
                 match self.active_tab() {
-                    Tab::Devices => self.open_selected_device_editor(),
+                    Tab::Devices => {
+                        match self.device_sub {
+                            DeviceSubPanel::Switches => {
+                                if let Some(sw) = self.switches.get(self.selected) {
+                                    self.switch_editor = Some(SwitchEditor {
+                                        id: sw.device_id.clone(),
+                                        label: sw.name.clone(),
+                                        field: SwitchEditField::Id,
+                                    });
+                                }
+                            }
+                            DeviceSubPanel::Timers => {
+                                if let Some(t) = self.timers.get(self.selected) {
+                                    self.timer_editor = Some(TimerEditor {
+                                        id: t.device_id.clone(),
+                                        label: t.name.clone(),
+                                        field: TimerEditField::Id,
+                                    });
+                                }
+                            }
+                            DeviceSubPanel::All => self.open_selected_device_editor(),
+                        }
+                    }
                     Tab::Areas   => self.open_area_editor_edit(),
                     Tab::Plugins => self.open_plugin_detail(),
                     Tab::Manage if matches!(self.admin_sub, AdminSubPanel::Users) => self.open_user_editor_role(),
@@ -1081,6 +1134,25 @@ impl App {
             }
             KeyCode::Char('n') => {
                 match self.active_tab() {
+                    Tab::Devices => {
+                        match self.device_sub {
+                            DeviceSubPanel::Switches => {
+                                self.switch_editor = Some(SwitchEditor {
+                                    id: String::new(),
+                                    label: String::new(),
+                                    field: SwitchEditField::Id,
+                                });
+                            }
+                            DeviceSubPanel::Timers => {
+                                self.timer_editor = Some(TimerEditor {
+                                    id: String::new(),
+                                    label: String::new(),
+                                    field: TimerEditField::Id,
+                                });
+                            }
+                            DeviceSubPanel::All => {}
+                        }
+                    }
                     Tab::Areas => self.open_area_editor_create(),
                     Tab::Manage => {
                         if matches!(self.admin_sub, AdminSubPanel::Users) && self.is_admin() {
@@ -1094,7 +1166,13 @@ impl App {
             }
             KeyCode::Char('d') => {
                 match self.active_tab() {
-                    Tab::Devices => self.delete_selected_device().await,
+                    Tab::Devices => {
+                        match self.device_sub {
+                            DeviceSubPanel::Switches => self.delete_selected_device_switch().await,
+                            DeviceSubPanel::Timers => self.delete_selected_device_timer().await,
+                            DeviceSubPanel::All => self.delete_selected_device().await,
+                        }
+                    }
                     Tab::Areas   => self.delete_selected_area().await,
                     Tab::Plugins => self.deregister_selected_plugin().await,
                     Tab::Manage => {
@@ -2003,7 +2081,11 @@ impl App {
 
     fn active_items_len(&self) -> usize {
         match self.active_tab() {
-            Tab::Devices => self.visible_devices().len(),
+            Tab::Devices => match self.device_sub {
+                DeviceSubPanel::All => self.visible_devices().len(),
+                DeviceSubPanel::Switches => self.switches.len(),
+                DeviceSubPanel::Timers => self.timers.len(),
+            },
             Tab::Scenes => self.scenes.len(),
             Tab::Areas => self.areas.len(),
             Tab::Automations => self.visible_automations().len(),
@@ -2011,8 +2093,6 @@ impl App {
             Tab::Logs => 0,
             Tab::Plugins => self.plugins.len(),
             Tab::Manage => match self.admin_sub {
-                AdminSubPanel::Switches => self.switches.len(),
-                AdminSubPanel::Timers => self.timers.len(),
                 AdminSubPanel::Modes => self.modes.len(),
                 AdminSubPanel::Status => 0,
                 AdminSubPanel::Users => self.users.len(),
@@ -2457,6 +2537,36 @@ impl App {
         }
     }
 
+    async fn delete_selected_device_switch(&mut self) {
+        let Some(sw) = self.switches.get(self.selected).cloned() else { return };
+        let id = sw.device_id.clone();
+        match self.client.delete_device(&id).await {
+            Ok(_) => {
+                self.switches.retain(|s| s.device_id != id);
+                self.devices.retain(|d| d.device_id != id);
+                self.clamp_selection();
+                self.status = format!("Deleted switch '{id}'");
+                let _ = self.save_to_cache().await;
+            }
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    async fn delete_selected_device_timer(&mut self) {
+        let Some(t) = self.timers.get(self.selected).cloned() else { return };
+        let id = t.device_id.clone();
+        match self.client.delete_device(&id).await {
+            Ok(_) => {
+                self.timers.retain(|ti| ti.device_id != id);
+                self.devices.retain(|d| d.device_id != id);
+                self.clamp_selection();
+                self.status = format!("Deleted timer '{id}'");
+                let _ = self.save_to_cache().await;
+            }
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
     // ── Plugin deregister ─────────────────────────────────────────────────────
 
     async fn deregister_selected_plugin(&mut self) {
@@ -2698,20 +2808,6 @@ impl App {
     fn open_manage_editor(&mut self) {
         self.error = None;
         match self.admin_sub {
-            AdminSubPanel::Switches => {
-                self.switch_editor = Some(SwitchEditor {
-                    id: String::new(),
-                    label: String::new(),
-                    field: SwitchEditField::Id,
-                });
-            }
-            AdminSubPanel::Timers => {
-                self.timer_editor = Some(TimerEditor {
-                    id: String::new(),
-                    label: String::new(),
-                    field: TimerEditField::Id,
-                });
-            }
             AdminSubPanel::Modes => {
                 self.mode_editor = Some(ModeEditor {
                     id: String::new(),
@@ -2740,32 +2836,6 @@ impl App {
 
     async fn delete_selected_manage_item(&mut self) {
         match self.admin_sub {
-            AdminSubPanel::Switches => {
-                let Some(sw) = self.switches.get(self.selected).cloned() else { return };
-                let id = sw.device_id.clone();
-                match self.client.delete_device(&id).await {
-                    Ok(_) => {
-                        self.switches.retain(|s| s.device_id != id);
-                        self.devices.retain(|d| d.device_id != id);
-                        self.clamp_selection();
-                        self.status = format!("Deleted {id}");
-                    }
-                    Err(e) => self.error = Some(e.to_string()),
-                }
-            }
-            AdminSubPanel::Timers => {
-                let Some(t) = self.timers.get(self.selected).cloned() else { return };
-                let id = t.device_id.clone();
-                match self.client.delete_device(&id).await {
-                    Ok(_) => {
-                        self.timers.retain(|ti| ti.device_id != id);
-                        self.devices.retain(|d| d.device_id != id);
-                        self.clamp_selection();
-                        self.status = format!("Deleted {id}");
-                    }
-                    Err(e) => self.error = Some(e.to_string()),
-                }
-            }
             AdminSubPanel::Modes => {
                 let Some(m) = self.modes.get(self.selected).cloned() else { return };
                 let id = m.config.id.clone();

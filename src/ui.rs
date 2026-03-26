@@ -1,7 +1,7 @@
 use crate::app::{
     format_timestamp_utc, AdminSubPanel, App, AreaEditor, AutomationFilterBar,
     AutomationFilterField, DeleteConfirm,
-    DeviceEditField, DeviceViewMode, FocusField, LogLevelFilter, LoginPhase,
+    DeviceEditField, DeviceSubPanel, DeviceViewMode, FocusField, LogLevelFilter, LoginPhase,
     ModeEditField, ModeEditor, ModeKind, PluginDetailPanel, SwitchEditField, SwitchEditor,
     Tab, TimerEditField, TimerEditor, UserEditField, UserEditMode, UserEditor,
 };
@@ -172,13 +172,28 @@ fn status_hints(app: &App) -> Vec<&'static str> {
     let mut hints = vec!["Tab/Shift+Tab menu", "1-9 jump tab", "j/k move", "r refresh", "q quit", "T time"];
     match app.active_tab() {
         Tab::Devices => {
-            hints.push("Spc toggle");
-            hints.push("t on/off");
-            hints.push("+/- brightness");
-            hints.push("l/u lock");
-            hints.push("v grouped/flat");
-            hints.push("Enter edit");
-            hints.push("d delete");
+            hints.push("◄/► panel");
+            match app.device_sub {
+                DeviceSubPanel::All => {
+                    hints.push("Spc toggle");
+                    hints.push("t on/off");
+                    hints.push("+/- brightness");
+                    hints.push("l/u lock");
+                    hints.push("v grouped/flat");
+                    hints.push("Enter edit");
+                    hints.push("d delete");
+                }
+                DeviceSubPanel::Switches => {
+                    hints.push("n new switch");
+                    hints.push("Enter edit");
+                    hints.push("d delete");
+                }
+                DeviceSubPanel::Timers => {
+                    hints.push("n new timer");
+                    hints.push("Enter edit");
+                    hints.push("d delete");
+                }
+            }
         }
         Tab::Scenes => { hints.push("a activate"); }
         Tab::Events => { hints.push("f filter"); }
@@ -224,7 +239,6 @@ fn status_hints(app: &App) -> Vec<&'static str> {
             hints.push("/ module");
             hints.push("c clear");
         }
-        // Status moved under Manage sub-panels.
     }
 
     if app.device_editor.is_some() {
@@ -1534,13 +1548,43 @@ fn draw_plugin_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
 }
 
 fn draw_dashboard(frame: &mut Frame<'_>, app: &App, area: Rect) {
-    let panes = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(0)])
         .split(area);
 
-    draw_device_list(frame, app, panes[0]);
-    draw_device_detail(frame, app, panes[1]);
+    let active_idx = match app.device_sub {
+        DeviceSubPanel::All => 0,
+        DeviceSubPanel::Switches => 1,
+        DeviceSubPanel::Timers => 2,
+    };
+    let sub_tabs = Tabs::new(vec![
+        Line::from("All"),
+        Line::from("Switches"),
+        Line::from("Timers"),
+    ])
+    .select(active_idx)
+    .block(Block::default().borders(Borders::ALL).title("Devices"))
+    .style(Style::default().fg(Color::Gray))
+    .highlight_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+    frame.render_widget(sub_tabs, layout[0]);
+
+    match app.device_sub {
+        DeviceSubPanel::All => {
+            let panes = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+                .split(layout[1]);
+            draw_device_list(frame, app, panes[0]);
+            draw_device_detail(frame, app, panes[1]);
+        }
+        DeviceSubPanel::Switches => {
+            draw_switches_list(frame, app, layout[1]);
+        }
+        DeviceSubPanel::Timers => {
+            draw_timers_list(frame, app, layout[1]);
+        }
+    }
 }
 
 fn draw_device_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
@@ -2085,6 +2129,77 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
     frame.render_widget(para, inner);
 }
 
+fn draw_switches_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let highlight = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+
+    let items: Vec<ListItem> = app
+        .switches
+        .iter()
+        .map(|s| {
+            let on = s.attributes.get("on").and_then(|v| v.as_bool()).unwrap_or(false);
+            let (dot, dot_color) = if on { ("●", Color::Green) } else { ("○", Color::DarkGray) };
+            let label = if s.name != s.device_id { format!("  {}", s.name) } else { String::new() };
+            ListItem::new(Line::from(vec![
+                Span::styled(format!("  {dot} "), Style::default().fg(dot_color)),
+                Span::styled(format!("{:<36}", s.device_id), Style::default().fg(Color::White)),
+                Span::styled(label, Style::default().fg(Color::DarkGray)),
+            ]))
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(Block::default().borders(Borders::ALL).title(format!("Switches [{}]", app.switches.len())))
+        .highlight_style(highlight)
+        .highlight_symbol(">> ");
+
+    let mut state = ratatui::widgets::ListState::default();
+    if !app.switches.is_empty() {
+        state.select(Some(app.selected.min(app.switches.len() - 1)));
+    }
+    frame.render_stateful_widget(list, area, &mut state);
+}
+
+fn draw_timers_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let highlight = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+
+    let items: Vec<ListItem> = app
+        .timers
+        .iter()
+        .map(|t| {
+            let state = t.attributes.get("state").and_then(|v| v.as_str()).unwrap_or("idle");
+            let state_color = match state {
+                "running"  => Color::Green,
+                "finished" => Color::Yellow,
+                "paused"   => Color::Cyan,
+                _          => Color::DarkGray,
+            };
+            let label = if t.name != t.device_id { format!("  {}", t.name) } else { String::new() };
+            ListItem::new(Line::from(vec![
+                Span::styled(format!("  {:<36}", t.device_id), Style::default().fg(Color::White)),
+                Span::styled(format!("{:<10}", state), Style::default().fg(state_color)),
+                Span::styled(label, Style::default().fg(Color::DarkGray)),
+            ]))
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(Block::default().borders(Borders::ALL).title(format!("Timers [{}]", app.timers.len())))
+        .highlight_style(highlight)
+        .highlight_symbol(">> ");
+
+    let mut state = ratatui::widgets::ListState::default();
+    if !app.timers.is_empty() {
+        state.select(Some(app.selected.min(app.timers.len() - 1)));
+    }
+    frame.render_stateful_widget(list, area, &mut state);
+}
+
 fn draw_device_editor(frame: &mut Frame<'_>, app: &App) {
     let Some(editor) = app.device_editor.as_ref() else {
         return;
@@ -2447,15 +2562,11 @@ fn draw_manage_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
         .split(area);
 
     let active_idx = match app.admin_sub {
-        AdminSubPanel::Switches => 0,
-        AdminSubPanel::Timers   => 1,
-        AdminSubPanel::Modes    => 2,
-        AdminSubPanel::Status   => 3,
-        AdminSubPanel::Users    => 4,
+        AdminSubPanel::Modes    => 0,
+        AdminSubPanel::Status   => 1,
+        AdminSubPanel::Users    => 2,
     };
     let sub_tabs = Tabs::new(vec![
-        Line::from("Switches"),
-        Line::from("Timers"),
         Line::from("Modes"),
         Line::from("Status"),
         Line::from("Users"),
@@ -2482,39 +2593,6 @@ fn draw_manage_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
     }
 
     let (items, title, len): (Vec<ListItem<'_>>, &str, usize) = match app.admin_sub {
-        AdminSubPanel::Switches => {
-            let items = app.switches.iter().map(|s| {
-                let on = s.attributes.get("on").and_then(|v| v.as_bool()).unwrap_or(false);
-                let (dot, dot_color) = if on { ("●", Color::Green) } else { ("○", Color::DarkGray) };
-                let label = if s.name != s.device_id { format!("  {}", s.name) } else { String::new() };
-                ListItem::new(Line::from(vec![
-                    Span::styled(format!("  {dot} "), Style::default().fg(dot_color)),
-                    Span::styled(format!("{:<36}", s.device_id), Style::default().fg(Color::White)),
-                    Span::styled(label, Style::default().fg(Color::DarkGray)),
-                ]))
-            }).collect();
-            let len = app.switches.len();
-            (items, "Switches", len)
-        }
-        AdminSubPanel::Timers => {
-            let items = app.timers.iter().map(|t| {
-                let state = t.attributes.get("state").and_then(|v| v.as_str()).unwrap_or("idle");
-                let state_color = match state {
-                    "running"  => Color::Green,
-                    "finished" => Color::Yellow,
-                    "paused"   => Color::Cyan,
-                    _          => Color::DarkGray,
-                };
-                let label = if t.name != t.device_id { format!("  {}", t.name) } else { String::new() };
-                ListItem::new(Line::from(vec![
-                    Span::styled(format!("  {:<36}", t.device_id), Style::default().fg(Color::White)),
-                    Span::styled(format!("{:<10}", state), Style::default().fg(state_color)),
-                    Span::styled(label, Style::default().fg(Color::DarkGray)),
-                ]))
-            }).collect();
-            let len = app.timers.len();
-            (items, "Timers", len)
-        }
         AdminSubPanel::Modes => {
             let items = app.modes.iter().map(|m| {
                 let on = m.state.as_ref()
