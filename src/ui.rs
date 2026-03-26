@@ -27,7 +27,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &App) {
         .constraints([
             Constraint::Length(3),
             Constraint::Min(5),
-            Constraint::Length(3),
+            Constraint::Length(4),
         ])
         .split(frame.area());
 
@@ -91,7 +91,6 @@ fn draw_status_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
         .map(|u| format!("{:?}", u.role))
         .unwrap_or_else(|| "unknown".to_string());
     let live = if app.ws_connected { "●" } else { "○" };
-    let live_color = if app.ws_connected { Color::Green } else { Color::Red };
 
     let status_text = if let Some(err) = &app.error {
         format!("ERROR: {err}")
@@ -105,14 +104,14 @@ fn draw_status_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
         .map(|u| u.username.as_str())
         .unwrap_or("n/a");
 
-    let mut hints = vec!["Tab/← → tab", "j/k move", "r refresh", "q quit", "T UTC toggle"];
+    let mut hints = vec!["Tab prev/next", "j/k move", "r refresh", "q quit", "T time"];
     match app.active_tab() {
         Tab::Devices => {
             hints.push("Spc toggle");
             hints.push("t on/off");
-            hints.push("+/- bright");
+            hints.push("+/- brightness");
             hints.push("l/u lock");
-            hints.push("v view");
+            hints.push("v grouped/flat");
             hints.push("Enter edit");
             hints.push("d delete");
         }
@@ -167,7 +166,7 @@ fn draw_status_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
         hints = vec!["Tab field", "Space cycle role", "Enter save", "Esc cancel"];
     }
     if app.plugin_detail_open {
-        hints = vec!["1/2/3 or ←/→ panel", "b discover bridges", "p pair bridges", "r refresh", "Esc close", "q quit"];
+        hints = vec!["1/2/3 panel", "b discover", "p pair", "r refresh", "Esc close", "q quit"];
     }
     if app.switch_editor.is_some() {
         hints = vec!["Tab field", "Enter create", "Esc cancel"];
@@ -179,23 +178,82 @@ fn draw_status_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
         hints = vec!["Tab field", "Space kind", "Enter create", "Esc cancel"];
     }
 
-    let hint_str = hints.join(" | ");
+    let inner_width = area.width.saturating_sub(2) as usize;
+    let status_line = fit_single_line(
+        &format!("{status_text} | {user_str} ({role}) {live}"),
+        inner_width,
+    );
+    let hint_str = fit_hints_line(&hints, inner_width.saturating_sub(6));
     let style = if app.error.is_some() {
         Style::default().fg(Color::Red)
     } else {
         Style::default()
     };
 
-    let line = Line::from(vec![
-        Span::styled(format!("{status_text} | {user_str} ({role}) "), style),
-        Span::styled(live, Style::default().fg(live_color)),
-        Span::styled(format!(" | {hint_str}"), style),
+    let line1 = Line::from(vec![Span::styled(status_line, style)]);
+    let line2 = Line::from(vec![
+        Span::styled("Keys: ", Style::default().fg(Color::DarkGray)),
+        Span::styled(hint_str, Style::default().fg(Color::White)),
     ]);
 
-    let footer = Paragraph::new(line)
+    let footer = Paragraph::new(vec![line1, line2])
         .block(Block::default().borders(Borders::ALL).title("Status"))
-        .wrap(Wrap { trim: true });
+        .wrap(Wrap { trim: false });
     frame.render_widget(footer, area);
+}
+
+fn fit_single_line(input: &str, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
+    if input.chars().count() <= max_chars {
+        return input.to_string();
+    }
+    if max_chars <= 3 {
+        return ".".repeat(max_chars);
+    }
+    let mut out = input
+        .chars()
+        .take(max_chars.saturating_sub(3))
+        .collect::<String>();
+    out.push_str("...");
+    out
+}
+
+fn fit_hints_line(hints: &[&str], max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
+
+    let sep = " | ";
+    let sep_len = sep.chars().count();
+    let mut out = String::new();
+    let mut used = 0usize;
+
+    for (idx, hint) in hints.iter().enumerate() {
+        let hint_len = hint.chars().count();
+        let join_len = if idx == 0 { 0 } else { sep_len };
+
+        if used + join_len + hint_len > max_chars {
+            if out.is_empty() {
+                return fit_single_line(hint, max_chars);
+            }
+            if used + 4 <= max_chars {
+                out.push(' ');
+                out.push_str("...");
+            }
+            break;
+        }
+
+        if idx > 0 {
+            out.push_str(sep);
+            used += sep_len;
+        }
+        out.push_str(hint);
+        used += hint_len;
+    }
+
+    out
 }
 
 fn draw_login(frame: &mut Frame<'_>, app: &App) {
