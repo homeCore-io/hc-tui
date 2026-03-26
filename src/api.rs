@@ -255,7 +255,7 @@ impl HomeCoreClient {
 
     pub async fn list_areas(&self) -> Result<Vec<Area>> {
         let resp = self.request(Method::GET, "/areas").await?;
-        Self::parse_json(resp).await
+        Self::parse_areas_response(resp).await
     }
 
     pub async fn list_automations(&self) -> Result<Vec<Rule>> {
@@ -376,14 +376,14 @@ impl HomeCoreClient {
     pub async fn create_area(&self, name: &str) -> Result<Area> {
         let body = serde_json::json!({ "name": name });
         let resp = self.request_with_json(Method::POST, "/areas", body).await?;
-        Self::parse_json(resp).await
+        Self::parse_area_response(resp).await
     }
 
     pub async fn rename_area(&self, id: &str, name: &str) -> Result<Area> {
         let path = format!("/areas/{id}");
         let body = serde_json::json!({ "name": name });
         let resp = self.request_with_json(Method::PATCH, &path, body).await?;
-        Self::parse_json(resp).await
+        Self::parse_area_response(resp).await
     }
 
     pub async fn delete_area(&self, id: &str) -> Result<()> {
@@ -853,6 +853,97 @@ impl HomeCoreClient {
         }
 
         Ok(events)
+    }
+
+    async fn parse_areas_response(resp: Response) -> Result<Vec<Area>> {
+        let status = resp.status();
+        if !status.is_success() {
+            let message = Self::extract_error_message(resp).await;
+            return Err(anyhow!("{}: {}", status, message));
+        }
+
+        let text = resp
+            .text()
+            .await
+            .context("failed to read areas response body")?;
+        let parsed = serde_json::from_str::<Value>(&text).with_context(|| {
+            let snippet = text.chars().take(300).collect::<String>();
+            format!("failed to parse areas json: {snippet}")
+        })?;
+
+        let arr = parsed
+            .as_array()
+            .or_else(|| parsed.get("areas").and_then(Value::as_array))
+            .or_else(|| parsed.get("data").and_then(Value::as_array))
+            .ok_or_else(|| anyhow!("areas payload was not a JSON array"))?;
+
+        let areas = arr.iter().filter_map(Self::parse_area_value).collect::<Vec<_>>();
+        Ok(areas)
+    }
+
+    async fn parse_area_response(resp: Response) -> Result<Area> {
+        let status = resp.status();
+        if !status.is_success() {
+            let message = Self::extract_error_message(resp).await;
+            return Err(anyhow!("{}: {}", status, message));
+        }
+
+        let text = resp
+            .text()
+            .await
+            .context("failed to read area response body")?;
+        let parsed = serde_json::from_str::<Value>(&text).with_context(|| {
+            let snippet = text.chars().take(300).collect::<String>();
+            format!("failed to parse area json: {snippet}")
+        })?;
+
+        let value = parsed.get("data").unwrap_or(&parsed);
+        Self::parse_area_value(value).ok_or_else(|| anyhow!("failed to parse area object"))
+    }
+
+    fn parse_area_value(value: &Value) -> Option<Area> {
+        let obj = value.as_object()?;
+
+        let id = obj
+            .get("id")
+            .or_else(|| obj.get("area_id"))
+            .and_then(Value::as_str)
+            .map(ToString::to_string)?;
+
+        let name = obj
+            .get("name")
+            .or_else(|| obj.get("label"))
+            .and_then(Value::as_str)
+            .map(ToString::to_string)
+            .unwrap_or_else(|| id.clone());
+
+        let device_ids = if let Some(arr) = obj
+            .get("device_ids")
+            .or_else(|| obj.get("deviceIds"))
+            .and_then(Value::as_array)
+        {
+            arr.iter()
+                .filter_map(Value::as_str)
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        } else if let Some(arr) = obj.get("devices").and_then(Value::as_array) {
+            arr.iter()
+                .filter_map(|v| {
+                    v.as_str()
+                        .map(ToString::to_string)
+                        .or_else(|| v.get("device_id").and_then(Value::as_str).map(ToString::to_string))
+                        .or_else(|| v.get("id").and_then(Value::as_str).map(ToString::to_string))
+                })
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+
+        Some(Area {
+            id,
+            name,
+            device_ids,
+        })
     }
 }
 
