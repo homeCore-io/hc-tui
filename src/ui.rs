@@ -22,12 +22,14 @@ pub fn draw(frame: &mut Frame<'_>, app: &App) {
         return;
     }
 
+    let footer_height = compute_footer_height(app, frame.area().width);
+
     let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),
             Constraint::Min(5),
-            Constraint::Length(4),
+            Constraint::Length(footer_height),
         ])
         .split(frame.area());
 
@@ -104,6 +106,44 @@ fn draw_status_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
         .map(|u| u.username.as_str())
         .unwrap_or("n/a");
 
+    let hints = status_hints(app);
+
+    let inner_width = area.width.saturating_sub(2) as usize;
+    let status_line = fit_single_line(
+        &format!("{status_text} | {user_str} ({role}) {live}"),
+        inner_width,
+    );
+    let hint_lines = fit_hints_lines(&hints, inner_width);
+    let style = if app.error.is_some() {
+        Style::default().fg(Color::Red)
+    } else {
+        Style::default()
+    };
+
+    let mut lines = vec![Line::from(vec![Span::styled(status_line, style)])];
+    for (idx, text) in hint_lines.iter().enumerate() {
+        let prefix = if idx == 0 { "Keys: " } else { "      " };
+        lines.push(Line::from(vec![
+            Span::styled(prefix, Style::default().fg(Color::DarkGray)),
+            Span::styled(text.clone(), Style::default().fg(Color::White)),
+        ]));
+    }
+
+    let footer = Paragraph::new(lines)
+        .block(Block::default().borders(Borders::ALL).title("Status"))
+        .wrap(Wrap { trim: false });
+    frame.render_widget(footer, area);
+}
+
+fn compute_footer_height(app: &App, width: u16) -> u16 {
+    let inner_width = width.saturating_sub(2) as usize;
+    let hint_lines = fit_hints_lines(&status_hints(app), inner_width);
+    // content lines + top/bottom borders
+    let content_lines = 1usize + hint_lines.len();
+    (content_lines + 2) as u16
+}
+
+fn status_hints(app: &App) -> Vec<&'static str> {
     let mut hints = vec!["Tab prev/next", "j/k move", "r refresh", "q quit", "T time"];
     match app.active_tab() {
         Tab::Devices => {
@@ -156,50 +196,30 @@ fn draw_status_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
             hints.push("r refresh");
         }
     }
+
     if app.device_editor.is_some() {
-        hints = vec!["Tab field", "Enter save", "Esc cancel"];
+        return vec!["Tab field", "Enter save", "Esc cancel"];
     }
     if app.area_editor.is_some() {
-        hints = vec!["Enter save", "Esc cancel"];
+        return vec!["Enter save", "Esc cancel"];
     }
     if app.user_editor.is_some() {
-        hints = vec!["Tab field", "Space cycle role", "Enter save", "Esc cancel"];
+        return vec!["Tab field", "Space cycle role", "Enter save", "Esc cancel"];
     }
     if app.plugin_detail_open {
-        hints = vec!["1/2/3 panel", "b discover", "p pair", "r refresh", "Esc close", "q quit"];
+        return vec!["1/2/3 panel", "b discover", "p pair", "r refresh", "Esc close", "q quit"];
     }
     if app.switch_editor.is_some() {
-        hints = vec!["Tab field", "Enter create", "Esc cancel"];
+        return vec!["Tab field", "Enter create", "Esc cancel"];
     }
     if app.timer_editor.is_some() {
-        hints = vec!["Tab field", "Enter create", "Esc cancel"];
+        return vec!["Tab field", "Enter create", "Esc cancel"];
     }
     if app.mode_editor.is_some() {
-        hints = vec!["Tab field", "Space kind", "Enter create", "Esc cancel"];
+        return vec!["Tab field", "Space kind", "Enter create", "Esc cancel"];
     }
 
-    let inner_width = area.width.saturating_sub(2) as usize;
-    let status_line = fit_single_line(
-        &format!("{status_text} | {user_str} ({role}) {live}"),
-        inner_width,
-    );
-    let hint_str = fit_hints_line(&hints, inner_width.saturating_sub(6));
-    let style = if app.error.is_some() {
-        Style::default().fg(Color::Red)
-    } else {
-        Style::default()
-    };
-
-    let line1 = Line::from(vec![Span::styled(status_line, style)]);
-    let line2 = Line::from(vec![
-        Span::styled("Keys: ", Style::default().fg(Color::DarkGray)),
-        Span::styled(hint_str, Style::default().fg(Color::White)),
-    ]);
-
-    let footer = Paragraph::new(vec![line1, line2])
-        .block(Block::default().borders(Borders::ALL).title("Status"))
-        .wrap(Wrap { trim: false });
-    frame.render_widget(footer, area);
+    hints
 }
 
 fn fit_single_line(input: &str, max_chars: usize) -> String {
@@ -220,40 +240,50 @@ fn fit_single_line(input: &str, max_chars: usize) -> String {
     out
 }
 
-fn fit_hints_line(hints: &[&str], max_chars: usize) -> String {
+fn fit_hints_lines(hints: &[&str], max_chars: usize) -> Vec<String> {
     if max_chars == 0 {
-        return String::new();
+        return vec![String::new()];
     }
 
+    let body_width = max_chars.saturating_sub(6).max(1);
     let sep = " | ";
     let sep_len = sep.chars().count();
-    let mut out = String::new();
+    let mut lines: Vec<String> = Vec::new();
+    let mut current = String::new();
     let mut used = 0usize;
 
-    for (idx, hint) in hints.iter().enumerate() {
+    for hint in hints {
         let hint_len = hint.chars().count();
-        let join_len = if idx == 0 { 0 } else { sep_len };
+        let join_len = if current.is_empty() { 0 } else { sep_len };
 
-        if used + join_len + hint_len > max_chars {
-            if out.is_empty() {
-                return fit_single_line(hint, max_chars);
+        if used + join_len + hint_len > body_width {
+            if current.is_empty() {
+                lines.push(fit_single_line(hint, body_width));
+                used = 0;
+                continue;
             }
-            if used + 4 <= max_chars {
-                out.push(' ');
-                out.push_str("...");
-            }
-            break;
+            lines.push(current);
+            current = String::new();
+            used = 0;
         }
 
-        if idx > 0 {
-            out.push_str(sep);
+        if !current.is_empty() {
+            current.push_str(sep);
             used += sep_len;
         }
-        out.push_str(hint);
+        current.push_str(hint);
         used += hint_len;
     }
 
-    out
+    if !current.is_empty() {
+        lines.push(current);
+    }
+
+    if lines.is_empty() {
+        vec![String::new()]
+    } else {
+        lines
+    }
 }
 
 fn draw_login(frame: &mut Frame<'_>, app: &App) {
