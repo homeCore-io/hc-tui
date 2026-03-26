@@ -644,19 +644,30 @@ fn draw_areas_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
         })
         .collect();
 
-    let list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Areas")
-                .border_style(border_style),
-        )
-        .highlight_style(highlight)
-        .highlight_symbol(">> ");
+    let list = if is_focused {
+        List::new(items)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Areas")
+                    .border_style(border_style),
+            )
+            .highlight_style(highlight)
+            .highlight_symbol(">> ")
+    } else {
+        List::new(items)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Areas")
+                    .border_style(border_style),
+            )
+            .highlight_symbol(">> ")
+    };
 
     let mut state = ratatui::widgets::ListState::default();
-    if !app.areas.is_empty() {
-        state.select(Some(app.selected));
+    if !app.areas.is_empty() && is_focused {
+        state.select(Some(app.areas_list_selected));
     }
     frame.render_stateful_widget(list, area, &mut state);
 }
@@ -734,25 +745,36 @@ fn draw_area_devices(frame: &mut Frame<'_>, app: &App, area: Rect) {
         })
         .collect();
 
-    let list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(title.clone())
-                .border_style(border_style),
-        )
-        .highlight_style(highlight)
-        .highlight_symbol(">> ");
+    let list = if is_focused {
+        List::new(items)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(title.clone())
+                    .border_style(border_style),
+            )
+            .highlight_style(highlight)
+            .highlight_symbol(">> ")
+    } else {
+        List::new(items)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(title.clone())
+                    .border_style(border_style),
+            )
+            .highlight_symbol(">> ")
+    };
 
     let mut state = ratatui::widgets::ListState::default();
-    if !device_ids.is_empty() {
+    if !device_ids.is_empty() && is_focused {
         let visible_devices = app
             .devices
             .iter()
             .filter(|d| device_ids.contains(&d.device_id))
             .count();
         if visible_devices > 0 {
-            state.select(Some(app.selected.min(visible_devices - 1)));
+            state.select(Some(app.areas_devices_selected.min(visible_devices - 1)));
         }
     }
     frame.render_stateful_widget(list, area, &mut state);
