@@ -159,8 +159,12 @@ fn status_hints(app: &App) -> Vec<&'static str> {
         Tab::Scenes => { hints.push("a activate"); }
         Tab::Events => { hints.push("f filter"); }
         Tab::Areas => {
-            hints.push("n new");
+            hints.push("n new area");
             hints.push("Enter rename");
+            hints.push("L/R ◄/► pane");
+            hints.push("Spc select dev");
+            hints.push("+ add device");
+            hints.push("- remove device");
             hints.push("d delete");
         }
         Tab::Users => {
@@ -398,6 +402,10 @@ fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
         draw_manage_tab(frame, app, area);
         return;
     }
+    if matches!(app.active_tab(), Tab::Areas) {
+        draw_areas_pane(frame, app, area);
+        return;
+    }
 
     let items = match app.active_tab() {
         Tab::Devices | Tab::Scenes | Tab::Automations | Tab::Logs | Tab::Status | Tab::Manage => Vec::new(),
@@ -587,6 +595,167 @@ fn draw_scenes_table(frame: &mut Frame<'_>, app: &App, area: Rect) {
         state.select(Some(app.selected));
     }
     frame.render_stateful_widget(table, area, &mut state);
+}
+
+// ── Areas Tab (Two-Pane) ──────────────────────────────────────────────────────
+
+fn draw_areas_pane(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    // Split into left (40%) and right (60%) panes
+    let panes = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+        .split(area);
+
+    draw_areas_list(frame, app, panes[0]);
+    draw_area_devices(frame, app, panes[1]);
+}
+
+fn draw_areas_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    use crate::app::AreasPane;
+
+    let highlight = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+
+    let is_focused = matches!(app.areas_pane_focus, AreasPane::AreasList);
+    let border_style = if is_focused {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+
+    let items: Vec<ListItem> = app
+        .areas
+        .iter()
+        .map(|a| {
+            let count = a.device_ids.len();
+            let dev_label = if count == 1 { "device" } else { "devices" };
+            ListItem::new(Line::from(vec![
+                Span::styled(
+                    format!("  {:<24}", a.name),
+                    Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("[{} {}]", count, dev_label),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ]))
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Areas")
+                .border_style(border_style),
+        )
+        .highlight_style(highlight)
+        .highlight_symbol(">> ");
+
+    let mut state = ratatui::widgets::ListState::default();
+    if !app.areas.is_empty() {
+        state.select(Some(app.selected));
+    }
+    frame.render_stateful_widget(list, area, &mut state);
+}
+
+fn draw_area_devices(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    use crate::app::AreasPane;
+
+    let highlight = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+
+    let is_focused = matches!(app.areas_pane_focus, AreasPane::DeviceList);
+    let border_style = if is_focused {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+
+    let title = if let Some(area_id) = &app.areas_selected_area_id {
+        app.areas
+            .iter()
+            .find(|a| &a.id == area_id)
+            .map(|a| format!("Devices in \"{}\"", a.name))
+            .unwrap_or_else(|| "Devices".to_string())
+    } else {
+        "Select an area".to_string()
+    };
+
+    if app.areas_selected_area_id.is_none() {
+        let msg = Paragraph::new("← Select an area to view devices")
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(title.clone())
+                    .border_style(border_style),
+            )
+            .style(Style::default().fg(Color::DarkGray));
+        frame.render_widget(msg, area);
+        return;
+    }
+
+    let area_id = app.areas_selected_area_id.as_ref().unwrap();
+    let device_ids = app
+        .areas
+        .iter()
+        .find(|a| &a.id == area_id)
+        .map(|a| a.device_ids.clone())
+        .unwrap_or_default();
+
+    let items: Vec<ListItem> = app
+        .devices
+        .iter()
+        .filter(|d| device_ids.contains(&d.device_id))
+        .enumerate()
+        .map(|(_i, d)| {
+            let is_selected = app.areas_selected_devices.contains(&d.device_id);
+            let sel_mark = if is_selected { "[✓]" } else { "[ ]" };
+            let (avail_dot, avail_color) = if d.available {
+                ("●", Color::Green)
+            } else {
+                ("○", Color::Red)
+            };
+            let plugin_short = d.plugin_id.trim_start_matches("plugin.").to_string();
+
+            ListItem::new(Line::from(vec![
+                Span::styled(format!("{} ", sel_mark), Style::default().fg(Color::Yellow)),
+                Span::styled(format!("{} ", avail_dot), Style::default().fg(avail_color)),
+                Span::styled(
+                    format!("{:<20}", d.name),
+                    Style::default().fg(Color::White),
+                ),
+                Span::styled(format!(" [{}]", plugin_short), Style::default().fg(Color::Gray)),
+            ]))
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(title.clone())
+                .border_style(border_style),
+        )
+        .highlight_style(highlight)
+        .highlight_symbol(">> ");
+
+    let mut state = ratatui::widgets::ListState::default();
+    if !device_ids.is_empty() {
+        let visible_devices = app
+            .devices
+            .iter()
+            .filter(|d| device_ids.contains(&d.device_id))
+            .count();
+        if visible_devices > 0 {
+            state.select(Some(app.selected.min(visible_devices - 1)));
+        }
+    }
+    frame.render_stateful_widget(list, area, &mut state);
 }
 
 // ── Automations tab ───────────────────────────────────────────────────────────

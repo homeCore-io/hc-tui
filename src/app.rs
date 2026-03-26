@@ -75,6 +75,12 @@ pub enum DeviceViewMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AreasPane {
+    AreasList,
+    DeviceList,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventsFilterMode {
     All,
     HueInputs,
@@ -292,6 +298,9 @@ pub struct App {
     pub login_phase: LoginPhase,
     pub device_editor: Option<DeviceEditor>,
     pub area_editor: Option<AreaEditor>,
+    pub areas_pane_focus: AreasPane, // left=areas list, right=device list
+    pub areas_selected_area_id: Option<String>,
+    pub areas_selected_devices: HashSet<String>,
     pub user_editor: Option<UserEditor>,
     pub admin_sub: AdminSubPanel,
     pub switches: Vec<DeviceState>,
@@ -379,6 +388,9 @@ impl App {
             login_phase: LoginPhase::Authenticating,
             device_editor: None,
             area_editor: None,
+            areas_pane_focus: AreasPane::AreasList,
+            areas_selected_area_id: None,
+            areas_selected_devices: HashSet::new(),
             user_editor: None,
             admin_sub: AdminSubPanel::Switches,
             switches: Vec::new(),
@@ -914,6 +926,12 @@ impl App {
             return;
         }
 
+        // Areas tab two-pane navigation
+        if matches!(self.active_tab(), Tab::Areas) {
+            self.on_key_areas_pane(key).await;
+            return;
+        }
+
         // Sub-panel switching within the Manage tab.
         if matches!(self.active_tab(), Tab::Manage) {
             match key.code {
@@ -954,6 +972,10 @@ impl App {
                 self.tab = (self.tab + tab_count - 1) % tab_count;
                 self.selected = 0;
                 self.clamp_selection();
+                // Reset areas pane when leaving
+                self.areas_pane_focus = AreasPane::AreasList;
+                self.areas_selected_area_id = None;
+                self.areas_selected_devices.clear();
                 // When entering Status tab, refresh
                 if matches!(self.active_tab(), Tab::Status) {
                     self.refresh_system_status().await;
@@ -964,6 +986,10 @@ impl App {
                 self.tab = (self.tab + 1) % tab_count;
                 self.selected = 0;
                 self.clamp_selection();
+                // Reset areas pane when leaving
+                self.areas_pane_focus = AreasPane::AreasList;
+                self.areas_selected_area_id = None;
+                self.areas_selected_devices.clear();
                 if matches!(self.active_tab(), Tab::Status) {
                     self.refresh_system_status().await;
                 }
@@ -2098,6 +2124,205 @@ impl App {
                 let _ = self.save_to_cache().await;
             }
             Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    // ── Areas Pane Navigation and Device Management ────────────────────────────
+
+    async fn on_key_areas_pane(&mut self, key: KeyEvent) {
+        use crate::app::AreasPane;
+        
+        match key.code {
+            // Pane switching (Left/Right arrows or L/R keys)
+            KeyCode::Left | KeyCode::Char('l') => {
+                self.areas_pane_focus = AreasPane::AreasList;
+                self.selected = 0;
+                self.areas_selected_devices.clear();
+            }
+            KeyCode::Right | KeyCode::Char('r') => {
+                if self.areas_selected_area_id.is_some() {
+                    self.areas_pane_focus = AreasPane::DeviceList;
+                    self.selected = 0;
+                }
+            }
+            
+            // Navigation within current pane
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.selected = self.selected.saturating_sub(1);
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                let len = self.get_areas_pane_len();
+                if len > 0 {
+                    self.selected = min(self.selected + 1, len - 1);
+                }
+            }
+            
+            // Enter key behavior based on pane focus
+            KeyCode::Enter => {
+                match self.areas_pane_focus {
+                    AreasPane::AreasList => {
+                        if let Some(area) = self.areas.get(self.selected) {
+                            self.areas_selected_area_id = Some(area.id.clone());
+                            self.areas_pane_focus = AreasPane::DeviceList;
+                            self.selected = 0;
+                            self.areas_selected_devices.clear();
+                        }
+                    }
+                    AreasPane::DeviceList => {
+                        if self.areas_selected_area_id.is_some() {
+                            self.open_area_editor_edit();
+                        }
+                    }
+                }
+            }
+            
+            // Create new area
+            KeyCode::Char('n') => {
+                self.open_area_editor_create();
+            }
+            
+            // Rename or delete based on pane focus
+            KeyCode::Char('d') => {
+                match self.areas_pane_focus {
+                    AreasPane::AreasList => {
+                        self.delete_selected_area().await;
+                    }
+                    AreasPane::DeviceList => {
+                        // Remove selected devices from area
+                        self.remove_selected_devices_from_area().await;
+                    }
+                }
+            }
+            
+            // Space: toggle device selection in device list pane
+            KeyCode::Char(' ') => {
+                if matches!(self.areas_pane_focus, AreasPane::DeviceList) {
+                    if let Some(area_id) = &self.areas_selected_area_id {
+                        let device_ids = self.areas
+                            .iter()
+                            .find(|a| &a.id == area_id)
+                            .map(|a| a.device_ids.clone())
+                            .unwrap_or_default();
+                        
+                        let visible_devices: Vec<_> = self.devices
+                            .iter()
+                            .filter(|d| device_ids.contains(&d.device_id))
+                            .collect();
+                        
+                        if let Some(device) = visible_devices.get(self.selected) {
+                            if self.areas_selected_devices.contains(&device.device_id) {
+                                self.areas_selected_devices.remove(&device.device_id);
+                            } else {
+                                self.areas_selected_devices.insert(device.device_id.clone());
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Plus/Minus: add/remove devices from area
+            KeyCode::Char('+') | KeyCode::Char('=') => {
+                if !self.areas_selected_devices.is_empty() {
+                    self.add_selected_devices_to_area().await;
+                }
+            }
+            KeyCode::Char('-') => {
+                if !self.areas_selected_devices.is_empty() {
+                    self.remove_selected_devices_from_area().await;
+                }
+            }
+            
+            _ => {}
+        }
+    }
+
+    fn get_areas_pane_len(&self) -> usize {
+        use crate::app::AreasPane;
+        
+        match self.areas_pane_focus {
+            AreasPane::AreasList => self.areas.len(),
+            AreasPane::DeviceList => {
+                if let Some(area_id) = &self.areas_selected_area_id {
+                    let device_ids = self.areas
+                        .iter()
+                        .find(|a| &a.id == area_id)
+                        .map(|a| a.device_ids.clone())
+                        .unwrap_or_default();
+                    self.devices
+                        .iter()
+                        .filter(|d| device_ids.contains(&d.device_id))
+                        .count()
+                } else {
+                    0
+                }
+            }
+        }
+    }
+
+    async fn add_selected_devices_to_area(&mut self) {
+        if self.areas_selected_devices.is_empty() {
+            return;
+        }
+        
+        if let Some(area_id) = &self.areas_selected_area_id {
+            if let Some(area) = self.areas.iter().find(|a| &a.id == area_id) {
+                let mut new_device_ids = area.device_ids.clone();
+                
+                // Add selected devices that aren't already in the area
+                for device_id in &self.areas_selected_devices {
+                    if !new_device_ids.contains(device_id) {
+                        new_device_ids.push(device_id.clone());
+                    }
+                }
+                
+                // Call API to set area devices
+                match self.client.set_area_devices(area_id, &new_device_ids).await {
+                    Ok(_) => {
+                        self.status = format!("Added {} device(s) to area", self.areas_selected_devices.len());
+                        self.areas_selected_devices.clear();
+                        // Refresh to get updated area
+                        if let Err(e) = self.refresh_all().await {
+                            self.error = Some(e.to_string());
+                        }
+                    }
+                    Err(e) => {
+                        self.error = Some(format!("Failed to add devices: {}", e));
+                    }
+                }
+            }
+        }
+    }
+
+    async fn remove_selected_devices_from_area(&mut self) {
+        if self.areas_selected_devices.is_empty() && matches!(self.areas_pane_focus, AreasPane::AreasList) {
+            self.delete_selected_area().await;
+            return;
+        }
+        
+        if let Some(area_id) = &self.areas_selected_area_id {
+            if let Some(area) = self.areas.iter().find(|a| &a.id == area_id) {
+                let new_device_ids: Vec<String> = area.device_ids
+                    .iter()
+                    .filter(|d| !self.areas_selected_devices.contains(*d))
+                    .cloned()
+                    .collect();
+                
+                // Call API to set area devices (now with removed devices)
+                match self.client.set_area_devices(area_id, &new_device_ids).await {
+                    Ok(_) => {
+                        let count = self.areas_selected_devices.len();
+                        self.status = format!("Removed {} device(s) from area", count);
+                        self.areas_selected_devices.clear();
+                        // Refresh to get updated area
+                        if let Err(e) = self.refresh_all().await {
+                            self.error = Some(e.to_string());
+                        }
+                    }
+                    Err(e) => {
+                        self.error = Some(format!("Failed to remove devices: {}", e));
+                    }
+                }
+            }
         }
     }
 

@@ -394,6 +394,13 @@ impl HomeCoreClient {
         Self::parse_empty(resp).await
     }
 
+    pub async fn set_area_devices(&self, id: &str, device_ids: &[String]) -> Result<Area> {
+        let path = format!("/areas/{id}/devices");
+        let body = serde_json::json!({ "device_ids": device_ids });
+        let resp = self.request_with_json(Method::PUT, &path, body).await?;
+        Self::parse_area_response(resp).await
+    }
+
     pub async fn delete_device(&self, device_id: &str) -> Result<()> {
         let path = format!("/devices/{device_id}");
         let resp = self.request(Method::DELETE, &path).await?;
