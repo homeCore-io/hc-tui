@@ -199,7 +199,7 @@ fn status_hints(app: &App) -> Vec<&'static str> {
         }
         Tab::Plugins => { hints.push("d deregister"); }
         Tab::Manage => {
-            hints.push("1/2/3/4 panel");
+            hints.push("◄/► panel");
             if matches!(app.admin_sub, AdminSubPanel::Status) {
                 hints.push("r refresh");
             } else {
@@ -2473,10 +2473,10 @@ fn draw_manage_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
         AdminSubPanel::Status   => 3,
     };
     let sub_tabs = Tabs::new(vec![
-        Line::from("1 Switches"),
-        Line::from("2 Timers"),
-        Line::from("3 Modes"),
-        Line::from("4 Status"),
+        Line::from("Switches"),
+        Line::from("Timers"),
+        Line::from("Modes"),
+        Line::from("Status"),
     ])
     .select(active_idx)
     .block(Block::default().borders(Borders::ALL).title("Manage"))

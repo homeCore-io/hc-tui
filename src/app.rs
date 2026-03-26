@@ -949,17 +949,6 @@ impl App {
             return;
         }
 
-        // Sub-panel switching within the Manage tab.
-        if matches!(self.active_tab(), Tab::Manage) {
-            match key.code {
-                KeyCode::Char('1') => { self.admin_sub = AdminSubPanel::Switches; self.selected = 0; self.error = None; return; }
-                KeyCode::Char('2') => { self.admin_sub = AdminSubPanel::Timers;   self.selected = 0; self.error = None; return; }
-                KeyCode::Char('3') => { self.admin_sub = AdminSubPanel::Modes;    self.selected = 0; self.error = None; return; }
-                KeyCode::Char('4') => { self.admin_sub = AdminSubPanel::Status;   self.selected = 0; self.error = None; self.refresh_system_status().await; return; }
-                _ => {}
-            }
-        }
-
         // Global T key: toggle time display
         if key.code == KeyCode::Char('T') {
             self.time_utc = !self.time_utc;
@@ -983,6 +972,32 @@ impl App {
                             self.error = Some(err.to_string());
                         }
                     }
+                }
+            }
+            KeyCode::Left if matches!(self.active_tab(), Tab::Manage) => {
+                self.admin_sub = match self.admin_sub {
+                    AdminSubPanel::Switches => AdminSubPanel::Status,
+                    AdminSubPanel::Timers => AdminSubPanel::Switches,
+                    AdminSubPanel::Modes => AdminSubPanel::Timers,
+                    AdminSubPanel::Status => AdminSubPanel::Modes,
+                };
+                self.selected = 0;
+                self.error = None;
+                if matches!(self.admin_sub, AdminSubPanel::Status) {
+                    self.refresh_system_status().await;
+                }
+            }
+            KeyCode::Right if matches!(self.active_tab(), Tab::Manage) => {
+                self.admin_sub = match self.admin_sub {
+                    AdminSubPanel::Switches => AdminSubPanel::Timers,
+                    AdminSubPanel::Timers => AdminSubPanel::Modes,
+                    AdminSubPanel::Modes => AdminSubPanel::Status,
+                    AdminSubPanel::Status => AdminSubPanel::Switches,
+                };
+                self.selected = 0;
+                self.error = None;
+                if matches!(self.admin_sub, AdminSubPanel::Status) {
+                    self.refresh_system_status().await;
                 }
             }
             KeyCode::BackTab => {
