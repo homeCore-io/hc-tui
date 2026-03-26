@@ -305,7 +305,6 @@ pub struct App {
     pub automation_filter_tag: String,
     pub automation_filter_trigger: String,
     pub automation_filter_stale: bool,
-    pub automation_filter_active: bool,
     pub automation_filter_bar: Option<AutomationFilterBar>,
     pub automation_selected_ids: HashSet<String>,
     pub automation_bulk_select_mode: bool,
@@ -392,7 +391,6 @@ impl App {
             automation_filter_tag: String::new(),
             automation_filter_trigger: String::new(),
             automation_filter_stale: false,
-            automation_filter_active: false,
             automation_filter_bar: None,
             automation_selected_ids: HashSet::new(),
             automation_bulk_select_mode: false,
@@ -2917,8 +2915,6 @@ pub fn format_timestamp_utc(ts: &str, utc: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::Map;
-    use serde_json::Value;
     use std::path::PathBuf;
 
     fn test_app() -> App {

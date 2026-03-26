@@ -1,5 +1,6 @@
 use crate::app::{
-    AdminSubPanel, App, AreaEditor, AutomationFilterBar, AutomationFilterField, DeleteConfirm,
+    format_timestamp_utc, AdminSubPanel, App, AreaEditor, AutomationFilterBar,
+    AutomationFilterField, DeleteConfirm,
     DeviceEditField, DeviceViewMode, FocusField, LogLevelFilter, LoginPhase,
     ModeEditField, ModeEditor, ModeKind, PluginDetailPanel, SwitchEditField, SwitchEditor,
     Tab, TimerEditField, TimerEditor, UserEditField, UserEditMode, UserEditor,
@@ -1554,7 +1555,7 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
         lines.push(detail_row(
             "Last seen",
             vec![Span::styled(
-                format_timestamp(&device.last_seen),
+                format_timestamp_utc(&device.last_seen, app.time_utc),
                 Style::default().fg(Color::DarkGray),
             )],
         ));
@@ -2178,14 +2179,6 @@ fn timer_remaining_secs(device: &DeviceState) -> u64 {
         }
     }
     device.attributes.get("remaining_secs").and_then(|v| v.as_u64()).unwrap_or(0)
-}
-
-fn format_timestamp(ts: &str) -> String {
-    if let Some(time_part) = ts.split('T').nth(1) {
-        time_part.split('.').next().unwrap_or(time_part).to_string()
-    } else {
-        ts.chars().take(20).collect()
-    }
 }
 
 fn clean_plugin_id(plugin_id: &str) -> String {

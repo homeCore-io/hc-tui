@@ -263,6 +263,7 @@ impl HomeCoreClient {
         Self::parse_json(resp).await
     }
 
+    #[allow(dead_code)]
     pub async fn list_automations_filtered(
         &self,
         tag: Option<&str>,
@@ -328,6 +329,7 @@ impl HomeCoreClient {
         Self::parse_json(resp).await
     }
 
+    #[allow(dead_code)]
     pub async fn create_automation_group(&self, name: &str) -> Result<RuleGroup> {
         let body = json!({ "name": name, "rule_ids": [] });
         let resp = self.request_with_json(Method::POST, "/automations/groups", body).await?;
