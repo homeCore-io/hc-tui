@@ -935,6 +935,15 @@ impl App {
             && !matches!(key.code, 
                          KeyCode::Tab 
                          | KeyCode::BackTab 
+                         | KeyCode::Char('1')
+                         | KeyCode::Char('2')
+                         | KeyCode::Char('3')
+                         | KeyCode::Char('4')
+                         | KeyCode::Char('5')
+                         | KeyCode::Char('6')
+                         | KeyCode::Char('7')
+                         | KeyCode::Char('8')
+                         | KeyCode::Char('9')
                          | KeyCode::Char('q') 
                          | KeyCode::Char('r') 
                          | KeyCode::Char('T')) {
