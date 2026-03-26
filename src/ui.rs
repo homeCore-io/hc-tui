@@ -199,9 +199,13 @@ fn status_hints(app: &App) -> Vec<&'static str> {
         }
         Tab::Plugins => { hints.push("d deregister"); }
         Tab::Manage => {
-            hints.push("1/2/3 panel");
-            hints.push("n new");
-            hints.push("d delete");
+            hints.push("1/2/3/4 panel");
+            if matches!(app.admin_sub, AdminSubPanel::Status) {
+                hints.push("r refresh");
+            } else {
+                hints.push("n new");
+                hints.push("d delete");
+            }
         }
         Tab::Automations => {
             hints.push("e enable");
@@ -221,9 +225,7 @@ fn status_hints(app: &App) -> Vec<&'static str> {
             hints.push("/ module");
             hints.push("c clear");
         }
-        Tab::Status => {
-            hints.push("r refresh");
-        }
+        // Status moved under Manage sub-panels.
     }
 
     if app.device_editor.is_some() {
@@ -414,10 +416,6 @@ fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
         draw_logs_tab(frame, app, area);
         return;
     }
-    if matches!(app.active_tab(), Tab::Status) {
-        draw_status_tab(frame, app, area);
-        return;
-    }
     if matches!(app.active_tab(), Tab::Plugins) && app.plugin_detail_open {
         draw_plugin_detail(frame, app, area);
         return;
@@ -432,7 +430,7 @@ fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
     }
 
     let items = match app.active_tab() {
-        Tab::Devices | Tab::Scenes | Tab::Automations | Tab::Logs | Tab::Status | Tab::Manage => Vec::new(),
+        Tab::Devices | Tab::Scenes | Tab::Automations | Tab::Logs | Tab::Manage => Vec::new(),
         Tab::Areas => app
             .areas
             .iter()
@@ -2459,7 +2457,6 @@ fn list_is_empty(app: &App) -> bool {
         Tab::Plugins => app.plugins.is_empty(),
         Tab::Manage => false,
         Tab::Logs => true,
-        Tab::Status => true,
     }
 }
 
@@ -2473,11 +2470,13 @@ fn draw_manage_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
         AdminSubPanel::Switches => 0,
         AdminSubPanel::Timers   => 1,
         AdminSubPanel::Modes    => 2,
+        AdminSubPanel::Status   => 3,
     };
     let sub_tabs = Tabs::new(vec![
         Line::from("1 Switches"),
         Line::from("2 Timers"),
         Line::from("3 Modes"),
+        Line::from("4 Status"),
     ])
     .select(active_idx)
     .block(Block::default().borders(Borders::ALL).title("Manage"))
@@ -2489,6 +2488,11 @@ fn draw_manage_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
         .fg(Color::Black)
         .bg(Color::Cyan)
         .add_modifier(Modifier::BOLD);
+
+    if matches!(app.admin_sub, AdminSubPanel::Status) {
+        draw_status_tab(frame, app, layout[1]);
+        return;
+    }
 
     let (items, title, len): (Vec<ListItem<'_>>, &str, usize) = match app.admin_sub {
         AdminSubPanel::Switches => {
@@ -2546,6 +2550,7 @@ fn draw_manage_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
             let len = app.modes.len();
             (items, "Modes", len)
         }
+        AdminSubPanel::Status => (Vec::new(), "Status", 0),
     };
 
     let list = List::new(items)

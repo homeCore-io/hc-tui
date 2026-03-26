@@ -121,6 +121,7 @@ pub enum AdminSubPanel {
     Switches,
     Timers,
     Modes,
+    Status,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -243,7 +244,6 @@ pub enum Tab {
     Areas,
     Automations,
     Logs,
-    Status,
     Events,
     Users,
     Plugins,
@@ -258,7 +258,6 @@ impl Tab {
             Self::Areas => "Areas",
             Self::Automations => "Automations",
             Self::Logs => "Logs",
-            Self::Status => "Status",
             Self::Events => "Events",
             Self::Users => "Users",
             Self::Plugins => "Plugins",
@@ -441,7 +440,6 @@ impl App {
             Tab::Areas,
             Tab::Automations,
             Tab::Logs,
-            Tab::Status,
             Tab::Events,
         ];
         if self.is_admin() {
@@ -957,6 +955,7 @@ impl App {
                 KeyCode::Char('1') => { self.admin_sub = AdminSubPanel::Switches; self.selected = 0; self.error = None; return; }
                 KeyCode::Char('2') => { self.admin_sub = AdminSubPanel::Timers;   self.selected = 0; self.error = None; return; }
                 KeyCode::Char('3') => { self.admin_sub = AdminSubPanel::Modes;    self.selected = 0; self.error = None; return; }
+                KeyCode::Char('4') => { self.admin_sub = AdminSubPanel::Status;   self.selected = 0; self.error = None; self.refresh_system_status().await; return; }
                 _ => {}
             }
         }
@@ -976,7 +975,7 @@ impl App {
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Char('r') => {
                 match self.active_tab() {
-                    Tab::Status => {
+                    Tab::Manage if matches!(self.admin_sub, AdminSubPanel::Status) => {
                         self.refresh_system_status().await;
                     }
                     _ => {
@@ -997,8 +996,8 @@ impl App {
                 self.areas_selected_devices.clear();
                 self.areas_list_selected = 0;
                 self.areas_devices_selected = 0;
-                // When entering Status tab, refresh
-                if matches!(self.active_tab(), Tab::Status) {
+                // When entering Manage/Status sub-tab, refresh
+                if matches!(self.active_tab(), Tab::Manage) && matches!(self.admin_sub, AdminSubPanel::Status) {
                     self.refresh_system_status().await;
                 }
             }
@@ -1013,7 +1012,7 @@ impl App {
                 self.areas_selected_devices.clear();
                 self.areas_list_selected = 0;
                 self.areas_devices_selected = 0;
-                if matches!(self.active_tab(), Tab::Status) {
+                if matches!(self.active_tab(), Tab::Manage) && matches!(self.admin_sub, AdminSubPanel::Status) {
                     self.refresh_system_status().await;
                 }
             }
@@ -1031,7 +1030,7 @@ impl App {
                     self.areas_selected_devices.clear();
                     self.areas_list_selected = 0;
                     self.areas_devices_selected = 0;
-                    if matches!(self.active_tab(), Tab::Status) {
+                    if matches!(self.active_tab(), Tab::Manage) && matches!(self.admin_sub, AdminSubPanel::Status) {
                         self.refresh_system_status().await;
                     }
                 }
@@ -1985,13 +1984,13 @@ impl App {
             Tab::Automations => self.visible_automations().len(),
             Tab::Events => self.filtered_events().len(),
             Tab::Logs => 0,
-            Tab::Status => 0,
             Tab::Users => self.users.len(),
             Tab::Plugins => self.plugins.len(),
             Tab::Manage => match self.admin_sub {
                 AdminSubPanel::Switches => self.switches.len(),
                 AdminSubPanel::Timers => self.timers.len(),
                 AdminSubPanel::Modes => self.modes.len(),
+                AdminSubPanel::Status => 0,
             },
         }
     }
@@ -2696,6 +2695,9 @@ impl App {
                     field: ModeEditField::Id,
                 });
             }
+            AdminSubPanel::Status => {
+                // No create action for system status panel.
+            }
         }
     }
 
@@ -2738,6 +2740,9 @@ impl App {
                     }
                     Err(e) => self.error = Some(e.to_string()),
                 }
+            }
+            AdminSubPanel::Status => {
+                // No delete action for system status panel.
             }
         }
     }
