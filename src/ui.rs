@@ -191,17 +191,16 @@ fn status_hints(app: &App) -> Vec<&'static str> {
             hints.push("- remove device");
             hints.push("d delete");
         }
-        Tab::Users => {
-            hints.push("n new");
-            hints.push("Enter role");
-            hints.push("p password");
-            hints.push("d delete");
-        }
         Tab::Plugins => { hints.push("d deregister"); }
         Tab::Manage => {
             hints.push("◄/► panel");
             if matches!(app.admin_sub, AdminSubPanel::Status) {
                 hints.push("r refresh");
+            } else if matches!(app.admin_sub, AdminSubPanel::Users) {
+                hints.push("n new");
+                hints.push("Enter role");
+                hints.push("p password");
+                hints.push("d delete");
             } else {
                 hints.push("n new");
                 hints.push("d delete");
@@ -416,6 +415,10 @@ fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
         draw_logs_tab(frame, app, area);
         return;
     }
+    if matches!(app.active_tab(), Tab::Manage) {
+        draw_manage_tab(frame, app, area);
+        return;
+    }
     if matches!(app.active_tab(), Tab::Plugins) && app.plugin_detail_open {
         draw_plugin_detail(frame, app, area);
         return;
@@ -481,29 +484,7 @@ fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
                 ]))
             })
             .collect::<Vec<_>>(),
-        Tab::Users => app
-            .users
-            .iter()
-            .map(|u| {
-                let is_self = app.current_user.as_ref().map(|me| me.id == u.id).unwrap_or(false);
-                let role_str = format!("{:?}", u.role);
-                let role_color = match u.role {
-                    crate::api::Role::Admin    => Color::Yellow,
-                    crate::api::Role::User     => Color::White,
-                    crate::api::Role::ReadOnly => Color::DarkGray,
-                };
-                let me_tag = if is_self { " (you)" } else { "" };
-                let date = u.created_at.chars().take(10).collect::<String>();
-                ListItem::new(Line::from(vec![
-                    Span::styled(
-                        format!("  {:<22}", format!("{}{}", u.username, me_tag)),
-                        Style::default().fg(Color::White),
-                    ),
-                    Span::styled(format!("{:<12}", role_str), Style::default().fg(role_color)),
-                    Span::styled(date, Style::default().fg(Color::DarkGray)),
-                ]))
-            })
-            .collect::<Vec<_>>(),
+
         Tab::Plugins => app
             .plugins
             .iter()
@@ -2453,7 +2434,6 @@ fn list_is_empty(app: &App) -> bool {
         Tab::Areas => app.areas.is_empty(),
         Tab::Automations => app.visible_automations().is_empty(),
         Tab::Events => app.filtered_events().is_empty(),
-        Tab::Users => app.users.is_empty(),
         Tab::Plugins => app.plugins.is_empty(),
         Tab::Manage => false,
         Tab::Logs => true,
@@ -2471,12 +2451,14 @@ fn draw_manage_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
         AdminSubPanel::Timers   => 1,
         AdminSubPanel::Modes    => 2,
         AdminSubPanel::Status   => 3,
+        AdminSubPanel::Users    => 4,
     };
     let sub_tabs = Tabs::new(vec![
         Line::from("Switches"),
         Line::from("Timers"),
         Line::from("Modes"),
         Line::from("Status"),
+        Line::from("Users"),
     ])
     .select(active_idx)
     .block(Block::default().borders(Borders::ALL).title("Manage"))
@@ -2491,6 +2473,11 @@ fn draw_manage_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
 
     if matches!(app.admin_sub, AdminSubPanel::Status) {
         draw_status_tab(frame, app, layout[1]);
+        return;
+    }
+
+    if matches!(app.admin_sub, AdminSubPanel::Users) {
+        draw_users_list(frame, app, layout[1]);
         return;
     }
 
@@ -2551,6 +2538,7 @@ fn draw_manage_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
             (items, "Modes", len)
         }
         AdminSubPanel::Status => (Vec::new(), "Status", 0),
+        AdminSubPanel::Users => (Vec::new(), "Users", 0),
     };
 
     let list = List::new(items)
@@ -2562,6 +2550,48 @@ fn draw_manage_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
         state.select(Some(app.selected.min(len - 1)));
     }
     frame.render_stateful_widget(list, layout[1], &mut state);
+}
+
+fn draw_users_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let highlight = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+
+    let items: Vec<ListItem> = app
+        .users
+        .iter()
+        .map(|u| {
+            let is_self = app.current_user.as_ref().map(|me| me.id == u.id).unwrap_or(false);
+            let role_str = format!("{:?}", u.role);
+            let role_color = match u.role {
+                crate::api::Role::Admin    => Color::Yellow,
+                crate::api::Role::User     => Color::White,
+                crate::api::Role::ReadOnly => Color::DarkGray,
+            };
+            let me_tag = if is_self { " (you)" } else { "" };
+            let date = u.created_at.chars().take(10).collect::<String>();
+            ListItem::new(Line::from(vec![
+                Span::styled(
+                    format!("  {:<22}", format!("{}{}", u.username, me_tag)),
+                    Style::default().fg(Color::White),
+                ),
+                Span::styled(format!("{:<12}", role_str), Style::default().fg(role_color)),
+                Span::styled(date, Style::default().fg(Color::DarkGray)),
+            ]))
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(Block::default().borders(Borders::ALL).title("Users"))
+        .highlight_style(highlight)
+        .highlight_symbol(">> ");
+    let mut state = ratatui::widgets::ListState::default();
+    let len = app.users.len();
+    if len > 0 {
+        state.select(Some(app.selected.min(len - 1)));
+    }
+    frame.render_stateful_widget(list, area, &mut state);
 }
 
 fn draw_switch_editor(frame: &mut Frame<'_>, editor: &SwitchEditor) {

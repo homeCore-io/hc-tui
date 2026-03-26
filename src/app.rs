@@ -122,6 +122,7 @@ pub enum AdminSubPanel {
     Timers,
     Modes,
     Status,
+    Users,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -245,7 +246,6 @@ pub enum Tab {
     Automations,
     Logs,
     Events,
-    Users,
     Plugins,
     Manage,
 }
@@ -259,7 +259,6 @@ impl Tab {
             Self::Automations => "Automations",
             Self::Logs => "Logs",
             Self::Events => "Events",
-            Self::Users => "Users",
             Self::Plugins => "Plugins",
             Self::Manage => "Manage",
         }
@@ -443,7 +442,6 @@ impl App {
             Tab::Events,
         ];
         if self.is_admin() {
-            tabs.push(Tab::Users);
             tabs.push(Tab::Plugins);
         }
         tabs.push(Tab::Manage);
@@ -976,10 +974,11 @@ impl App {
             }
             KeyCode::Left if matches!(self.active_tab(), Tab::Manage) => {
                 self.admin_sub = match self.admin_sub {
-                    AdminSubPanel::Switches => AdminSubPanel::Status,
+                    AdminSubPanel::Switches => AdminSubPanel::Users,
                     AdminSubPanel::Timers => AdminSubPanel::Switches,
                     AdminSubPanel::Modes => AdminSubPanel::Timers,
                     AdminSubPanel::Status => AdminSubPanel::Modes,
+                    AdminSubPanel::Users => AdminSubPanel::Status,
                 };
                 self.selected = 0;
                 self.error = None;
@@ -992,7 +991,8 @@ impl App {
                     AdminSubPanel::Switches => AdminSubPanel::Timers,
                     AdminSubPanel::Timers => AdminSubPanel::Modes,
                     AdminSubPanel::Modes => AdminSubPanel::Status,
-                    AdminSubPanel::Status => AdminSubPanel::Switches,
+                    AdminSubPanel::Status => AdminSubPanel::Users,
+                    AdminSubPanel::Users => AdminSubPanel::Switches,
                 };
                 self.selected = 0;
                 self.error = None;
@@ -1074,16 +1074,21 @@ impl App {
                 match self.active_tab() {
                     Tab::Devices => self.open_selected_device_editor(),
                     Tab::Areas   => self.open_area_editor_edit(),
-                    Tab::Users   => self.open_user_editor_role(),
                     Tab::Plugins => self.open_plugin_detail(),
+                    Tab::Manage if matches!(self.admin_sub, AdminSubPanel::Users) => self.open_user_editor_role(),
                     _ => {}
                 }
             }
             KeyCode::Char('n') => {
                 match self.active_tab() {
                     Tab::Areas => self.open_area_editor_create(),
-                    Tab::Users if self.is_admin() => self.open_user_editor_create(),
-                    Tab::Manage => self.open_manage_editor(),
+                    Tab::Manage => {
+                        if matches!(self.admin_sub, AdminSubPanel::Users) && self.is_admin() {
+                            self.open_user_editor_create();
+                        } else {
+                            self.open_manage_editor();
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -1091,9 +1096,14 @@ impl App {
                 match self.active_tab() {
                     Tab::Devices => self.delete_selected_device().await,
                     Tab::Areas   => self.delete_selected_area().await,
-                    Tab::Users   => self.delete_selected_user().await,
                     Tab::Plugins => self.deregister_selected_plugin().await,
-                    Tab::Manage  => self.delete_selected_manage_item().await,
+                    Tab::Manage => {
+                        if matches!(self.admin_sub, AdminSubPanel::Users) {
+                            self.delete_selected_user().await;
+                        } else {
+                            self.delete_selected_manage_item().await;
+                        }
+                    }
                     Tab::Automations => self.disable_selected_automation().await,
                     Tab::Logs => {
                         self.log_lines.clear();
@@ -1117,7 +1127,7 @@ impl App {
             }
             KeyCode::Char('p') => {
                 match self.active_tab() {
-                    Tab::Users => self.open_user_editor_password(),
+                    Tab::Manage if matches!(self.admin_sub, AdminSubPanel::Users) => self.open_user_editor_password(),
                     Tab::Logs => {
                         self.log_paused = !self.log_paused;
                         if !self.log_paused {
@@ -1999,13 +2009,13 @@ impl App {
             Tab::Automations => self.visible_automations().len(),
             Tab::Events => self.filtered_events().len(),
             Tab::Logs => 0,
-            Tab::Users => self.users.len(),
             Tab::Plugins => self.plugins.len(),
             Tab::Manage => match self.admin_sub {
                 AdminSubPanel::Switches => self.switches.len(),
                 AdminSubPanel::Timers => self.timers.len(),
                 AdminSubPanel::Modes => self.modes.len(),
                 AdminSubPanel::Status => 0,
+                AdminSubPanel::Users => self.users.len(),
             },
         }
     }
@@ -2713,6 +2723,18 @@ impl App {
             AdminSubPanel::Status => {
                 // No create action for system status panel.
             }
+            AdminSubPanel::Users => {
+                self.user_editor = Some(UserEditor {
+                    mode: UserEditMode::Create,
+                    id: None,
+                    username: String::new(),
+                    current_password: String::new(),
+                    password: String::new(),
+                    confirm_password: String::new(),
+                    role: crate::api::Role::User,
+                    field: UserEditField::Username,
+                });
+            }
         }
     }
 
@@ -2758,6 +2780,18 @@ impl App {
             }
             AdminSubPanel::Status => {
                 // No delete action for system status panel.
+            }
+            AdminSubPanel::Users => {
+                let Some(u) = self.users.get(self.selected).cloned() else { return };
+                let id = u.id.clone();
+                match self.client.delete_user(&id).await {
+                    Ok(_) => {
+                        self.users.retain(|us| us.id != id);
+                        self.clamp_selection();
+                        self.status = format!("Deleted user {}", u.username);
+                    }
+                    Err(e) => self.error = Some(e.to_string()),
+                }
             }
         }
     }
