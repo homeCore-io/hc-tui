@@ -2189,6 +2189,10 @@ impl App {
             KeyCode::Char('h') | KeyCode::Left => {
                 self.areas_pane_focus = AreasPane::AreasList;
                 self.areas_selected_devices.clear();
+                    // Auto-select the area at current selection
+                    if let Some(area) = self.areas.get(self.areas_list_selected) {
+                        self.areas_selected_area_id = Some(area.id.clone());
+                    }
             }
             KeyCode::Char('l') | KeyCode::Right => {
                 if self.areas_selected_area_id.is_some() {
@@ -2201,7 +2205,13 @@ impl App {
                 match self.areas_pane_focus {
                     AreasPane::AreasList => {
                         self.areas_list_selected = self.areas_list_selected.saturating_sub(1);
-                    }
+                            // Auto-update selected area and reset device selection
+                            if let Some(area) = self.areas.get(self.areas_list_selected) {
+                                self.areas_selected_area_id = Some(area.id.clone());
+                                self.areas_devices_selected = 0;
+                                self.areas_selected_devices.clear();
+                            }
+                        }
                     AreasPane::DeviceList => {
                         self.areas_devices_selected = self.areas_devices_selected.saturating_sub(1);
                     }
@@ -2213,7 +2223,13 @@ impl App {
                     match self.areas_pane_focus {
                         AreasPane::AreasList => {
                             self.areas_list_selected = min(self.areas_list_selected + 1, len - 1);
-                        }
+                                // Auto-update selected area and reset device selection
+                                if let Some(area) = self.areas.get(self.areas_list_selected) {
+                                    self.areas_selected_area_id = Some(area.id.clone());
+                                    self.areas_devices_selected = 0;
+                                    self.areas_selected_devices.clear();
+                                }
+                            }
                         AreasPane::DeviceList => {
                             self.areas_devices_selected = min(self.areas_devices_selected + 1, len - 1);
                         }
