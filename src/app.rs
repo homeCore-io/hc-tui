@@ -1010,6 +1010,25 @@ impl App {
                     self.refresh_system_status().await;
                 }
             }
+            // Number keys 1-9 for quick tab selection
+            KeyCode::Char(c) if c >= '1' && c <= '9' => {
+                let tab_count = self.tabs().len();
+                let tab_idx = c as usize - '1' as usize;
+                if tab_idx < tab_count {
+                    self.tab = tab_idx;
+                    self.selected = 0;
+                    self.clamp_selection();
+                    // Reset areas pane when jumping to new tab
+                    self.areas_pane_focus = AreasPane::AreasList;
+                    self.areas_selected_area_id = None;
+                    self.areas_selected_devices.clear();
+                    self.areas_list_selected = 0;
+                    self.areas_devices_selected = 0;
+                    if matches!(self.active_tab(), Tab::Status) {
+                        self.refresh_system_status().await;
+                    }
+                }
+            }
             KeyCode::Down | KeyCode::Char('j') if !matches!(self.active_tab(), Tab::Logs) => {
                 let len = self.active_items_len();
                 if len > 0 {

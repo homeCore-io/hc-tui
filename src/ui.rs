@@ -37,7 +37,14 @@ pub fn draw(frame: &mut Frame<'_>, app: &App) {
     let tabs = app
         .tabs()
         .iter()
-        .map(|tab| Line::from(tab.title()))
+        .enumerate()
+        .map(|(idx, tab)| {
+            let num = idx + 1;
+            Line::from(Span::styled(
+                format!("({}) {}", num, tab.title()),
+                Style::default().fg(Color::Gray),
+            ))
+        })
         .collect::<Vec<_>>();
     let tabs_widget = Tabs::new(tabs)
         .select(app.tab)
@@ -145,7 +152,7 @@ fn compute_footer_height(app: &App, width: u16) -> u16 {
 }
 
 fn status_hints(app: &App) -> Vec<&'static str> {
-    let mut hints = vec!["Tab prev/next", "j/k move", "r refresh", "q quit", "T time"];
+    let mut hints = vec!["Tab/Shift+Tab menu", "1-9 jump tab", "j/k move", "r refresh", "q quit", "T time"];
     match app.active_tab() {
         Tab::Devices => {
             hints.push("Spc toggle");
