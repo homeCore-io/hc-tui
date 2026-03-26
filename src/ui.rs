@@ -755,7 +755,7 @@ fn draw_area_devices(frame: &mut Frame<'_>, app: &App, area: Rect) {
             } else {
                 ("○", Color::Red)
             };
-            let plugin_short = d.plugin_id.trim_start_matches("plugin.").to_string();
+            let status = app.device_status(d);
 
             ListItem::new(Line::from(vec![
                 Span::styled(format!("{} ", sel_mark), Style::default().fg(Color::Yellow)),
@@ -764,7 +764,7 @@ fn draw_area_devices(frame: &mut Frame<'_>, app: &App, area: Rect) {
                     format!("{:<20}", d.name),
                     Style::default().fg(Color::White),
                 ),
-                Span::styled(format!(" [{}]", plugin_short), Style::default().fg(Color::Gray)),
+                Span::styled(format!(" [{}]", status), Style::default().fg(Color::Gray)),
             ]))
         })
         .collect();
