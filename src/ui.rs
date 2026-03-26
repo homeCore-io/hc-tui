@@ -161,7 +161,7 @@ fn status_hints(app: &App) -> Vec<&'static str> {
         Tab::Areas => {
             hints.push("n new area");
             hints.push("Enter rename");
-            hints.push("L/R ◄/► pane");
+            hints.push("h/l ◄/► pane");
             hints.push("Spc select dev");
             hints.push("+ add device");
             hints.push("- remove device");

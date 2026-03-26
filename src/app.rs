@@ -930,9 +930,16 @@ impl App {
             return;
         }
 
-        // Areas tab two-pane navigation (but allow Tab/Shift+Tab and other global keys)
+        // Areas tab two-pane navigation (but allow arrow keys and other global keys)
         if matches!(self.active_tab(), Tab::Areas) 
-            && !matches!(key.code, KeyCode::Tab | KeyCode::BackTab | KeyCode::Char('q') | KeyCode::Char('r') | KeyCode::Char('T')) {
+            && !matches!(key.code, 
+                         KeyCode::Tab 
+                         | KeyCode::BackTab 
+                         | KeyCode::Left 
+                         | KeyCode::Right 
+                         | KeyCode::Char('q') 
+                         | KeyCode::Char('r') 
+                         | KeyCode::Char('T')) {
             self.on_key_areas_pane(key).await;
             return;
         }
@@ -2161,12 +2168,12 @@ impl App {
         use crate::app::AreasPane;
         
         match key.code {
-            // Pane switching (Left/Right arrows or L/R keys)
-            KeyCode::Left | KeyCode::Char('l') => {
+            // Pane switching (h/l keys, Left/Right arrows go to tab nav)
+            KeyCode::Char('h') => {
                 self.areas_pane_focus = AreasPane::AreasList;
                 self.areas_selected_devices.clear();
             }
-            KeyCode::Right | KeyCode::Char('r') => {
+            KeyCode::Char('l') => {
                 if self.areas_selected_area_id.is_some() {
                     self.areas_pane_focus = AreasPane::DeviceList;
                 }
