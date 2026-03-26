@@ -196,7 +196,6 @@ fn status_hints(app: &App) -> Vec<&'static str> {
             }
         }
         Tab::Scenes => { hints.push("a activate"); }
-        Tab::Events => { hints.push("f filter"); }
         Tab::Areas => {
             hints.push("n new area");
             hints.push("Enter rename");
@@ -216,6 +215,14 @@ fn status_hints(app: &App) -> Vec<&'static str> {
                 hints.push("Enter role");
                 hints.push("p password");
                 hints.push("d delete");
+            } else if matches!(app.admin_sub, AdminSubPanel::Logs) {
+                hints.push("p pause");
+                hints.push("Spc pause");
+                hints.push("e/w/i level");
+                hints.push("/ module");
+                hints.push("c clear");
+            } else if matches!(app.admin_sub, AdminSubPanel::Events) {
+                hints.push("f filter");
             } else {
                 hints.push("n new");
                 hints.push("d delete");
@@ -231,13 +238,6 @@ fn status_hints(app: &App) -> Vec<&'static str> {
             hints.push("s stale");
             hints.push("g groups");
             hints.push("Spc select");
-        }
-        Tab::Logs => {
-            hints.push("p pause");
-            hints.push("Spc pause");
-            hints.push("e/w/i level");
-            hints.push("/ module");
-            hints.push("c clear");
         }
     }
 
@@ -425,10 +425,6 @@ fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
         draw_automations_tab(frame, app, area);
         return;
     }
-    if matches!(app.active_tab(), Tab::Logs) {
-        draw_logs_tab(frame, app, area);
-        return;
-    }
     if matches!(app.active_tab(), Tab::Manage) {
         draw_manage_tab(frame, app, area);
         return;
@@ -447,7 +443,7 @@ fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
     }
 
     let items = match app.active_tab() {
-        Tab::Devices | Tab::Scenes | Tab::Automations | Tab::Logs | Tab::Manage => Vec::new(),
+        Tab::Devices | Tab::Scenes | Tab::Automations | Tab::Manage => Vec::new(),
         Tab::Areas => app
             .areas
             .iter()
@@ -463,38 +459,6 @@ fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
                         format!("{count} {dev_label}"),
                         Style::default().fg(Color::DarkGray),
                     ),
-                ]))
-            })
-            .collect::<Vec<_>>(),
-        Tab::Events => app
-            .filtered_events()
-            .iter()
-            .map(|e| {
-                let mut extra = String::new();
-                if let Some(device) = &e.device_id {
-                    extra = format!(" device={device}");
-                } else if let Some(rule) = &e.rule_name {
-                    extra = format!(" rule={rule}");
-                } else if let Some(custom) = &e.event_type_custom {
-                    extra = format!(" event={custom}");
-                }
-                if let Some(detail) = &e.event_detail {
-                    extra.push_str(&format!(" detail={detail}"));
-                }
-
-                let (tag, tag_color) = match e.event_type.as_str() {
-                    "device_button" => ("BTN", Color::LightBlue),
-                    "device_rotary" => ("ROT", Color::Cyan),
-                    "entertainment_action_applied" => ("ENT", Color::Magenta),
-                    "entertainment_status_changed" => ("ENT", Color::Magenta),
-                    "plugin_command_result" => ("CMD", Color::LightGreen),
-                    "plugin_metrics" => ("MET", Color::Yellow),
-                    _ => ("EVT", Color::DarkGray),
-                };
-
-                ListItem::new(Line::from(vec![
-                    Span::styled(format!("[{tag}] "), Style::default().fg(tag_color)),
-                    Span::raw(format!("{} | {}{}", e.timestamp, e.event_type, extra)),
                 ]))
             })
             .collect::<Vec<_>>(),
@@ -523,10 +487,7 @@ fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
         .fg(Color::Black)
         .bg(Color::Cyan)
         .add_modifier(Modifier::BOLD);
-    let title = match app.active_tab() {
-        Tab::Events => format!("Events [{}]", app.events_filter_mode.title()),
-        other => other.title().to_string(),
-    };
+    let title = app.active_tab().title().to_string();
 
     let list = List::new(items)
         .block(Block::default().borders(Borders::ALL).title(title))
@@ -2548,10 +2509,8 @@ fn list_is_empty(app: &App) -> bool {
         Tab::Scenes => app.scenes.is_empty(),
         Tab::Areas => app.areas.is_empty(),
         Tab::Automations => app.visible_automations().is_empty(),
-        Tab::Events => app.filtered_events().is_empty(),
         Tab::Plugins => app.plugins.is_empty(),
         Tab::Manage => false,
-        Tab::Logs => true,
     }
 }
 
@@ -2562,14 +2521,18 @@ fn draw_manage_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
         .split(area);
 
     let active_idx = match app.admin_sub {
-        AdminSubPanel::Modes    => 0,
-        AdminSubPanel::Status   => 1,
-        AdminSubPanel::Users    => 2,
+        AdminSubPanel::Modes => 0,
+        AdminSubPanel::Status => 1,
+        AdminSubPanel::Users => 2,
+        AdminSubPanel::Logs => 3,
+        AdminSubPanel::Events => 4,
     };
     let sub_tabs = Tabs::new(vec![
         Line::from("Modes"),
         Line::from("Status"),
         Line::from("Users"),
+        Line::from("Logs"),
+        Line::from("Events"),
     ])
     .select(active_idx)
     .block(Block::default().borders(Borders::ALL).title("Manage"))
@@ -2589,6 +2552,57 @@ fn draw_manage_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
 
     if matches!(app.admin_sub, AdminSubPanel::Users) {
         draw_users_list(frame, app, layout[1]);
+        return;
+    }
+
+    if matches!(app.admin_sub, AdminSubPanel::Logs) {
+        draw_logs_tab(frame, app, layout[1]);
+        return;
+    }
+
+    if matches!(app.admin_sub, AdminSubPanel::Events) {
+        let items = app
+            .filtered_events()
+            .iter()
+            .map(|e| {
+                let mut extra = String::new();
+                if let Some(device) = &e.device_id {
+                    extra = format!(" device={device}");
+                } else if let Some(rule) = &e.rule_name {
+                    extra = format!(" rule={rule}");
+                } else if let Some(custom) = &e.event_type_custom {
+                    extra = format!(" event={custom}");
+                }
+                if let Some(detail) = &e.event_detail {
+                    extra.push_str(&format!(" detail={detail}"));
+                }
+
+                let (tag, tag_color) = match e.event_type.as_str() {
+                    "device_button" => ("BTN", Color::LightBlue),
+                    "device_rotary" => ("ROT", Color::Cyan),
+                    "entertainment_action_applied" => ("ENT", Color::Magenta),
+                    "entertainment_status_changed" => ("ENT", Color::Magenta),
+                    "plugin_command_result" => ("CMD", Color::LightGreen),
+                    "plugin_metrics" => ("MET", Color::Yellow),
+                    _ => ("EVT", Color::DarkGray),
+                };
+
+                ListItem::new(Line::from(vec![
+                    Span::styled(format!("[{tag}] "), Style::default().fg(tag_color)),
+                    Span::raw(format!("{} | {}{}", e.timestamp, e.event_type, extra)),
+                ]))
+            })
+            .collect::<Vec<_>>();
+        let title = format!("Events [{}]", app.events_filter_mode.title());
+        let list = List::new(items)
+            .block(Block::default().borders(Borders::ALL).title(title))
+            .highlight_style(highlight)
+            .highlight_symbol(">> ");
+        let mut state = ratatui::widgets::ListState::default();
+        if !app.filtered_events().is_empty() {
+            state.select(Some(app.selected.min(app.filtered_events().len() - 1)));
+        }
+        frame.render_stateful_widget(list, layout[1], &mut state);
         return;
     }
 
@@ -2617,8 +2631,9 @@ fn draw_manage_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
         }
         AdminSubPanel::Status => (Vec::new(), "Status", 0),
         AdminSubPanel::Users => (Vec::new(), "Users", 0),
+        AdminSubPanel::Logs => (Vec::new(), "Logs", 0),
+        AdminSubPanel::Events => (Vec::new(), "Events", 0),
     };
-
     let list = List::new(items)
         .block(Block::default().borders(Borders::ALL).title(title))
         .highlight_style(highlight)

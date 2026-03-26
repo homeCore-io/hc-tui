@@ -138,6 +138,8 @@ pub enum AdminSubPanel {
     Modes,
     Status,
     Users,
+    Logs,
+    Events,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -259,8 +261,6 @@ pub enum Tab {
     Scenes,
     Areas,
     Automations,
-    Logs,
-    Events,
     Plugins,
     Manage,
 }
@@ -272,8 +272,6 @@ impl Tab {
             Self::Scenes => "Scenes",
             Self::Areas => "Areas",
             Self::Automations => "Automations",
-            Self::Logs => "Logs",
-            Self::Events => "Events",
             Self::Plugins => "Plugins",
             Self::Manage => "Manage",
         }
@@ -455,8 +453,6 @@ impl App {
             Tab::Scenes,
             Tab::Areas,
             Tab::Automations,
-            Tab::Logs,
-            Tab::Events,
         ];
         if self.is_admin() {
             tabs.push(Tab::Plugins);
@@ -1009,9 +1005,11 @@ impl App {
             }
             KeyCode::Left if matches!(self.active_tab(), Tab::Manage) => {
                 self.admin_sub = match self.admin_sub {
-                    AdminSubPanel::Modes => AdminSubPanel::Users,
+                    AdminSubPanel::Modes => AdminSubPanel::Events,
                     AdminSubPanel::Status => AdminSubPanel::Modes,
                     AdminSubPanel::Users => AdminSubPanel::Status,
+                    AdminSubPanel::Logs => AdminSubPanel::Users,
+                    AdminSubPanel::Events => AdminSubPanel::Logs,
                 };
                 self.selected = 0;
                 self.error = None;
@@ -1023,7 +1021,9 @@ impl App {
                 self.admin_sub = match self.admin_sub {
                     AdminSubPanel::Modes => AdminSubPanel::Status,
                     AdminSubPanel::Status => AdminSubPanel::Users,
-                    AdminSubPanel::Users => AdminSubPanel::Modes,
+                    AdminSubPanel::Users => AdminSubPanel::Logs,
+                    AdminSubPanel::Logs => AdminSubPanel::Events,
+                    AdminSubPanel::Events => AdminSubPanel::Modes,
                 };
                 self.selected = 0;
                 self.error = None;
@@ -1081,25 +1081,29 @@ impl App {
                     }
                 }
             }
-            KeyCode::Down | KeyCode::Char('j') if !matches!(self.active_tab(), Tab::Logs) => {
+            KeyCode::Down | KeyCode::Char('j') => {
+                                // Exclude Logs sub-panel in Manage
+                                if matches!(self.active_tab(), Tab::Manage) && matches!(self.admin_sub, AdminSubPanel::Logs) {
+                                    if self.log_paused {
+                                        let max = self.log_lines.len().saturating_sub(1);
+                                        self.log_scroll_offset = min(self.log_scroll_offset + 1, max);
+                                    }
+                                    return;
+                                }
                 let len = self.active_items_len();
                 if len > 0 {
                     self.selected = min(self.selected + 1, len - 1);
                 }
             }
-            KeyCode::Up | KeyCode::Char('k') if !matches!(self.active_tab(), Tab::Logs) => {
+            KeyCode::Up | KeyCode::Char('k') => {
+                                // Exclude Logs sub-panel in Manage
+                                if matches!(self.active_tab(), Tab::Manage) && matches!(self.admin_sub, AdminSubPanel::Logs) {
+                                    if self.log_paused {
+                                        self.log_scroll_offset = self.log_scroll_offset.saturating_sub(1);
+                                    }
+                                    return;
+                                }
                 self.selected = self.selected.saturating_sub(1);
-            }
-            KeyCode::Down | KeyCode::Char('j') if matches!(self.active_tab(), Tab::Logs) => {
-                if self.log_paused {
-                    let max = self.log_lines.len().saturating_sub(1);
-                    self.log_scroll_offset = min(self.log_scroll_offset + 1, max);
-                }
-            }
-            KeyCode::Up | KeyCode::Char('k') if matches!(self.active_tab(), Tab::Logs) => {
-                if self.log_paused {
-                    self.log_scroll_offset = self.log_scroll_offset.saturating_sub(1);
-                }
             }
             KeyCode::Enter => {
                 match self.active_tab() {
@@ -1128,7 +1132,17 @@ impl App {
                     }
                     Tab::Areas   => self.open_area_editor_edit(),
                     Tab::Plugins => self.open_plugin_detail(),
-                    Tab::Manage if matches!(self.admin_sub, AdminSubPanel::Users) => self.open_user_editor_role(),
+                    Tab::Manage => {
+                        if matches!(self.admin_sub, AdminSubPanel::Users) {
+                            if self.is_admin() {
+                                self.open_user_editor_create();
+                            } else {
+                                self.open_user_editor_role();
+                            }
+                        } else {
+                            self.open_manage_editor();
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -1155,8 +1169,10 @@ impl App {
                     }
                     Tab::Areas => self.open_area_editor_create(),
                     Tab::Manage => {
-                        if matches!(self.admin_sub, AdminSubPanel::Users) && self.is_admin() {
-                            self.open_user_editor_create();
+                        if matches!(self.admin_sub, AdminSubPanel::Users) {
+                            if self.is_admin() {
+                                self.open_user_editor_create();
+                            }
                         } else {
                             self.open_manage_editor();
                         }
@@ -1175,6 +1191,11 @@ impl App {
                     }
                     Tab::Areas   => self.delete_selected_area().await,
                     Tab::Plugins => self.deregister_selected_plugin().await,
+                                        Tab::Manage if matches!(self.admin_sub, AdminSubPanel::Logs) => {
+                                            self.log_lines.clear();
+                                            self.log_scroll_offset = 0;
+                                            self.status = "Log buffer cleared".to_string();
+                                        }
                     Tab::Manage => {
                         if matches!(self.admin_sub, AdminSubPanel::Users) {
                             self.delete_selected_user().await;
@@ -1183,11 +1204,6 @@ impl App {
                         }
                     }
                     Tab::Automations => self.disable_selected_automation().await,
-                    Tab::Logs => {
-                        self.log_lines.clear();
-                        self.log_scroll_offset = 0;
-                        self.status = "Log buffer cleared".to_string();
-                    }
                     _ => {}
                 }
             }
@@ -1206,7 +1222,7 @@ impl App {
             KeyCode::Char('p') => {
                 match self.active_tab() {
                     Tab::Manage if matches!(self.admin_sub, AdminSubPanel::Users) => self.open_user_editor_password(),
-                    Tab::Logs => {
+                    Tab::Manage if matches!(self.admin_sub, AdminSubPanel::Logs) => {
                         self.log_paused = !self.log_paused;
                         if !self.log_paused {
                             self.log_scroll_offset = self.log_lines.len().saturating_sub(1);
@@ -1224,7 +1240,7 @@ impl App {
                 match self.active_tab() {
                     Tab::Devices => self.toggle_lock_or_switch().await,
                     Tab::Automations => self.toggle_automation_selection(),
-                    Tab::Logs => {
+                    Tab::Manage if matches!(self.admin_sub, AdminSubPanel::Logs) => {
                         self.log_paused = !self.log_paused;
                         if !self.log_paused {
                             self.log_scroll_offset = self.log_lines.len().saturating_sub(1);
@@ -1275,7 +1291,7 @@ impl App {
             }
             KeyCode::Char('f') => {
                 match self.active_tab() {
-                    Tab::Events => {
+                    Tab::Manage if matches!(self.admin_sub, AdminSubPanel::Events) => {
                         self.events_filter_mode = match self.events_filter_mode {
                             EventsFilterMode::All => EventsFilterMode::HueInputs,
                             EventsFilterMode::HueInputs => EventsFilterMode::Entertainment,
@@ -1310,7 +1326,7 @@ impl App {
             KeyCode::Char('c') | KeyCode::Char('C') => {
                 if matches!(self.active_tab(), Tab::Automations) {
                     self.clone_selected_automation().await;
-                } else if matches!(self.active_tab(), Tab::Logs) {
+                } else if matches!(self.active_tab(), Tab::Manage) && matches!(self.admin_sub, AdminSubPanel::Logs) {
                     self.log_lines.clear();
                     self.log_scroll_offset = 0;
                     self.status = "Log buffer cleared".to_string();
@@ -1325,7 +1341,7 @@ impl App {
                             self.enable_selected_automation().await;
                         }
                     }
-                    Tab::Logs => {
+                    Tab::Manage if matches!(self.admin_sub, AdminSubPanel::Logs) => {
                         self.log_level_filter = LogLevelFilter::Error;
                         self.status = "Log level: ERROR".to_string();
                     }
@@ -1345,19 +1361,19 @@ impl App {
                 }
             }
             KeyCode::Char('w') => {
-                if matches!(self.active_tab(), Tab::Logs) {
+                if matches!(self.active_tab(), Tab::Manage) && matches!(self.admin_sub, AdminSubPanel::Logs) {
                     self.log_level_filter = LogLevelFilter::Warn;
                     self.status = "Log level: WARN".to_string();
                 }
             }
             KeyCode::Char('i') => {
-                if matches!(self.active_tab(), Tab::Logs) {
+                if matches!(self.active_tab(), Tab::Manage) && matches!(self.admin_sub, AdminSubPanel::Logs) {
                     self.log_level_filter = LogLevelFilter::Info;
                     self.status = "Log level: INFO".to_string();
                 }
             }
             KeyCode::Char('/') => {
-                if matches!(self.active_tab(), Tab::Logs) {
+                if matches!(self.active_tab(), Tab::Manage) && matches!(self.admin_sub, AdminSubPanel::Logs) {
                     self.log_module_input_open = true;
                     self.log_module_input = self.log_module_filter.clone();
                 }
@@ -2089,13 +2105,13 @@ impl App {
             Tab::Scenes => self.scenes.len(),
             Tab::Areas => self.areas.len(),
             Tab::Automations => self.visible_automations().len(),
-            Tab::Events => self.filtered_events().len(),
-            Tab::Logs => 0,
             Tab::Plugins => self.plugins.len(),
             Tab::Manage => match self.admin_sub {
                 AdminSubPanel::Modes => self.modes.len(),
                 AdminSubPanel::Status => 0,
                 AdminSubPanel::Users => self.users.len(),
+                        AdminSubPanel::Logs => 0,
+                        AdminSubPanel::Events => self.filtered_events().len(),
             },
         }
     }
@@ -2831,6 +2847,12 @@ impl App {
                     field: UserEditField::Username,
                 });
             }
+            AdminSubPanel::Logs => {
+                // No create action for logs panel.
+            }
+            AdminSubPanel::Events => {
+                // No create action for events panel.
+            }
         }
     }
 
@@ -2862,6 +2884,12 @@ impl App {
                     }
                     Err(e) => self.error = Some(e.to_string()),
                 }
+            }
+            AdminSubPanel::Logs => {
+                // No delete action for logs panel.
+            }
+            AdminSubPanel::Events => {
+                // No delete action for events panel.
             }
         }
     }
