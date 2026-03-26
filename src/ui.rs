@@ -25,41 +25,31 @@ pub fn draw(frame: &mut Frame<'_>, app: &App) {
 
     let footer_height = compute_footer_height(app, frame.area().width);
 
+    // Main layout: left menu sidebar + right content + footer
     let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
             Constraint::Min(5),
             Constraint::Length(footer_height),
         ])
         .split(frame.area());
 
-    let tabs = app
-        .tabs()
-        .iter()
-        .enumerate()
-        .map(|(idx, tab)| {
-            let num = idx + 1;
-            Line::from(Span::styled(
-                format!("({}) {}", num, tab.title()),
-                Style::default().fg(Color::Gray),
-            ))
-        })
-        .collect::<Vec<_>>();
-    let tabs_widget = Tabs::new(tabs)
-        .select(app.tab)
-        .block(Block::default().borders(Borders::ALL).title("HomeCore"))
-        .style(Style::default().fg(Color::Gray))
-        .highlight_style(
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        );
-    frame.render_widget(tabs_widget, layout[0]);
+    // Split content area into left menu and right content
+    let content_layout = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(20),  // Fixed width for left menu
+            Constraint::Min(10),      // Remaining space for content
+        ])
+        .split(layout[0]);
 
-    draw_tab_body(frame, app, layout[1]);
+    // Draw left sidebar menu with tabs
+    draw_menu_sidebar(frame, app, content_layout[0]);
 
-    draw_status_bar(frame, app, layout[2]);
+    // Draw tab content
+    draw_tab_body(frame, app, content_layout[1]);
+
+    draw_status_bar(frame, app, layout[1]);
 
     if app.device_editor.is_some() {
         draw_device_editor(frame, app);
@@ -92,6 +82,33 @@ pub fn draw(frame: &mut Frame<'_>, app: &App) {
     if app.log_module_input_open {
         draw_log_module_input(frame, app);
     }
+}
+
+fn draw_menu_sidebar(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let menu_items: Vec<ListItem> = app
+        .tabs()
+        .iter()
+        .enumerate()
+        .map(|(idx, tab)| {
+            let num = idx + 1;
+            let prefix = if idx == app.tab { "► " } else { "  " };
+            let style = if idx == app.tab {
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+            ListItem::new(Span::styled(
+                format!("{}{}) {}", prefix, num, tab.title()),
+                style,
+            ))
+        })
+        .collect();
+
+    let menu_list = List::new(menu_items)
+        .block(Block::default().borders(Borders::RIGHT).title("Menu"));
+    frame.render_widget(menu_list, area);
 }
 
 fn draw_status_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
@@ -168,7 +185,7 @@ fn status_hints(app: &App) -> Vec<&'static str> {
         Tab::Areas => {
             hints.push("n new area");
             hints.push("Enter rename");
-            hints.push("h/l ◄/► pane");
+            hints.push("◄/► pane");
             hints.push("Spc select dev");
             hints.push("+ add device");
             hints.push("- remove device");
