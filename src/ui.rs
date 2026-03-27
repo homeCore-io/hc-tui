@@ -1633,14 +1633,24 @@ fn device_list_row(app: &App, device: &DeviceState, is_selected: bool, indent: b
 
     // Compact sensor suffix
     let mut suffix = String::new();
+    let status_shows_temp = status.contains('°');
+    let status_shows_humidity = status.ends_with("%rh");
+    let status_shows_battery = status.ends_with('%') && !status_shows_humidity;
+
     if let Some(b) = App::device_battery(device) {
+        if !status_shows_battery {
         suffix.push_str(&format!(" {b}%🔋"));
+        }
     }
     if let Some(t) = App::device_temperature(device) {
-        suffix.push_str(&format!(" {t:.1}°"));
+        if !status_shows_temp {
+            suffix.push_str(&format!(" {t:.1}°"));
+        }
     }
     if let Some(h) = App::device_humidity(device) {
-        suffix.push_str(&format!(" {h:.0}%"));
+        if !status_shows_humidity {
+            suffix.push_str(&format!(" {h:.0}%"));
+        }
     }
     // Timer countdown suffix
     if device.plugin_id == "core.timer" {
