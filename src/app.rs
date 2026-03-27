@@ -1742,7 +1742,7 @@ impl App {
     }
 
     pub fn device_battery(device: &DeviceState) -> Option<u8> {
-        for key in &["battery", "battery_level", "battery_percent"] {
+        for key in &["battery", "battery_level", "battery_percent", "battery_pct"] {
             if let Some(n) = device.attributes.get(*key).and_then(|v| v.as_f64()) {
                 return Some(n.clamp(0.0, 100.0) as u8);
             }
@@ -1930,6 +1930,13 @@ impl App {
         }
         if let Some(hum) = attrs.get("humidity").and_then(|v| v.as_f64()) {
             return format!("{hum:.0}%rh");
+        }
+        // Battery-only sensor/status devices (e.g. Hue device_power)
+        if let Some(battery) = Self::device_battery(device) {
+            return format!("{battery}%");
+        }
+        if let Some(state) = attrs.get("battery_state").and_then(|v| v.as_str()) {
+            return normalize_label(state);
         }
         // Illuminance sensors (e.g. Hue light_level)
         if let Some(illuminance) = attrs

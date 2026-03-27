@@ -2040,7 +2040,7 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
     // internal noise properties that have no user-visible meaning.
     let shown = [
         "on", "state", "open", "online", "locked",
-        "battery", "battery_level", "battery_percent", "battery_low",
+        "battery", "battery_level", "battery_percent", "battery_pct", "battery_state", "battery_low",
         "temperature", "temp", "humidity", "brightness",
         "motion", "contact_open", "position", "location",
         "mode", "hvac_action", "target_temp",
