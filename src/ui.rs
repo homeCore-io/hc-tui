@@ -180,6 +180,9 @@ fn status_hints(app: &App) -> Vec<&'static str> {
                     hints.push("+/- brightness");
                     hints.push("l/u lock");
                     hints.push("v grouped/flat");
+                    hints.push("f filter");
+                    hints.push("s sort");
+                    hints.push("/ search");
                     hints.push("Enter edit");
                     hints.push("d delete");
                 }
@@ -1556,7 +1559,18 @@ fn draw_device_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
     };
 
     let mode_label = if app.view_mode == DeviceViewMode::Grouped { "Grouped" } else { "Flat" };
-    let title = format!("Devices ({mode_label}) [{}]", app.visible_devices().len());
+    let search = if app.device_search_query.trim().is_empty() {
+        "-".to_string()
+    } else {
+        app.device_search_query.clone()
+    };
+    let title = format!(
+        "Devices ({mode_label}) [{}] f:{} s:{} q:{}",
+        app.visible_devices().len(),
+        app.device_filter_mode.title(),
+        app.device_sort_mode.title(),
+        search,
+    );
 
     let list = List::new(items).block(Block::default().borders(Borders::ALL).title(title));
 

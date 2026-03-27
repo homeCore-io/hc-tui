@@ -127,6 +127,59 @@ impl DeviceSubPanel {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceFilterMode {
+    All,
+    Online,
+    Offline,
+    LowBattery,
+}
+
+impl DeviceFilterMode {
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Online => "online",
+            Self::Offline => "offline",
+            Self::LowBattery => "low_battery",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::All => Self::Online,
+            Self::Online => Self::Offline,
+            Self::Offline => Self::LowBattery,
+            Self::LowBattery => Self::All,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceSortMode {
+    Name,
+    Status,
+    LastSeen,
+}
+
+impl DeviceSortMode {
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Name => "name",
+            Self::Status => "status",
+            Self::LastSeen => "last_seen",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Name => Self::Status,
+            Self::Status => Self::LastSeen,
+            Self::LastSeen => Self::Name,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AdminSubPanel {
     Modes,
     Status,
@@ -309,6 +362,10 @@ pub struct App {
     pub areas_devices_selected: usize, // selection index for devices list pane
     pub user_editor: Option<UserEditor>,
     pub device_sub: DeviceSubPanel,
+    pub device_filter_mode: DeviceFilterMode,
+    pub device_sort_mode: DeviceSortMode,
+    pub device_search_query: String,
+    pub device_search_input_open: bool,
     pub admin_sub: AdminSubPanel,
     pub switches: Vec<DeviceState>,
     pub timers: Vec<DeviceState>,
@@ -402,6 +459,10 @@ impl App {
             areas_devices_selected: 0,
             user_editor: None,
             device_sub: DeviceSubPanel::All,
+            device_filter_mode: DeviceFilterMode::All,
+            device_sort_mode: DeviceSortMode::Name,
+            device_search_query: String::new(),
+            device_search_input_open: false,
             admin_sub: AdminSubPanel::Modes,
             switches: Vec::new(),
             timers: Vec::new(),
@@ -914,6 +975,11 @@ impl App {
             return;
         }
 
+        if self.device_search_input_open {
+            self.on_key_device_search_input(key);
+            return;
+        }
+
         // Automation filter bar
         if self.automation_filter_bar.is_some() {
             self.on_key_automation_filter_bar(key).await;
@@ -1284,6 +1350,12 @@ impl App {
             }
             KeyCode::Char('f') => {
                 match self.active_tab() {
+                    Tab::Devices if matches!(self.device_sub, DeviceSubPanel::All) => {
+                        self.device_filter_mode = self.device_filter_mode.next();
+                        self.selected = 0;
+                        self.clamp_selection();
+                        self.status = format!("Device filter: {}", self.device_filter_mode.title());
+                    }
                     Tab::Manage if matches!(self.admin_sub, AdminSubPanel::Events) => {
                         self.events_filter_mode = match self.events_filter_mode {
                             EventsFilterMode::All => EventsFilterMode::HueInputs,
@@ -1369,6 +1441,11 @@ impl App {
                 if matches!(self.active_tab(), Tab::Manage) && matches!(self.admin_sub, AdminSubPanel::Logs) {
                     self.log_module_input_open = true;
                     self.log_module_input = self.log_module_filter.clone();
+                } else if matches!(self.active_tab(), Tab::Devices)
+                    && matches!(self.device_sub, DeviceSubPanel::All)
+                {
+                    self.device_search_input_open = true;
+                    self.status = format!("Device search: {}", self.device_search_query);
                 }
             }
             KeyCode::Char('g') | KeyCode::Char('G') => {
@@ -1386,6 +1463,13 @@ impl App {
                     } else {
                         "Filter: showing all rules".to_string()
                     };
+                } else if matches!(self.active_tab(), Tab::Devices)
+                    && matches!(self.device_sub, DeviceSubPanel::All)
+                {
+                    self.device_sort_mode = self.device_sort_mode.next();
+                    self.selected = 0;
+                    self.clamp_selection();
+                    self.status = format!("Device sort: {}", self.device_sort_mode.title());
                 }
             }
             KeyCode::Delete | KeyCode::Char('x') => {
@@ -1408,6 +1492,32 @@ impl App {
                     }
                     _ => {}
                 }
+            }
+            _ => {}
+        }
+    }
+
+    fn on_key_device_search_input(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => {
+                self.device_search_input_open = false;
+                self.status = "Device search canceled".to_string();
+            }
+            KeyCode::Enter => {
+                self.device_search_input_open = false;
+                self.selected = 0;
+                self.clamp_selection();
+                self.status = if self.device_search_query.trim().is_empty() {
+                    "Device search cleared".to_string()
+                } else {
+                    format!("Device search: {}", self.device_search_query)
+                };
+            }
+            KeyCode::Backspace => {
+                self.device_search_query.pop();
+            }
+            KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.device_search_query.push(ch);
             }
             _ => {}
         }
@@ -1695,11 +1805,62 @@ impl App {
     /// Returns devices grouped by area, sorted alphabetically. Unassigned devices last.
     /// Devices that should appear in the Devices tab (scene devices are shown in Scenes tab).
     pub fn visible_devices(&self) -> Vec<&DeviceState> {
-        self
+        let mut visible = self
             .devices
             .iter()
             .filter(|d| !is_hidden_in_devices_view_with_context(d, &self.devices))
-            .collect()
+            .filter(|d| self.device_matches_filter(d))
+            .filter(|d| self.device_matches_search(d))
+            .collect::<Vec<_>>();
+
+        match self.device_sort_mode {
+            DeviceSortMode::Name => {
+                visible.sort_by_key(|d| d.name.to_lowercase());
+            }
+            DeviceSortMode::Status => {
+                visible.sort_by(|a, b| {
+                    let sa = self.device_status(a).to_lowercase();
+                    let sb = self.device_status(b).to_lowercase();
+                    sa.cmp(&sb).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+                });
+            }
+            DeviceSortMode::LastSeen => {
+                visible.sort_by(|a, b| b.last_seen.cmp(&a.last_seen));
+            }
+        }
+
+        visible
+    }
+
+    fn device_matches_filter(&self, device: &DeviceState) -> bool {
+        match self.device_filter_mode {
+            DeviceFilterMode::All => true,
+            DeviceFilterMode::Online => device.available,
+            DeviceFilterMode::Offline => !device.available,
+            DeviceFilterMode::LowBattery => Self::device_battery(device).map(|b| b <= 20).unwrap_or(false),
+        }
+    }
+
+    fn device_matches_search(&self, device: &DeviceState) -> bool {
+        let q = self.device_search_query.trim().to_lowercase();
+        if q.is_empty() {
+            return true;
+        }
+
+        device.name.to_lowercase().contains(&q)
+            || device.device_id.to_lowercase().contains(&q)
+            || device.plugin_id.to_lowercase().contains(&q)
+            || device
+                .area
+                .as_deref()
+                .map(|a| a.to_lowercase().contains(&q))
+                .unwrap_or(false)
+            || device
+                .attributes
+                .get("kind")
+                .and_then(Value::as_str)
+                .map(|k| k.to_lowercase().contains(&q))
+                .unwrap_or(false)
     }
 
     pub fn grouped_devices(&self) -> Vec<(String, Vec<usize>)> {
