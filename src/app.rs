@@ -1702,7 +1702,11 @@ impl App {
     /// Returns devices grouped by area, sorted alphabetically. Unassigned devices last.
     /// Devices that should appear in the Devices tab (scene devices are shown in Scenes tab).
     pub fn visible_devices(&self) -> Vec<&DeviceState> {
-        self.devices.iter().filter(|d| !is_scene_device(d)).collect()
+        self
+            .devices
+            .iter()
+            .filter(|d| !is_hidden_in_devices_view(d))
+            .collect()
     }
 
     pub fn grouped_devices(&self) -> Vec<(String, Vec<usize>)> {
@@ -3060,6 +3064,16 @@ pub fn is_scene_device(device: &DeviceState) -> bool {
     }
     // Lutron scene devices: phantom buttons, keypad phantom buttons, etc.
     device.device_id.starts_with("lutron_scene_")
+}
+
+fn is_hidden_in_devices_view(device: &DeviceState) -> bool {
+    if is_scene_device(device) {
+        return true;
+    }
+
+    // Hue zigbee_connectivity resources are internal connectivity diagnostics and
+    // should not appear in the main interactive Devices view.
+    device.attributes.get("kind").and_then(Value::as_str) == Some("hue_zigbee_connectivity")
 }
 
 /// Extract hue scene devices from the device list and convert them to Scene entries.
