@@ -1698,7 +1698,7 @@ impl App {
         self
             .devices
             .iter()
-            .filter(|d| !is_hidden_in_devices_view(d))
+            .filter(|d| !is_hidden_in_devices_view_with_context(d, &self.devices))
             .collect()
     }
 
@@ -3090,7 +3090,37 @@ fn is_hidden_in_devices_view(device: &DeviceState) -> bool {
 
     // Hue zigbee_connectivity resources are internal connectivity diagnostics and
     // should not appear in the main interactive Devices view.
-    device.attributes.get("kind").and_then(Value::as_str) == Some("hue_zigbee_connectivity")
+    if device.attributes.get("kind").and_then(Value::as_str) == Some("hue_zigbee_connectivity") {
+        return true;
+    }
+
+    false
+}
+
+fn is_hidden_in_devices_view_with_context(device: &DeviceState, all_devices: &[DeviceState]) -> bool {
+    if is_hidden_in_devices_view(device) {
+        return true;
+    }
+
+    // Compact Hue motion facets in the TUI when the corresponding motion device
+    // exists: show one motion row that carries motion/temp/lux/battery values.
+    let Some(kind) = device.attributes.get("kind").and_then(Value::as_str) else {
+        return false;
+    };
+    if !matches!(kind, "hue_temperature" | "hue_light_level" | "hue_device_power") {
+        return false;
+    }
+
+    all_devices.iter().any(|other| {
+        if other.plugin_id != device.plugin_id || other.name != device.name {
+            return false;
+        }
+        other
+            .attributes
+            .get("kind")
+            .and_then(Value::as_str)
+            == Some("hue_motion")
+    })
 }
 
 /// Extract hue scene devices from the device list and convert them to Scene entries.
