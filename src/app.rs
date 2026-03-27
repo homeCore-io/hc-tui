@@ -1931,6 +1931,23 @@ impl App {
         if let Some(hum) = attrs.get("humidity").and_then(|v| v.as_f64()) {
             return format!("{hum:.0}%rh");
         }
+        // Illuminance sensors (e.g. Hue light_level)
+        if let Some(illuminance) = attrs
+            .get("illuminance")
+            .or_else(|| attrs.get("illuminance_lux"))
+            .or_else(|| attrs.get("illuminance_raw"))
+            .and_then(|v| v.as_f64())
+        {
+            let unit = attrs
+                .get("illuminance_unit")
+                .and_then(|v| v.as_str())
+                .unwrap_or("lux");
+            return if unit.eq_ignore_ascii_case("raw") {
+                format!("{illuminance:.0} raw")
+            } else {
+                format!("{illuminance:.0} lx")
+            };
+        }
         // Smoke / CO / water alarms
         for key in &["smoke", "co", "water_detected"] {
             if let Some(true) = attrs.get(*key).and_then(|v| v.as_bool()) {
