@@ -124,13 +124,6 @@ pub enum DeviceSubPanel {
 }
 
 impl DeviceSubPanel {
-    pub fn title(self) -> &'static str {
-        match self {
-            Self::All => "All",
-            Self::Switches => "Switches",
-            Self::Timers => "Timers",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
