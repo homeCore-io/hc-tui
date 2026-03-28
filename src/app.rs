@@ -1893,11 +1893,26 @@ impl App {
             payload.insert("passcode".to_string(), Value::Number((pin as u64).into()));
         }
 
+        let before = self.matter_nodes.len();
+
         match self.client.matter_commission(Value::Object(payload)).await {
             Ok(_) => {
-                self.status = "Matter commission requested".to_string();
                 self.error = None;
                 self.refresh_matter_nodes().await;
+                if self.error.is_none() {
+                    let after = self.matter_nodes.len();
+                    if after > before {
+                        self.status = format!(
+                            "Matter commission accepted; inventory {} -> {}",
+                            before, after
+                        );
+                    } else {
+                        self.status = format!(
+                            "Matter commission accepted; waiting for device response (inventory {})",
+                            after
+                        );
+                    }
+                }
             }
             Err(err) => {
                 self.error = Some(format!("Matter commission failed: {err}"));
