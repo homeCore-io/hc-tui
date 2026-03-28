@@ -211,7 +211,12 @@ fn status_hints(app: &App) -> Vec<&'static str> {
         Tab::Plugins => { hints.push("d deregister"); }
         Tab::Manage => {
             hints.push("◄/► panel");
-            if matches!(app.admin_sub, AdminSubPanel::Status) {
+            if matches!(app.admin_sub, AdminSubPanel::Matter) {
+                hints.push("c commission");
+                hints.push("r refresh");
+                hints.push("i reinterview");
+                hints.push("d remove");
+            } else if matches!(app.admin_sub, AdminSubPanel::Status) {
                 hints.push("r refresh");
             } else if matches!(app.admin_sub, AdminSubPanel::Users) {
                 hints.push("n new");
@@ -2546,13 +2551,15 @@ fn draw_manage_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
 
     let active_idx = match app.admin_sub {
         AdminSubPanel::Modes => 0,
-        AdminSubPanel::Status => 1,
-        AdminSubPanel::Users => 2,
-        AdminSubPanel::Logs => 3,
-        AdminSubPanel::Events => 4,
+        AdminSubPanel::Matter => 1,
+        AdminSubPanel::Status => 2,
+        AdminSubPanel::Users => 3,
+        AdminSubPanel::Logs => 4,
+        AdminSubPanel::Events => 5,
     };
     let sub_tabs = Tabs::new(vec![
         Line::from("Modes"),
+        Line::from("Matter"),
         Line::from("Status"),
         Line::from("Users"),
         Line::from("Logs"),
@@ -2571,6 +2578,40 @@ fn draw_manage_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
 
     if matches!(app.admin_sub, AdminSubPanel::Status) {
         draw_status_tab(frame, app, layout[1]);
+        return;
+    }
+
+    if matches!(app.admin_sub, AdminSubPanel::Matter) {
+        let items = app
+            .matter_nodes
+            .iter()
+            .map(|n| {
+                ListItem::new(Line::from(vec![
+                    Span::styled(
+                        format!("  {:<30}", n.node_id),
+                        Style::default().fg(Color::White),
+                    ),
+                    Span::styled(
+                        format!("ep {:<4}", n.endpoint),
+                        Style::default().fg(Color::Cyan),
+                    ),
+                    Span::styled(
+                        format!("  clusters:{}", n.clusters.len()),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ]))
+            })
+            .collect::<Vec<_>>();
+
+        let list = List::new(items)
+            .block(Block::default().borders(Borders::ALL).title("Matter Nodes"))
+            .highlight_style(highlight)
+            .highlight_symbol(">> ");
+        let mut state = ratatui::widgets::ListState::default();
+        if !app.matter_nodes.is_empty() {
+            state.select(Some(app.selected.min(app.matter_nodes.len() - 1)));
+        }
+        frame.render_stateful_widget(list, layout[1], &mut state);
         return;
     }
 
@@ -2653,6 +2694,7 @@ fn draw_manage_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
             let len = app.modes.len();
             (items, "Modes", len)
         }
+        AdminSubPanel::Matter => (Vec::new(), "Matter", 0),
         AdminSubPanel::Status => (Vec::new(), "Status", 0),
         AdminSubPanel::Users => (Vec::new(), "Users", 0),
         AdminSubPanel::Logs => (Vec::new(), "Logs", 0),

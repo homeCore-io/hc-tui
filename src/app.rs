@@ -1,6 +1,6 @@
 use crate::api::{
     Area, DeviceState, EventEntry, HomeCoreClient, LogLine, LoginResponse, ModeRecord,
-    PluginRecord, Role, Rule, RuleFiring, RuleGroup, Scene, SystemStatus, UserInfo,
+    MatterNode, PluginRecord, Role, Rule, RuleFiring, RuleGroup, Scene, SystemStatus, UserInfo,
 };
 use crate::cache::{CacheSnapshot, CacheStore};
 use anyhow::Result;
@@ -182,6 +182,7 @@ impl DeviceSortMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AdminSubPanel {
     Modes,
+    Matter,
     Status,
     Users,
     Logs,
@@ -349,6 +350,7 @@ pub struct App {
     pub events: Vec<EventEntry>,
     pub users: Vec<UserInfo>,
     pub plugins: Vec<PluginRecord>,
+    pub matter_nodes: Vec<MatterNode>,
     pub ws_connected: bool,
     pub login_in_progress: bool,
     pub login_animation_step: u16,
@@ -446,6 +448,7 @@ impl App {
             events: Vec::new(),
             users: Vec::new(),
             plugins: Vec::new(),
+            matter_nodes: Vec::new(),
             ws_connected: false,
             login_in_progress: false,
             login_animation_step: 0,
@@ -626,6 +629,7 @@ impl App {
         if self.is_admin() {
             self.users = self.client.list_users().await?;
             self.plugins = self.client.list_plugins().await?;
+            self.matter_nodes = self.client.list_matter_nodes().await.unwrap_or_default();
         }
         if self.current_user.is_none() {
             self.current_user = Some(self.client.me().await?);
@@ -1034,6 +1038,9 @@ impl App {
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Char('r') => {
                 match self.active_tab() {
+                    Tab::Manage if matches!(self.admin_sub, AdminSubPanel::Matter) => {
+                        self.refresh_matter_nodes().await;
+                    }
                     Tab::Manage if matches!(self.admin_sub, AdminSubPanel::Status) => {
                         self.refresh_system_status().await;
                     }
@@ -1065,20 +1072,25 @@ impl App {
             KeyCode::Left if matches!(self.active_tab(), Tab::Manage) => {
                 self.admin_sub = match self.admin_sub {
                     AdminSubPanel::Modes => AdminSubPanel::Events,
-                    AdminSubPanel::Status => AdminSubPanel::Modes,
+                    AdminSubPanel::Matter => AdminSubPanel::Modes,
+                    AdminSubPanel::Status => AdminSubPanel::Matter,
                     AdminSubPanel::Users => AdminSubPanel::Status,
                     AdminSubPanel::Logs => AdminSubPanel::Users,
                     AdminSubPanel::Events => AdminSubPanel::Logs,
                 };
                 self.selected = 0;
                 self.error = None;
+                if matches!(self.admin_sub, AdminSubPanel::Matter) {
+                    self.refresh_matter_nodes().await;
+                }
                 if matches!(self.admin_sub, AdminSubPanel::Status) {
                     self.refresh_system_status().await;
                 }
             }
             KeyCode::Right if matches!(self.active_tab(), Tab::Manage) => {
                 self.admin_sub = match self.admin_sub {
-                    AdminSubPanel::Modes => AdminSubPanel::Status,
+                    AdminSubPanel::Modes => AdminSubPanel::Matter,
+                    AdminSubPanel::Matter => AdminSubPanel::Status,
                     AdminSubPanel::Status => AdminSubPanel::Users,
                     AdminSubPanel::Users => AdminSubPanel::Logs,
                     AdminSubPanel::Logs => AdminSubPanel::Events,
@@ -1086,6 +1098,9 @@ impl App {
                 };
                 self.selected = 0;
                 self.error = None;
+                if matches!(self.admin_sub, AdminSubPanel::Matter) {
+                    self.refresh_matter_nodes().await;
+                }
                 if matches!(self.admin_sub, AdminSubPanel::Status) {
                     self.refresh_system_status().await;
                 }
@@ -1192,7 +1207,9 @@ impl App {
                     Tab::Areas   => self.open_area_editor_edit(),
                     Tab::Plugins => self.open_plugin_detail(),
                     Tab::Manage => {
-                        if matches!(self.admin_sub, AdminSubPanel::Users) {
+                        if matches!(self.admin_sub, AdminSubPanel::Matter) {
+                            self.reinterview_selected_matter_node().await;
+                        } else if matches!(self.admin_sub, AdminSubPanel::Users) {
                             if self.is_admin() {
                                 self.open_user_editor_create();
                             } else {
@@ -1228,7 +1245,9 @@ impl App {
                     }
                     Tab::Areas => self.open_area_editor_create(),
                     Tab::Manage => {
-                        if matches!(self.admin_sub, AdminSubPanel::Users) {
+                        if matches!(self.admin_sub, AdminSubPanel::Matter) {
+                            self.commission_matter().await;
+                        } else if matches!(self.admin_sub, AdminSubPanel::Users) {
                             if self.is_admin() {
                                 self.open_user_editor_create();
                             }
@@ -1258,6 +1277,8 @@ impl App {
                     Tab::Manage => {
                         if matches!(self.admin_sub, AdminSubPanel::Users) {
                             self.delete_selected_user().await;
+                        } else if matches!(self.admin_sub, AdminSubPanel::Matter) {
+                            self.remove_selected_matter_node().await;
                         } else {
                             self.delete_selected_manage_item().await;
                         }
@@ -1391,6 +1412,10 @@ impl App {
             KeyCode::Char('c') | KeyCode::Char('C') => {
                 if matches!(self.active_tab(), Tab::Automations) {
                     self.clone_selected_automation().await;
+                } else if matches!(self.active_tab(), Tab::Manage)
+                    && matches!(self.admin_sub, AdminSubPanel::Matter)
+                {
+                    self.commission_matter().await;
                 } else if matches!(self.active_tab(), Tab::Manage) && matches!(self.admin_sub, AdminSubPanel::Logs) {
                     self.log_lines.clear();
                     self.log_scroll_offset = 0;
@@ -1432,7 +1457,11 @@ impl App {
                 }
             }
             KeyCode::Char('i') => {
-                if matches!(self.active_tab(), Tab::Manage) && matches!(self.admin_sub, AdminSubPanel::Logs) {
+                if matches!(self.active_tab(), Tab::Manage)
+                    && matches!(self.admin_sub, AdminSubPanel::Matter)
+                {
+                    self.reinterview_selected_matter_node().await;
+                } else if matches!(self.active_tab(), Tab::Manage) && matches!(self.admin_sub, AdminSubPanel::Logs) {
                     self.log_level_filter = LogLevelFilter::Info;
                     self.status = "Log level: INFO".to_string();
                 }
@@ -1796,6 +1825,75 @@ impl App {
             }
             Err(e) => {
                 self.error = Some(format!("Failed to load system status: {e}"));
+            }
+        }
+    }
+
+    async fn refresh_matter_nodes(&mut self) {
+        match self.client.list_matter_nodes().await {
+            Ok(nodes) => {
+                self.matter_nodes = nodes;
+                self.clamp_selection();
+                self.status = format!("Matter nodes refreshed ({})", self.matter_nodes.len());
+                self.error = None;
+            }
+            Err(err) => {
+                self.error = Some(format!("Matter list failed: {err}"));
+            }
+        }
+    }
+
+    async fn commission_matter(&mut self) {
+        match self.client.matter_commission().await {
+            Ok(_) => {
+                self.status = "Matter commission requested".to_string();
+                self.error = None;
+                self.refresh_matter_nodes().await;
+            }
+            Err(err) => {
+                self.error = Some(format!("Matter commission failed: {err}"));
+            }
+        }
+    }
+
+    async fn reinterview_selected_matter_node(&mut self) {
+        let Some(node) = self.matter_nodes.get(self.selected).cloned() else {
+            self.error = Some("No Matter node selected for reinterview".to_string());
+            return;
+        };
+
+        match self.client.matter_reinterview(&node.node_id).await {
+            Ok(_) => {
+                self.status = format!("Matter reinterview requested for {}", node.node_id);
+                self.error = None;
+                self.refresh_matter_nodes().await;
+            }
+            Err(err) => {
+                self.error = Some(format!(
+                    "Matter reinterview failed for {}: {}",
+                    node.node_id, err
+                ));
+            }
+        }
+    }
+
+    async fn remove_selected_matter_node(&mut self) {
+        let Some(node) = self.matter_nodes.get(self.selected).cloned() else {
+            self.error = Some("No Matter node selected for removal".to_string());
+            return;
+        };
+
+        match self.client.matter_remove_node(&node.node_id).await {
+            Ok(_) => {
+                self.status = format!("Matter node removal requested for {}", node.node_id);
+                self.error = None;
+                self.refresh_matter_nodes().await;
+            }
+            Err(err) => {
+                self.error = Some(format!(
+                    "Matter remove failed for {}: {}",
+                    node.node_id, err
+                ));
             }
         }
     }
@@ -2290,6 +2388,7 @@ impl App {
             Tab::Plugins => self.plugins.len(),
             Tab::Manage => match self.admin_sub {
                 AdminSubPanel::Modes => self.modes.len(),
+                AdminSubPanel::Matter => self.matter_nodes.len(),
                 AdminSubPanel::Status => 0,
                 AdminSubPanel::Users => self.users.len(),
                         AdminSubPanel::Logs => 0,
@@ -3014,6 +3113,9 @@ impl App {
                     field: ModeEditField::Id,
                 });
             }
+            AdminSubPanel::Matter => {
+                // Commissioning is action-driven; no modal editor.
+            }
             AdminSubPanel::Status => {
                 // No create action for system status panel.
             }
@@ -3051,6 +3153,9 @@ impl App {
                     }
                     Err(e) => self.error = Some(e.to_string()),
                 }
+            }
+            AdminSubPanel::Matter => {
+                self.remove_selected_matter_node().await;
             }
             AdminSubPanel::Status => {
                 // No delete action for system status panel.

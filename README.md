@@ -26,6 +26,11 @@ It is built with:
   - Events
   - Users (admin)
   - Plugins (admin)
+  - Manage > Matter (admin)
+    - Commission
+    - List commissioned nodes
+    - Reinterview selected node
+    - Remove selected node
 - Live updates:
   - Connects to `/api/v1/events/stream?token=...` via WebSocket
   - Applies device state/availability/name changes in real time
@@ -61,6 +66,12 @@ cargo run -- --base-url http://127.0.0.1:8080 --cache-dir ./cache
   - `t` toggle selected device (Devices tab)
   - `a` activate selected scene (Scenes tab)
 
+- Manage > Matter (admin):
+  - `c` request commission
+  - `r` refresh node inventory
+  - `i` request reinterview for selected node
+  - `d` request removal for selected node
+
 ## HomeCore API Integration
 
 This client targets the existing endpoints in `homeCore`:
@@ -75,3 +86,7 @@ This client targets the existing endpoints in `homeCore`:
 - `GET /api/v1/events?limit=...`
 - `GET /api/v1/auth/users` (admin)
 - `GET /api/v1/plugins` (admin)
+- `POST /api/v1/plugins/matter/commission` (admin)
+- `GET /api/v1/plugins/matter/nodes` (admin)
+- `POST /api/v1/plugins/matter/reinterview` (admin)
+- `DELETE /api/v1/plugins/matter/nodes/{id}` (admin)

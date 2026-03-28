@@ -172,6 +172,22 @@ pub struct ModeRecord {
     pub state: Option<DeviceState>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MatterNode {
+    pub node_id: String,
+    pub commissioned_at_unix: u64,
+    pub last_interview_unix: u64,
+    pub endpoint: u16,
+    #[serde(default)]
+    pub clusters: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct MatterNodesResponse {
+    #[serde(default)]
+    nodes: Vec<MatterNode>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct LoginBody<'a> {
     pub username: &'a str,
@@ -368,6 +384,33 @@ impl HomeCoreClient {
     pub async fn list_plugins(&self) -> Result<Vec<PluginRecord>> {
         let resp = self.request(Method::GET, "/plugins").await?;
         Self::parse_json(resp).await
+    }
+
+    pub async fn matter_commission(&self) -> Result<()> {
+        let resp = self
+            .request_with_json(Method::POST, "/plugins/matter/commission", json!({}))
+            .await?;
+        Self::parse_empty(resp).await
+    }
+
+    pub async fn list_matter_nodes(&self) -> Result<Vec<MatterNode>> {
+        let resp = self.request(Method::GET, "/plugins/matter/nodes").await?;
+        let body: MatterNodesResponse = Self::parse_json(resp).await?;
+        Ok(body.nodes)
+    }
+
+    pub async fn matter_reinterview(&self, node_id: &str) -> Result<()> {
+        let body = json!({ "node_id": node_id });
+        let resp = self
+            .request_with_json(Method::POST, "/plugins/matter/reinterview", body)
+            .await?;
+        Self::parse_empty(resp).await
+    }
+
+    pub async fn matter_remove_node(&self, node_id: &str) -> Result<()> {
+        let path = format!("/plugins/matter/nodes/{node_id}");
+        let resp = self.request(Method::DELETE, &path).await?;
+        Self::parse_empty(resp).await
     }
 
     pub async fn list_users(&self) -> Result<Vec<UserInfo>> {
