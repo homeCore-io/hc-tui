@@ -371,6 +371,7 @@ pub struct App {
     pub plugins: Vec<PluginRecord>,
     pub matter_nodes: Vec<MatterNode>,
     pub matter_last_action: String,
+    pub matter_last_metric: Option<String>,
     pub matter_pending: bool,
     pub matter_last_node_count: usize,
     pub matter_activity: VecDeque<String>,
@@ -474,6 +475,7 @@ impl App {
             plugins: Vec::new(),
             matter_nodes: Vec::new(),
             matter_last_action: "No Matter operation started".to_string(),
+            matter_last_metric: None,
             matter_pending: false,
             matter_last_node_count: 0,
             matter_activity: VecDeque::new(),
@@ -866,13 +868,23 @@ impl App {
             _ => {}
         }
 
+        let plugin_id = event
+            .get("plugin_id")
+            .and_then(Value::as_str)
+            .map(ToString::to_string);
+
+        let detail = summarize_live_event_detail(&event);
+
+        if event_type == "plugin_metrics"
+            && plugin_id.as_deref() == Some("plugin.matter")
+        {
+            self.matter_last_metric = summarize_matter_plugin_metric(&event).or(detail.clone());
+        }
+
         let entry = EventEntry {
             event_type,
             timestamp,
-            plugin_id: event
-                .get("plugin_id")
-                .and_then(Value::as_str)
-                .map(ToString::to_string),
+            plugin_id,
             device_id: event
                 .get("device_id")
                 .and_then(Value::as_str)
@@ -885,7 +897,7 @@ impl App {
                 .get("event_type")
                 .and_then(Value::as_str)
                 .map(ToString::to_string),
-            event_detail: summarize_live_event_detail(&event),
+            event_detail: detail,
         };
         self.events.insert(0, entry);
         self.events.truncate(200);
@@ -3818,6 +3830,41 @@ fn summarize_live_event_detail(event: &Value) -> Option<String> {
         }
         _ => None,
     }
+}
+
+fn summarize_matter_plugin_metric(event: &Value) -> Option<String> {
+    let phase = event.get("phase").and_then(Value::as_str);
+    let nodes = event.get("commissioned_nodes").and_then(Value::as_u64);
+    let bridged = event.get("bridged_endpoints").and_then(Value::as_u64);
+    let failed = event.get("failed_commands").and_then(Value::as_u64);
+    let latency = event.get("command_latency_ms").and_then(Value::as_u64);
+    let loop_prevented = event.get("loop_prevented_writes").and_then(Value::as_u64);
+
+    let mut parts = Vec::new();
+    if let Some(v) = phase {
+        parts.push(format!("phase={v}"));
+    }
+    if let Some(v) = nodes {
+        parts.push(format!("nodes={v}"));
+    }
+    if let Some(v) = bridged {
+        parts.push(format!("bridged={v}"));
+    }
+    if let Some(v) = failed {
+        parts.push(format!("failed={v}"));
+    }
+    if let Some(v) = latency {
+        parts.push(format!("latency={v}ms"));
+    }
+    if let Some(v) = loop_prevented {
+        parts.push(format!("loop_prevented={v}"));
+    }
+
+    if parts.is_empty() {
+        return None;
+    }
+
+    Some(parts.join(" "))
 }
 
 fn normalize_label(value: &str) -> String {

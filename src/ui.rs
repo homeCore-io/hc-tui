@@ -2643,6 +2643,16 @@ fn draw_manage_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
             Span::styled(app.matter_last_action.as_str(), Style::default().fg(Color::White)),
         ])];
 
+        activity_lines.push(Line::from(vec![
+            Span::styled("Metric: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                app.matter_last_metric
+                    .as_deref()
+                    .unwrap_or("No Matter plugin_metrics event received yet"),
+                Style::default().fg(Color::LightBlue),
+            ),
+        ]));
+
         if app.matter_activity.is_empty() {
             activity_lines.push(Line::from(Span::styled(
                 "No recent Matter activity",
