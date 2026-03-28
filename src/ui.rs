@@ -2589,6 +2589,11 @@ fn draw_manage_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
     }
 
     if matches!(app.admin_sub, AdminSubPanel::Matter) {
+        let matter_layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(6), Constraint::Length(8)])
+            .split(layout[1]);
+
         let items = app
             .matter_nodes
             .iter()
@@ -2610,15 +2615,52 @@ fn draw_manage_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
             })
             .collect::<Vec<_>>();
 
+        let pending_badge = if app.matter_pending {
+            " [pending]"
+        } else {
+            ""
+        };
+
+        let list_title = format!(
+            "Matter Nodes ({}){}",
+            app.matter_nodes.len(),
+            pending_badge
+        );
+
         let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL).title("Matter Nodes"))
+            .block(Block::default().borders(Borders::ALL).title(list_title))
             .highlight_style(highlight)
             .highlight_symbol(">> ");
         let mut state = ratatui::widgets::ListState::default();
         if !app.matter_nodes.is_empty() {
             state.select(Some(app.selected.min(app.matter_nodes.len() - 1)));
         }
-        frame.render_stateful_widget(list, layout[1], &mut state);
+
+        frame.render_stateful_widget(list, matter_layout[0], &mut state);
+
+        let mut activity_lines = vec![Line::from(vec![
+            Span::styled("Last: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(app.matter_last_action.as_str(), Style::default().fg(Color::White)),
+        ])];
+
+        if app.matter_activity.is_empty() {
+            activity_lines.push(Line::from(Span::styled(
+                "No recent Matter activity",
+                Style::default().fg(Color::DarkGray),
+            )));
+        } else {
+            for line in app.matter_activity.iter().take(3) {
+                activity_lines.push(Line::from(Span::styled(
+                    line.as_str(),
+                    Style::default().fg(Color::Gray),
+                )));
+            }
+        }
+
+        let activity = Paragraph::new(activity_lines)
+            .block(Block::default().borders(Borders::ALL).title("Matter Activity"))
+            .wrap(Wrap { trim: true });
+        frame.render_widget(activity, matter_layout[1]);
         return;
     }
 

@@ -370,6 +370,10 @@ pub struct App {
     pub users: Vec<UserInfo>,
     pub plugins: Vec<PluginRecord>,
     pub matter_nodes: Vec<MatterNode>,
+    pub matter_last_action: String,
+    pub matter_pending: bool,
+    pub matter_last_node_count: usize,
+    pub matter_activity: VecDeque<String>,
     pub ws_connected: bool,
     pub login_in_progress: bool,
     pub login_animation_step: u16,
@@ -469,6 +473,10 @@ impl App {
             users: Vec::new(),
             plugins: Vec::new(),
             matter_nodes: Vec::new(),
+            matter_last_action: "No Matter operation started".to_string(),
+            matter_pending: false,
+            matter_last_node_count: 0,
+            matter_activity: VecDeque::new(),
             ws_connected: false,
             login_in_progress: false,
             login_animation_step: 0,
@@ -1857,13 +1865,27 @@ impl App {
     async fn refresh_matter_nodes(&mut self) {
         match self.client.list_matter_nodes().await {
             Ok(nodes) => {
+                let prev = self.matter_last_node_count;
                 self.matter_nodes = nodes;
+                self.matter_last_node_count = self.matter_nodes.len();
                 self.clamp_selection();
                 self.status = format!("Matter nodes refreshed ({})", self.matter_nodes.len());
+                if self.matter_pending && self.matter_nodes.len() > prev {
+                    self.matter_pending = false;
+                    self.matter_last_action = format!(
+                        "Commission completed: inventory {} -> {}",
+                        prev,
+                        self.matter_nodes.len()
+                    );
+                }
+                self.push_matter_activity(self.status.clone());
                 self.error = None;
             }
             Err(err) => {
-                self.error = Some(format!("Matter list failed: {err}"));
+                let message = format!("Matter list failed: {err}");
+                self.matter_last_action = message.clone();
+                self.push_matter_activity(message.clone());
+                self.error = Some(message);
             }
         }
     }
@@ -1898,6 +1920,9 @@ impl App {
         match self.client.matter_commission(Value::Object(payload)).await {
             Ok(_) => {
                 self.error = None;
+                self.matter_pending = true;
+                self.matter_last_action = "Commission request accepted; waiting for device response".to_string();
+                self.push_matter_activity(self.matter_last_action.clone());
                 self.refresh_matter_nodes().await;
                 if self.error.is_none() {
                     let after = self.matter_nodes.len();
@@ -1906,16 +1931,24 @@ impl App {
                             "Matter commission accepted; inventory {} -> {}",
                             before, after
                         );
+                        self.matter_pending = false;
+                        self.matter_last_action = self.status.clone();
                     } else {
                         self.status = format!(
                             "Matter commission accepted; waiting for device response (inventory {})",
                             after
                         );
+                        self.matter_last_action = self.status.clone();
                     }
+                    self.push_matter_activity(self.status.clone());
                 }
             }
             Err(err) => {
-                self.error = Some(format!("Matter commission failed: {err}"));
+                self.matter_pending = false;
+                let message = format!("Matter commission failed: {err}");
+                self.matter_last_action = message.clone();
+                self.push_matter_activity(message.clone());
+                self.error = Some(message);
             }
         }
     }
@@ -2053,14 +2086,19 @@ impl App {
         match self.client.matter_reinterview(&node.node_id).await {
             Ok(_) => {
                 self.status = format!("Matter reinterview requested for {}", node.node_id);
+                self.matter_last_action = self.status.clone();
+                self.push_matter_activity(self.status.clone());
                 self.error = None;
                 self.refresh_matter_nodes().await;
             }
             Err(err) => {
-                self.error = Some(format!(
+                let message = format!(
                     "Matter reinterview failed for {}: {}",
                     node.node_id, err
-                ));
+                );
+                self.matter_last_action = message.clone();
+                self.push_matter_activity(message.clone());
+                self.error = Some(message);
             }
         }
     }
@@ -2074,15 +2112,28 @@ impl App {
         match self.client.matter_remove_node(&node.node_id).await {
             Ok(_) => {
                 self.status = format!("Matter node removal requested for {}", node.node_id);
+                self.matter_last_action = self.status.clone();
+                self.push_matter_activity(self.status.clone());
                 self.error = None;
                 self.refresh_matter_nodes().await;
             }
             Err(err) => {
-                self.error = Some(format!(
+                let message = format!(
                     "Matter remove failed for {}: {}",
                     node.node_id, err
-                ));
+                );
+                self.matter_last_action = message.clone();
+                self.push_matter_activity(message.clone());
+                self.error = Some(message);
             }
+        }
+    }
+
+    fn push_matter_activity(&mut self, line: String) {
+        let ts = Local::now().format("%H:%M:%S");
+        self.matter_activity.push_front(format!("[{ts}] {line}"));
+        while self.matter_activity.len() > 8 {
+            self.matter_activity.pop_back();
         }
     }
 
