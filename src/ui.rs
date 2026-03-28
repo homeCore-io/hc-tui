@@ -2653,6 +2653,27 @@ fn draw_manage_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
             ),
         ]));
 
+        if let Some(reason) = app.matter_blocked_reason.as_deref() {
+            activity_lines.push(Line::from(vec![
+                Span::styled("Blocked: ", Style::default().fg(Color::Red)),
+                Span::styled(reason, Style::default().fg(Color::LightRed)),
+            ]));
+
+            if app.matter_blocked_suggestions.is_empty() {
+                activity_lines.push(Line::from(Span::styled(
+                    "Retry with device in pairing mode and confirm mDNS/LAN reachability",
+                    Style::default().fg(Color::Yellow),
+                )));
+            } else {
+                for suggestion in app.matter_blocked_suggestions.iter().take(2) {
+                    activity_lines.push(Line::from(vec![
+                        Span::styled("- ", Style::default().fg(Color::DarkGray)),
+                        Span::styled(suggestion.as_str(), Style::default().fg(Color::Yellow)),
+                    ]));
+                }
+            }
+        }
+
         if app.matter_activity.is_empty() {
             activity_lines.push(Line::from(Span::styled(
                 "No recent Matter activity",

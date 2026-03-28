@@ -375,6 +375,8 @@ pub struct App {
     pub matter_pending: bool,
     pub matter_last_node_count: usize,
     pub matter_activity: VecDeque<String>,
+    pub matter_blocked_reason: Option<String>,
+    pub matter_blocked_suggestions: Vec<String>,
     pub ws_connected: bool,
     pub login_in_progress: bool,
     pub login_animation_step: u16,
@@ -479,6 +481,8 @@ impl App {
             matter_pending: false,
             matter_last_node_count: 0,
             matter_activity: VecDeque::new(),
+            matter_blocked_reason: None,
+            matter_blocked_suggestions: Vec::new(),
             ws_connected: false,
             login_in_progress: false,
             login_animation_step: 0,
@@ -879,6 +883,7 @@ impl App {
             && plugin_id.as_deref() == Some("plugin.matter")
         {
             self.matter_last_metric = summarize_matter_plugin_metric(&event).or(detail.clone());
+            self.update_matter_commission_feedback_from_metric(&event);
         }
 
         let entry = EventEntry {
@@ -1910,6 +1915,9 @@ impl App {
         discriminator: Option<u16>,
         passcode: Option<u32>,
     ) {
+        self.matter_blocked_reason = None;
+        self.matter_blocked_suggestions.clear();
+
         let mut payload = serde_json::Map::new();
         if let Some(code) = pairing_code {
             payload.insert("pairing_code".to_string(), Value::String(code));
@@ -2146,6 +2154,59 @@ impl App {
         self.matter_activity.push_front(format!("[{ts}] {line}"));
         while self.matter_activity.len() > 8 {
             self.matter_activity.pop_back();
+        }
+    }
+
+    fn update_matter_commission_feedback_from_metric(&mut self, event: &Value) {
+        let phase = event.get("phase").and_then(Value::as_str).unwrap_or("");
+        let result = event.get("result").and_then(Value::as_str).unwrap_or("");
+
+        if phase == "commission_blocked" || result == "blocked" {
+            self.matter_pending = false;
+
+            let reason_code = event
+                .get("reason")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            let reason_text = humanize_matter_block_reason(reason_code);
+            let timeout_suffix = event
+                .get("timeout_ms")
+                .and_then(Value::as_u64)
+                .map(|v| format!(" (scan {}ms)", v))
+                .unwrap_or_default();
+
+            let message = format!("Matter commission blocked: {reason_text}{timeout_suffix}");
+            self.status = message.clone();
+            self.matter_last_action = message.clone();
+            self.matter_blocked_reason = Some(reason_text.to_string());
+            self.matter_blocked_suggestions = event
+                .get("suggestions")
+                .and_then(Value::as_array)
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .take(3)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+
+            if self
+                .matter_activity
+                .front()
+                .map(|line| !line.contains(&message))
+                .unwrap_or(true)
+            {
+                self.push_matter_activity(message);
+            }
+            return;
+        }
+
+        if phase == "commission" && result == "ok" {
+            self.matter_blocked_reason = None;
+            self.matter_blocked_suggestions.clear();
         }
     }
 
@@ -3834,6 +3895,9 @@ fn summarize_live_event_detail(event: &Value) -> Option<String> {
 
 fn summarize_matter_plugin_metric(event: &Value) -> Option<String> {
     let phase = event.get("phase").and_then(Value::as_str);
+    let result = event.get("result").and_then(Value::as_str);
+    let reason = event.get("reason").and_then(Value::as_str);
+    let timeout_ms = event.get("timeout_ms").and_then(Value::as_u64);
     let nodes = event.get("commissioned_nodes").and_then(Value::as_u64);
     let bridged = event.get("bridged_endpoints").and_then(Value::as_u64);
     let failed = event.get("failed_commands").and_then(Value::as_u64);
@@ -3843,6 +3907,15 @@ fn summarize_matter_plugin_metric(event: &Value) -> Option<String> {
     let mut parts = Vec::new();
     if let Some(v) = phase {
         parts.push(format!("phase={v}"));
+    }
+    if let Some(v) = result {
+        parts.push(format!("result={v}"));
+    }
+    if let Some(v) = reason {
+        parts.push(format!("reason={v}"));
+    }
+    if let Some(v) = timeout_ms {
+        parts.push(format!("timeout={v}ms"));
     }
     if let Some(v) = nodes {
         parts.push(format!("nodes={v}"));
@@ -3865,6 +3938,13 @@ fn summarize_matter_plugin_metric(event: &Value) -> Option<String> {
     }
 
     Some(parts.join(" "))
+}
+
+fn humanize_matter_block_reason(reason: &str) -> &'static str {
+    match reason {
+        "no_commissionable_device_discovered" => "no commissionable device discovered",
+        _ => "commissioning blocked by plugin",
+    }
 }
 
 fn normalize_label(value: &str) -> String {
