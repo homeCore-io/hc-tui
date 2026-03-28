@@ -254,6 +254,8 @@ pub struct ModeEditor {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MatterCommissionField {
     PairingCode,
+    Name,
+    Room,
     Discriminator,
     Passcode,
 }
@@ -261,6 +263,8 @@ pub enum MatterCommissionField {
 #[derive(Debug, Clone)]
 pub struct MatterCommissionEditor {
     pub pairing_code: String,
+    pub name: String,
+    pub room: String,
     pub discriminator: String,
     pub passcode: String,
     pub field: MatterCommissionField,
@@ -1867,12 +1871,20 @@ impl App {
     async fn commission_matter(
         &mut self,
         pairing_code: Option<String>,
+        name: Option<String>,
+        room: Option<String>,
         discriminator: Option<u16>,
         passcode: Option<u32>,
     ) {
         let mut payload = serde_json::Map::new();
         if let Some(code) = pairing_code {
             payload.insert("pairing_code".to_string(), Value::String(code));
+        }
+        if let Some(device_name) = name {
+            payload.insert("name".to_string(), Value::String(device_name));
+        }
+        if let Some(area) = room {
+            payload.insert("area".to_string(), Value::String(area));
         }
         if let Some(disc) = discriminator {
             payload.insert("discriminator".to_string(), Value::Number((disc as u64).into()));
@@ -1896,6 +1908,8 @@ impl App {
     fn open_matter_commission_editor(&mut self) {
         self.matter_commission_editor = Some(MatterCommissionEditor {
             pairing_code: String::new(),
+            name: String::new(),
+            room: String::new(),
             discriminator: String::new(),
             passcode: String::new(),
             field: MatterCommissionField::PairingCode,
@@ -1915,7 +1929,9 @@ impl App {
             }
             KeyCode::Tab | KeyCode::BackTab => {
                 editor.field = match editor.field {
-                    MatterCommissionField::PairingCode => MatterCommissionField::Discriminator,
+                    MatterCommissionField::PairingCode => MatterCommissionField::Name,
+                    MatterCommissionField::Name => MatterCommissionField::Room,
+                    MatterCommissionField::Room => MatterCommissionField::Discriminator,
                     MatterCommissionField::Discriminator => MatterCommissionField::Passcode,
                     MatterCommissionField::Passcode => MatterCommissionField::PairingCode,
                 };
@@ -1923,6 +1939,12 @@ impl App {
             KeyCode::Backspace => match editor.field {
                 MatterCommissionField::PairingCode => {
                     editor.pairing_code.pop();
+                }
+                MatterCommissionField::Name => {
+                    editor.name.pop();
+                }
+                MatterCommissionField::Room => {
+                    editor.room.pop();
                 }
                 MatterCommissionField::Discriminator => {
                     editor.discriminator.pop();
@@ -1937,6 +1959,8 @@ impl App {
             KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                 match editor.field {
                     MatterCommissionField::PairingCode => editor.pairing_code.push(ch),
+                    MatterCommissionField::Name => editor.name.push(ch),
+                    MatterCommissionField::Room => editor.room.push(ch),
                     MatterCommissionField::Discriminator => {
                         if ch.is_ascii_digit() {
                             editor.discriminator.push(ch);
@@ -1964,6 +1988,18 @@ impl App {
             Some(editor.pairing_code.trim().to_string())
         };
 
+        let name = if editor.name.trim().is_empty() {
+            None
+        } else {
+            Some(editor.name.trim().to_string())
+        };
+
+        let room = if editor.room.trim().is_empty() {
+            None
+        } else {
+            Some(editor.room.trim().to_string())
+        };
+
         let discriminator = if editor.discriminator.trim().is_empty() {
             None
         } else {
@@ -1989,7 +2025,7 @@ impl App {
         };
 
         self.matter_commission_editor = None;
-        self.commission_matter(pairing_code, discriminator, passcode)
+        self.commission_matter(pairing_code, name, room, discriminator, passcode)
             .await;
     }
 

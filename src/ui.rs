@@ -2890,7 +2890,7 @@ fn draw_mode_editor(frame: &mut Frame<'_>, editor: &ModeEditor) {
 }
 
 fn draw_matter_commission_editor(frame: &mut Frame<'_>, editor: &MatterCommissionEditor) {
-    let popup = centered_rect(70, 55, frame.area());
+    let popup = centered_rect(72, 68, frame.area());
     frame.render_widget(Clear, popup);
     let outer = Block::default().borders(Borders::ALL).title("Matter Commission");
     let inner = outer.inner(popup);
@@ -2902,6 +2902,8 @@ fn draw_matter_commission_editor(frame: &mut Frame<'_>, editor: &MatterCommissio
     let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
+            Constraint::Length(3),
+            Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(3),
@@ -2923,6 +2925,32 @@ fn draw_matter_commission_editor(frame: &mut Frame<'_>, editor: &MatterCommissio
         layout[0],
     );
     frame.render_widget(
+        Paragraph::new(editor.name.as_str()).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Name (optional)")
+                .border_style(if editor.field == MatterCommissionField::Name {
+                    focused
+                } else {
+                    normal
+                }),
+        ),
+        layout[1],
+    );
+    frame.render_widget(
+        Paragraph::new(editor.room.as_str()).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Room (optional)")
+                .border_style(if editor.field == MatterCommissionField::Room {
+                    focused
+                } else {
+                    normal
+                }),
+        ),
+        layout[2],
+    );
+    frame.render_widget(
         Paragraph::new(editor.discriminator.as_str()).block(
             Block::default()
                 .borders(Borders::ALL)
@@ -2933,7 +2961,7 @@ fn draw_matter_commission_editor(frame: &mut Frame<'_>, editor: &MatterCommissio
                     normal
                 }),
         ),
-        layout[1],
+        layout[3],
     );
     frame.render_widget(
         Paragraph::new(editor.passcode.as_str()).block(
@@ -2946,12 +2974,12 @@ fn draw_matter_commission_editor(frame: &mut Frame<'_>, editor: &MatterCommissio
                     normal
                 }),
         ),
-        layout[2],
+        layout[4],
     );
     frame.render_widget(
         Paragraph::new("Tab field  |  Enter commission  |  Esc cancel")
             .alignment(Alignment::Center),
-        layout[3],
+        layout[5],
     );
 }
 

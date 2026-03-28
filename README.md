@@ -67,7 +67,7 @@ cargo run -- --base-url http://127.0.0.1:8080 --cache-dir ./cache
   - `a` activate selected scene (Scenes tab)
 
 - Manage > Matter (admin):
-  - `c` open commission form (pairing code, optional discriminator/passcode)
+  - `c` open commission form (pairing code, optional name/room/discriminator/passcode)
   - `r` refresh node inventory
   - `i` request reinterview for selected node
   - `d` request removal for selected node
