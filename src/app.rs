@@ -252,6 +252,21 @@ pub struct ModeEditor {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MatterCommissionField {
+    PairingCode,
+    Discriminator,
+    Passcode,
+}
+
+#[derive(Debug, Clone)]
+pub struct MatterCommissionEditor {
+    pub pairing_code: String,
+    pub discriminator: String,
+    pub passcode: String,
+    pub field: MatterCommissionField,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogLevelFilter {
     Error,
     Warn,
@@ -375,6 +390,7 @@ pub struct App {
     pub switch_editor: Option<SwitchEditor>,
     pub timer_editor: Option<TimerEditor>,
     pub mode_editor: Option<ModeEditor>,
+    pub matter_commission_editor: Option<MatterCommissionEditor>,
 
     // Automations tab features
     pub automation_filter_tag: String,
@@ -473,6 +489,7 @@ impl App {
             switch_editor: None,
             timer_editor: None,
             mode_editor: None,
+            matter_commission_editor: None,
 
             automation_filter_tag: String::new(),
             automation_filter_trigger: String::new(),
@@ -978,6 +995,10 @@ impl App {
             self.on_key_mode_editor(key).await;
             return;
         }
+        if self.matter_commission_editor.is_some() {
+            self.on_key_matter_commission_editor(key).await;
+            return;
+        }
 
         if self.device_search_input_open {
             self.on_key_device_search_input(key);
@@ -1246,7 +1267,7 @@ impl App {
                     Tab::Areas => self.open_area_editor_create(),
                     Tab::Manage => {
                         if matches!(self.admin_sub, AdminSubPanel::Matter) {
-                            self.commission_matter().await;
+                            self.open_matter_commission_editor();
                         } else if matches!(self.admin_sub, AdminSubPanel::Users) {
                             if self.is_admin() {
                                 self.open_user_editor_create();
@@ -1415,7 +1436,7 @@ impl App {
                 } else if matches!(self.active_tab(), Tab::Manage)
                     && matches!(self.admin_sub, AdminSubPanel::Matter)
                 {
-                    self.commission_matter().await;
+                    self.open_matter_commission_editor();
                 } else if matches!(self.active_tab(), Tab::Manage) && matches!(self.admin_sub, AdminSubPanel::Logs) {
                     self.log_lines.clear();
                     self.log_scroll_offset = 0;
@@ -1843,8 +1864,24 @@ impl App {
         }
     }
 
-    async fn commission_matter(&mut self) {
-        match self.client.matter_commission().await {
+    async fn commission_matter(
+        &mut self,
+        pairing_code: Option<String>,
+        discriminator: Option<u16>,
+        passcode: Option<u32>,
+    ) {
+        let mut payload = serde_json::Map::new();
+        if let Some(code) = pairing_code {
+            payload.insert("pairing_code".to_string(), Value::String(code));
+        }
+        if let Some(disc) = discriminator {
+            payload.insert("discriminator".to_string(), Value::Number((disc as u64).into()));
+        }
+        if let Some(pin) = passcode {
+            payload.insert("passcode".to_string(), Value::Number((pin as u64).into()));
+        }
+
+        match self.client.matter_commission(Value::Object(payload)).await {
             Ok(_) => {
                 self.status = "Matter commission requested".to_string();
                 self.error = None;
@@ -1854,6 +1891,106 @@ impl App {
                 self.error = Some(format!("Matter commission failed: {err}"));
             }
         }
+    }
+
+    fn open_matter_commission_editor(&mut self) {
+        self.matter_commission_editor = Some(MatterCommissionEditor {
+            pairing_code: String::new(),
+            discriminator: String::new(),
+            passcode: String::new(),
+            field: MatterCommissionField::PairingCode,
+        });
+        self.error = None;
+    }
+
+    async fn on_key_matter_commission_editor(&mut self, key: KeyEvent) {
+        let Some(editor) = self.matter_commission_editor.as_mut() else {
+            return;
+        };
+
+        match key.code {
+            KeyCode::Esc => {
+                self.matter_commission_editor = None;
+                self.status = "Matter commission canceled".to_string();
+            }
+            KeyCode::Tab | KeyCode::BackTab => {
+                editor.field = match editor.field {
+                    MatterCommissionField::PairingCode => MatterCommissionField::Discriminator,
+                    MatterCommissionField::Discriminator => MatterCommissionField::Passcode,
+                    MatterCommissionField::Passcode => MatterCommissionField::PairingCode,
+                };
+            }
+            KeyCode::Backspace => match editor.field {
+                MatterCommissionField::PairingCode => {
+                    editor.pairing_code.pop();
+                }
+                MatterCommissionField::Discriminator => {
+                    editor.discriminator.pop();
+                }
+                MatterCommissionField::Passcode => {
+                    editor.passcode.pop();
+                }
+            },
+            KeyCode::Enter => {
+                self.save_matter_commission_editor().await;
+            }
+            KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                match editor.field {
+                    MatterCommissionField::PairingCode => editor.pairing_code.push(ch),
+                    MatterCommissionField::Discriminator => {
+                        if ch.is_ascii_digit() {
+                            editor.discriminator.push(ch);
+                        }
+                    }
+                    MatterCommissionField::Passcode => {
+                        if ch.is_ascii_digit() {
+                            editor.passcode.push(ch);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    async fn save_matter_commission_editor(&mut self) {
+        let Some(editor) = self.matter_commission_editor.clone() else {
+            return;
+        };
+
+        let pairing_code = if editor.pairing_code.trim().is_empty() {
+            None
+        } else {
+            Some(editor.pairing_code.trim().to_string())
+        };
+
+        let discriminator = if editor.discriminator.trim().is_empty() {
+            None
+        } else {
+            match editor.discriminator.trim().parse::<u16>() {
+                Ok(v) => Some(v),
+                Err(_) => {
+                    self.error = Some("Matter discriminator must be a number (0-65535)".to_string());
+                    return;
+                }
+            }
+        };
+
+        let passcode = if editor.passcode.trim().is_empty() {
+            None
+        } else {
+            match editor.passcode.trim().parse::<u32>() {
+                Ok(v) => Some(v),
+                Err(_) => {
+                    self.error = Some("Matter passcode must be a number".to_string());
+                    return;
+                }
+            }
+        };
+
+        self.matter_commission_editor = None;
+        self.commission_matter(pairing_code, discriminator, passcode)
+            .await;
     }
 
     async fn reinterview_selected_matter_node(&mut self) {

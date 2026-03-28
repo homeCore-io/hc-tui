@@ -2,6 +2,7 @@ use crate::app::{
     format_timestamp_utc, AdminSubPanel, App, AreaEditor, AutomationFilterBar,
     AutomationFilterField, DeleteConfirm,
     DeviceEditField, DeviceSubPanel, DeviceViewMode, FocusField, LogLevelFilter, LoginPhase,
+    MatterCommissionEditor, MatterCommissionField,
     ModeEditField, ModeEditor, ModeKind, PluginDetailPanel, SwitchEditField, SwitchEditor,
     Tab, TimerEditField, TimerEditor, UserEditField, UserEditMode, UserEditor,
 };
@@ -68,6 +69,9 @@ pub fn draw(frame: &mut Frame<'_>, app: &App) {
     }
     if let Some(editor) = app.mode_editor.as_ref() {
         draw_mode_editor(frame, editor);
+    }
+    if let Some(editor) = app.matter_commission_editor.as_ref() {
+        draw_matter_commission_editor(frame, editor);
     }
     // Automation overlays (drawn on top of everything)
     if let Some(confirm) = app.automation_delete_confirm.as_ref() {
@@ -269,6 +273,9 @@ fn status_hints(app: &App) -> Vec<&'static str> {
     }
     if app.mode_editor.is_some() {
         return vec!["Tab field", "Space kind", "Enter create", "Esc cancel"];
+    }
+    if app.matter_commission_editor.is_some() {
+        return vec!["Tab field", "Enter commission", "Esc cancel"];
     }
 
     hints
@@ -2877,6 +2884,72 @@ fn draw_mode_editor(frame: &mut Frame<'_>, editor: &ModeEditor) {
     );
     frame.render_widget(
         Paragraph::new("Tab field  |  Space cycle kind  |  Enter create  |  Esc cancel")
+            .alignment(Alignment::Center),
+        layout[3],
+    );
+}
+
+fn draw_matter_commission_editor(frame: &mut Frame<'_>, editor: &MatterCommissionEditor) {
+    let popup = centered_rect(70, 55, frame.area());
+    frame.render_widget(Clear, popup);
+    let outer = Block::default().borders(Borders::ALL).title("Matter Commission");
+    let inner = outer.inner(popup);
+    frame.render_widget(outer, popup);
+
+    let focused = Style::default().fg(Color::Yellow);
+    let normal = Style::default();
+
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Min(1),
+        ])
+        .split(inner);
+
+    frame.render_widget(
+        Paragraph::new(editor.pairing_code.as_str()).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Pairing Code (manual code)")
+                .border_style(if editor.field == MatterCommissionField::PairingCode {
+                    focused
+                } else {
+                    normal
+                }),
+        ),
+        layout[0],
+    );
+    frame.render_widget(
+        Paragraph::new(editor.discriminator.as_str()).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Discriminator (optional)")
+                .border_style(if editor.field == MatterCommissionField::Discriminator {
+                    focused
+                } else {
+                    normal
+                }),
+        ),
+        layout[1],
+    );
+    frame.render_widget(
+        Paragraph::new(editor.passcode.as_str()).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Passcode (optional)")
+                .border_style(if editor.field == MatterCommissionField::Passcode {
+                    focused
+                } else {
+                    normal
+                }),
+        ),
+        layout[2],
+    );
+    frame.render_widget(
+        Paragraph::new("Tab field  |  Enter commission  |  Esc cancel")
             .alignment(Alignment::Center),
         layout[3],
     );

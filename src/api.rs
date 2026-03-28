@@ -386,9 +386,9 @@ impl HomeCoreClient {
         Self::parse_json(resp).await
     }
 
-    pub async fn matter_commission(&self) -> Result<()> {
+    pub async fn matter_commission(&self, payload: Value) -> Result<()> {
         let resp = self
-            .request_with_json(Method::POST, "/plugins/matter/commission", json!({}))
+            .request_with_json(Method::POST, "/plugins/matter/commission", payload)
             .await?;
         Self::parse_empty(resp).await
     }
