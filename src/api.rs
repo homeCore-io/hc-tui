@@ -1,7 +1,7 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use reqwest::{Client, Method, Response};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -44,6 +44,8 @@ pub struct LoginResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceState {
     pub device_id: String,
+    #[serde(default)]
+    pub canonical_name: Option<String>,
     pub name: String,
     pub plugin_id: String,
     pub area: Option<String>,
@@ -336,7 +338,9 @@ impl HomeCoreClient {
 
     pub async fn bulk_toggle_automations(&self, ids: &[String], enabled: bool) -> Result<()> {
         let body = json!({ "ids": ids, "enabled": enabled });
-        let resp = self.request_with_json(Method::PATCH, "/automations", body).await?;
+        let resp = self
+            .request_with_json(Method::PATCH, "/automations", body)
+            .await?;
         Self::parse_empty(resp).await
     }
 
@@ -348,7 +352,9 @@ impl HomeCoreClient {
     #[allow(dead_code)]
     pub async fn create_automation_group(&self, name: &str) -> Result<RuleGroup> {
         let body = json!({ "name": name, "rule_ids": [] });
-        let resp = self.request_with_json(Method::POST, "/automations/groups", body).await?;
+        let resp = self
+            .request_with_json(Method::POST, "/automations/groups", body)
+            .await?;
         Self::parse_json(resp).await
     }
 
@@ -457,7 +463,9 @@ impl HomeCoreClient {
 
     pub async fn create_switch(&self, id: &str, label: &str) -> Result<DeviceState> {
         let body = json!({ "id": id, "label": label });
-        let resp = self.request_with_json(Method::POST, "/switches", body).await?;
+        let resp = self
+            .request_with_json(Method::POST, "/switches", body)
+            .await?;
         Self::parse_json(resp).await
     }
 
@@ -468,7 +476,9 @@ impl HomeCoreClient {
 
     pub async fn create_timer(&self, id: &str, label: &str) -> Result<DeviceState> {
         let body = json!({ "id": id, "label": label });
-        let resp = self.request_with_json(Method::POST, "/timers", body).await?;
+        let resp = self
+            .request_with_json(Method::POST, "/timers", body)
+            .await?;
         Self::parse_json(resp).await
     }
 
@@ -489,9 +499,16 @@ impl HomeCoreClient {
         Self::parse_empty(resp).await
     }
 
-    pub async fn create_user(&self, username: &str, password: &str, role: &Role) -> Result<UserInfo> {
+    pub async fn create_user(
+        &self,
+        username: &str,
+        password: &str,
+        role: &Role,
+    ) -> Result<UserInfo> {
         let body = serde_json::json!({ "username": username, "password": password, "role": role });
-        let resp = self.request_with_json(Method::POST, "/auth/users", body).await?;
+        let resp = self
+            .request_with_json(Method::POST, "/auth/users", body)
+            .await?;
         Self::parse_json(resp).await
     }
 
@@ -510,7 +527,9 @@ impl HomeCoreClient {
 
     pub async fn change_password(&self, current_password: &str, new_password: &str) -> Result<()> {
         let body = serde_json::json!({ "current_password": current_password, "new_password": new_password });
-        let resp = self.request_with_json(Method::POST, "/auth/change-password", body).await?;
+        let resp = self
+            .request_with_json(Method::POST, "/auth/change-password", body)
+            .await?;
         Self::parse_empty(resp).await
     }
 
@@ -612,6 +631,7 @@ impl HomeCoreClient {
         device_id: &str,
         name: &str,
         area: Option<&str>,
+        canonical_name: Option<&str>,
     ) -> Result<()> {
         let path = format!("/devices/{device_id}");
         let mut body = Map::new();
@@ -620,6 +640,13 @@ impl HomeCoreClient {
             "area".to_string(),
             match area {
                 Some(a) => Value::String(a.to_string()),
+                None => Value::Null,
+            },
+        );
+        body.insert(
+            "canonical_name".to_string(),
+            match canonical_name {
+                Some(value) => Value::String(value.to_string()),
                 None => Value::Null,
             },
         );
@@ -715,7 +742,10 @@ impl HomeCoreClient {
             return Err(anyhow!("{}: {}", status, message));
         }
 
-        let text = resp.text().await.context("failed to read login response body")?;
+        let text = resp
+            .text()
+            .await
+            .context("failed to read login response body")?;
         let parsed = serde_json::from_str::<Value>(&text).with_context(|| {
             let snippet = text.chars().take(300).collect::<String>();
             format!("failed to parse login json: {snippet}")
@@ -780,6 +810,10 @@ impl HomeCoreClient {
                 .and_then(Value::as_str)
                 .map(ToString::to_string)
                 .unwrap_or_else(|| device_id.clone());
+            let canonical_name = obj
+                .get("canonical_name")
+                .and_then(Value::as_str)
+                .map(ToString::to_string);
             let plugin_id = obj
                 .get("plugin_id")
                 .and_then(Value::as_str)
@@ -808,6 +842,7 @@ impl HomeCoreClient {
 
             devices.push(DeviceState {
                 device_id,
+                canonical_name,
                 name,
                 plugin_id,
                 area,
@@ -929,7 +964,10 @@ impl HomeCoreClient {
             .or_else(|| parsed.get("data").and_then(Value::as_array))
             .ok_or_else(|| anyhow!("areas payload was not a JSON array"))?;
 
-        let areas = arr.iter().filter_map(Self::parse_area_value).collect::<Vec<_>>();
+        let areas = arr
+            .iter()
+            .filter_map(Self::parse_area_value)
+            .collect::<Vec<_>>();
         Ok(areas)
     }
 
@@ -983,7 +1021,11 @@ impl HomeCoreClient {
                 .filter_map(|v| {
                     v.as_str()
                         .map(ToString::to_string)
-                        .or_else(|| v.get("device_id").and_then(Value::as_str).map(ToString::to_string))
+                        .or_else(|| {
+                            v.get("device_id")
+                                .and_then(Value::as_str)
+                                .map(ToString::to_string)
+                        })
                         .or_else(|| v.get("id").and_then(Value::as_str).map(ToString::to_string))
                 })
                 .collect::<Vec<_>>()
@@ -1060,10 +1102,14 @@ fn summarize_event_detail(
 
             let mut parts = Vec::new();
             if let (Some(f), Some(a), Some(r)) = (fallback, applied, ratio) {
-                parts.push(format!("fallback={f} incremental={a} fallback_ratio={r:.2}%"));
+                parts.push(format!(
+                    "fallback={f} incremental={a} fallback_ratio={r:.2}%"
+                ));
             }
             if let (Some(f), Some(a), Some(r)) = (recent_fallback, recent_applied, recent_ratio) {
-                parts.push(format!("recent_fallback={f} recent_incremental={a} recent_ratio={r:.2}%"));
+                parts.push(format!(
+                    "recent_fallback={f} recent_incremental={a} recent_ratio={r:.2}%"
+                ));
             }
 
             if parts.is_empty() {

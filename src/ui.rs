@@ -1,21 +1,20 @@
-use crate::app::{
-    format_timestamp_utc, AdminSubPanel, App, AreaEditor, AutomationFilterBar,
-    AutomationFilterField, DeleteConfirm,
-    DeviceEditField, DeviceSubPanel, DeviceViewMode, FocusField, LogLevelFilter, LoginPhase,
-    MatterCommissionEditor, MatterCommissionField,
-    ModeEditField, ModeEditor, ModeKind, PluginDetailPanel, SwitchEditField, SwitchEditor,
-    Tab, TimerEditField, TimerEditor, UserEditField, UserEditMode, UserEditor,
-};
 use crate::api::DeviceState;
+use crate::app::{
+    AdminSubPanel, App, AreaEditor, AutomationFilterBar, AutomationFilterField, DeleteConfirm,
+    DeviceEditField, DeviceSubPanel, DeviceViewMode, FocusField, LogLevelFilter, LoginPhase,
+    MatterCommissionEditor, MatterCommissionField, ModeEditField, ModeEditor, ModeKind,
+    PluginDetailPanel, SwitchEditField, SwitchEditor, Tab, TimerEditField, TimerEditor,
+    UserEditField, UserEditMode, UserEditor, format_timestamp_utc,
+};
 use chrono::Utc;
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
         Block, Borders, Cell, Clear, Gauge, List, ListItem, Paragraph, Row, Table, Tabs, Wrap,
     },
-    Frame,
 };
 
 pub fn draw(frame: &mut Frame<'_>, app: &App) {
@@ -29,18 +28,15 @@ pub fn draw(frame: &mut Frame<'_>, app: &App) {
     // Main layout: left menu sidebar + right content + footer
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(5),
-            Constraint::Length(footer_height),
-        ])
+        .constraints([Constraint::Min(5), Constraint::Length(footer_height)])
         .split(frame.area());
 
     // Split content area into left menu and right content
     let content_layout = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Length(20),  // Fixed width for left menu
-            Constraint::Min(10),      // Remaining space for content
+            Constraint::Length(20), // Fixed width for left menu
+            Constraint::Min(10),    // Remaining space for content
         ])
         .split(layout[0]);
 
@@ -110,8 +106,8 @@ fn draw_menu_sidebar(frame: &mut Frame<'_>, app: &App, area: Rect) {
         })
         .collect();
 
-    let menu_list = List::new(menu_items)
-        .block(Block::default().borders(Borders::RIGHT).title("Menu"));
+    let menu_list =
+        List::new(menu_items).block(Block::default().borders(Borders::RIGHT).title("Menu"));
     frame.render_widget(menu_list, area);
 }
 
@@ -173,7 +169,14 @@ fn compute_footer_height(app: &App, width: u16) -> u16 {
 }
 
 fn status_hints(app: &App) -> Vec<&'static str> {
-    let mut hints = vec!["Tab/Shift+Tab menu", "1-9 jump tab", "j/k move", "r refresh", "q quit", "T time"];
+    let mut hints = vec![
+        "Tab/Shift+Tab menu",
+        "1-9 jump tab",
+        "j/k move",
+        "r refresh",
+        "q quit",
+        "T time",
+    ];
     match app.active_tab() {
         Tab::Devices => {
             hints.push("◄/► panel");
@@ -202,7 +205,9 @@ fn status_hints(app: &App) -> Vec<&'static str> {
                 }
             }
         }
-        Tab::Scenes => { hints.push("a activate"); }
+        Tab::Scenes => {
+            hints.push("a activate");
+        }
         Tab::Areas => {
             hints.push("n new area");
             hints.push("Enter rename");
@@ -212,7 +217,9 @@ fn status_hints(app: &App) -> Vec<&'static str> {
             hints.push("- remove device");
             hints.push("d delete");
         }
-        Tab::Plugins => { hints.push("d deregister"); }
+        Tab::Plugins => {
+            hints.push("d deregister");
+        }
         Tab::Manage => {
             hints.push("◄/► panel");
             if matches!(app.admin_sub, AdminSubPanel::Matter) {
@@ -263,7 +270,14 @@ fn status_hints(app: &App) -> Vec<&'static str> {
         return vec!["Tab field", "Space cycle role", "Enter save", "Esc cancel"];
     }
     if app.plugin_detail_open {
-        return vec!["1/2/3 panel", "b discover", "p pair", "r refresh", "Esc close", "q quit"];
+        return vec![
+            "1/2/3 panel",
+            "b discover",
+            "p pair",
+            "r refresh",
+            "Esc close",
+            "q quit",
+        ];
     }
     if app.switch_editor.is_some() {
         return vec!["Tab field", "Enter create", "Esc cancel"];
@@ -362,7 +376,11 @@ fn draw_login(frame: &mut Frame<'_>, app: &App) {
         .split(popup);
 
     let title = Paragraph::new("HomeCore TUI Login")
-        .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        .style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )
         .alignment(Alignment::Center)
         .block(Block::default().borders(Borders::ALL).title("Authenticate"));
     frame.render_widget(title, layout[0]);
@@ -394,7 +412,8 @@ fn draw_login(frame: &mut Frame<'_>, app: &App) {
     );
     frame.render_widget(password, layout[2]);
 
-    let help = Paragraph::new("Tab switch field | Enter login | Esc quit").alignment(Alignment::Center);
+    let help =
+        Paragraph::new("Tab switch field | Enter login | Esc quit").alignment(Alignment::Center);
     frame.render_widget(help, layout[3]);
 
     let loading_label = if app.login_in_progress {
@@ -468,7 +487,9 @@ fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
                 ListItem::new(Line::from(vec![
                     Span::styled(
                         format!("  {:<28}", a.name),
-                        Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(Color::White)
+                            .add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(
                         format!("{count} {dev_label}"),
@@ -483,14 +504,22 @@ fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
             .iter()
             .map(|p| {
                 let (dot, dot_color) = match p.status.as_str() {
-                    "active"   => ("●", Color::Green),
+                    "active" => ("●", Color::Green),
                     "degraded" => ("●", Color::Yellow),
-                    _          => ("○", Color::Red),
+                    _ => ("○", Color::Red),
                 };
-                let ts = p.registered_at.chars().take(19).collect::<String>().replace('T', " ");
+                let ts = p
+                    .registered_at
+                    .chars()
+                    .take(19)
+                    .collect::<String>()
+                    .replace('T', " ");
                 ListItem::new(Line::from(vec![
                     Span::styled(format!("  {dot} "), Style::default().fg(dot_color)),
-                    Span::styled(format!("{:<30}", p.plugin_id), Style::default().fg(Color::White)),
+                    Span::styled(
+                        format!("{:<30}", p.plugin_id),
+                        Style::default().fg(Color::White),
+                    ),
                     Span::styled(format!("{:<12}", p.status), Style::default().fg(dot_color)),
                     Span::styled(ts, Style::default().fg(Color::DarkGray)),
                 ]))
@@ -524,9 +553,13 @@ fn draw_scenes_table(frame: &mut Frame<'_>, app: &App, area: Rect) {
 
     let header_cells = ["  Scene", "Plugin", "Area / Room", "Status"]
         .iter()
-        .map(|h| Cell::from(*h).style(
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-        ));
+        .map(|h| {
+            Cell::from(*h).style(
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )
+        });
     let header = Row::new(header_cells).height(1).bottom_margin(0);
 
     let rows: Vec<Row> = app
@@ -536,15 +569,17 @@ fn draw_scenes_table(frame: &mut Frame<'_>, app: &App, area: Rect) {
         .map(|(i, s)| {
             let is_sel = i == app.selected;
 
-            let plugin = s.plugin_id.as_deref()
+            let plugin = s
+                .plugin_id
+                .as_deref()
                 .map(|p| p.trim_start_matches("plugin.").to_string())
                 .unwrap_or_else(|| "-".to_string());
             let area_str = s.area.clone().unwrap_or_else(|| "-".to_string());
 
             let (status_str, status_color) = match s.active {
-                Some(true)  => ("● Active",   Color::Green),
+                Some(true) => ("● Active", Color::Green),
                 Some(false) => ("○ Inactive", Color::DarkGray),
-                None        => ("-",          Color::DarkGray),
+                None => ("-", Color::DarkGray),
             };
 
             if is_sel {
@@ -556,14 +591,10 @@ fn draw_scenes_table(frame: &mut Frame<'_>, app: &App, area: Rect) {
                 ])
             } else {
                 Row::new(vec![
-                    Cell::from(format!("  {}", s.name))
-                        .style(Style::default().fg(Color::White)),
-                    Cell::from(plugin)
-                        .style(Style::default().fg(Color::DarkGray)),
-                    Cell::from(area_str)
-                        .style(Style::default().fg(Color::Gray)),
-                    Cell::from(status_str)
-                        .style(Style::default().fg(status_color)),
+                    Cell::from(format!("  {}", s.name)).style(Style::default().fg(Color::White)),
+                    Cell::from(plugin).style(Style::default().fg(Color::DarkGray)),
+                    Cell::from(area_str).style(Style::default().fg(Color::Gray)),
+                    Cell::from(status_str).style(Style::default().fg(status_color)),
                 ])
             }
         })
@@ -627,7 +658,9 @@ fn draw_areas_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
             ListItem::new(Line::from(vec![
                 Span::styled(
                     format!("  {:<24}", a.name),
-                    Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     format!("[{} {}]", count, dev_label),
@@ -729,10 +762,7 @@ fn draw_area_devices(frame: &mut Frame<'_>, app: &App, area: Rect) {
             ListItem::new(Line::from(vec![
                 Span::styled(format!("{} ", sel_mark), Style::default().fg(Color::Yellow)),
                 Span::styled(format!("{} ", avail_dot), Style::default().fg(avail_color)),
-                Span::styled(
-                    format!("{:<20}", d.name),
-                    Style::default().fg(Color::White),
-                ),
+                Span::styled(format!("{:<20}", d.name), Style::default().fg(Color::White)),
                 Span::styled(format!(" [{}]", status), Style::default().fg(Color::Gray)),
             ]))
         })
@@ -822,7 +852,13 @@ fn draw_automations_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
 
     let header_cells = ["Sel", "●", "Name", "Trigger", "Tags", "Pri"]
         .iter()
-        .map(|h| Cell::from(*h).style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)));
+        .map(|h| {
+            Cell::from(*h).style(
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )
+        });
     let header = Row::new(header_cells).height(1).bottom_margin(0);
 
     let rows: Vec<Row> = visible
@@ -836,8 +872,12 @@ fn draw_automations_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
             let sel_mark = if is_bulk { "[✓]" } else { "[ ]" };
             let dot = if r.enabled { "●" } else { "○" };
             let name_prefix = if is_stale { "⚠ " } else { "  " };
-            let name_display: String = format!("{}{}", name_prefix, r.name).chars().take(32).collect();
-            let trigger_str = r.trigger
+            let name_display: String = format!("{}{}", name_prefix, r.name)
+                .chars()
+                .take(32)
+                .collect();
+            let trigger_str = r
+                .trigger
                 .as_ref()
                 .and_then(|t| t.get("type").and_then(|v| v.as_str()))
                 .unwrap_or("-")
@@ -852,7 +892,11 @@ fn draw_automations_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
             } else {
                 Style::default().fg(Color::DarkGray)
             };
-            let dot_color = if r.enabled { Color::Green } else { Color::DarkGray };
+            let dot_color = if r.enabled {
+                Color::Green
+            } else {
+                Color::DarkGray
+            };
 
             if is_sel {
                 Row::new(vec![
@@ -929,21 +973,32 @@ fn draw_automation_history(frame: &mut Frame<'_>, app: &App, area: Rect) {
         .fire_history
         .iter()
         .map(|f| {
-            let ts: String = f.timestamp.chars().take(19).collect::<String>().replace('T', " ");
+            let ts: String = f
+                .timestamp
+                .chars()
+                .take(19)
+                .collect::<String>()
+                .replace('T', " ");
             let pass_str = if f.conditions_passed { "✓" } else { "✗" };
-            let pass_color = if f.conditions_passed { Color::Green } else { Color::Red };
+            let pass_color = if f.conditions_passed {
+                Color::Green
+            } else {
+                Color::Red
+            };
             let eval_str = format!("{}ms", f.eval_ms);
             ListItem::new(Line::from(vec![
                 Span::styled(format!("{pass_str} "), Style::default().fg(pass_color)),
                 Span::styled(format!("{ts} "), Style::default().fg(Color::DarkGray)),
-                Span::styled(format!("act={} ", f.actions_ran), Style::default().fg(Color::Cyan)),
+                Span::styled(
+                    format!("act={} ", f.actions_ran),
+                    Style::default().fg(Color::Cyan),
+                ),
                 Span::styled(eval_str, Style::default().fg(Color::DarkGray)),
             ]))
         })
         .collect();
 
-    let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(title));
+    let list = List::new(items).block(Block::default().borders(Borders::ALL).title(title));
     frame.render_widget(list, area);
 }
 
@@ -960,11 +1015,19 @@ fn draw_delete_confirm(frame: &mut Frame<'_>, confirm: &DeleteConfirm) {
 
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(2), Constraint::Length(1), Constraint::Min(1)])
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Length(1),
+            Constraint::Min(1),
+        ])
         .split(inner);
 
     let msg = Paragraph::new(format!("Delete rule: \"{}\"?", confirm.rule_name))
-        .style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD))
+        .style(
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        )
         .alignment(Alignment::Center);
     frame.render_widget(msg, layout[0]);
 
@@ -1012,8 +1075,16 @@ fn draw_groups_overlay(frame: &mut Frame<'_>, app: &App) {
             .map(|g| {
                 let rule_count = g.rule_ids.len();
                 ListItem::new(Line::from(vec![
-                    Span::styled(format!("  {:<28}", g.name), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-                    Span::styled(format!("{} rule(s)", rule_count), Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        format!("  {:<28}", g.name),
+                        Style::default()
+                            .fg(Color::White)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!("{} rule(s)", rule_count),
+                        Style::default().fg(Color::DarkGray),
+                    ),
                 ]))
             })
             .collect();
@@ -1048,7 +1119,11 @@ fn draw_filter_bar(frame: &mut Frame<'_>, filter_bar: &AutomationFilterBar) {
 
     let layout = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(40), Constraint::Percentage(40), Constraint::Percentage(20)])
+        .constraints([
+            Constraint::Percentage(40),
+            Constraint::Percentage(40),
+            Constraint::Percentage(20),
+        ])
         .split(bar_area);
 
     let tag_style = if filter_bar.active_field == AutomationFilterField::Tag {
@@ -1062,16 +1137,28 @@ fn draw_filter_bar(frame: &mut Frame<'_>, filter_bar: &AutomationFilterBar) {
         Style::default().fg(Color::Gray)
     };
 
-    let tag_field = Paragraph::new(filter_bar.tag.as_str())
-        .block(Block::default().borders(Borders::ALL).title("Tag filter").border_style(tag_style));
+    let tag_field = Paragraph::new(filter_bar.tag.as_str()).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Tag filter")
+            .border_style(tag_style),
+    );
     frame.render_widget(tag_field, layout[0]);
 
-    let trigger_field = Paragraph::new(filter_bar.trigger.as_str())
-        .block(Block::default().borders(Borders::ALL).title("Trigger filter").border_style(trigger_style));
+    let trigger_field = Paragraph::new(filter_bar.trigger.as_str()).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Trigger filter")
+            .border_style(trigger_style),
+    );
     frame.render_widget(trigger_field, layout[1]);
 
     let stale_str = if filter_bar.stale { "ON " } else { "off" };
-    let stale_color = if filter_bar.stale { Color::Red } else { Color::DarkGray };
+    let stale_color = if filter_bar.stale {
+        Color::Red
+    } else {
+        Color::DarkGray
+    };
     let stale_field = Paragraph::new(Span::styled(stale_str, Style::default().fg(stale_color)))
         .block(Block::default().borders(Borders::ALL).title("Stale only"));
     frame.render_widget(stale_field, layout[2]);
@@ -1093,8 +1180,12 @@ fn draw_log_module_input(frame: &mut Frame<'_>, app: &App) {
         .constraints([Constraint::Length(3), Constraint::Min(1)])
         .split(inner);
 
-    let input = Paragraph::new(app.log_module_input.as_str())
-        .block(Block::default().borders(Borders::ALL).title("Filter string").border_style(Style::default().fg(Color::Yellow)));
+    let input = Paragraph::new(app.log_module_input.as_str()).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Filter string")
+            .border_style(Style::default().fg(Color::Yellow)),
+    );
     frame.render_widget(input, layout[0]);
 
     let help = Paragraph::new("Enter apply  |  Esc cancel")
@@ -1118,38 +1209,64 @@ fn draw_logs_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
 
 fn draw_logs_header(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let level_labels: Vec<Line> = vec![
-        Line::from(Span::styled("e ERROR", if app.log_level_filter == LogLevelFilter::Error {
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(Color::DarkGray)
-        })),
-        Line::from(Span::styled("w WARN", if app.log_level_filter == LogLevelFilter::Warn {
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(Color::DarkGray)
-        })),
-        Line::from(Span::styled("i INFO", if app.log_level_filter == LogLevelFilter::Info {
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(Color::DarkGray)
-        })),
-        Line::from(Span::styled("d DEBUG", if app.log_level_filter == LogLevelFilter::Debug {
-            Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(Color::DarkGray)
-        })),
+        Line::from(Span::styled(
+            "e ERROR",
+            if app.log_level_filter == LogLevelFilter::Error {
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::DarkGray)
+            },
+        )),
+        Line::from(Span::styled(
+            "w WARN",
+            if app.log_level_filter == LogLevelFilter::Warn {
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::DarkGray)
+            },
+        )),
+        Line::from(Span::styled(
+            "i INFO",
+            if app.log_level_filter == LogLevelFilter::Info {
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::DarkGray)
+            },
+        )),
+        Line::from(Span::styled(
+            "d DEBUG",
+            if app.log_level_filter == LogLevelFilter::Debug {
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::DarkGray)
+            },
+        )),
     ];
 
     let selected_idx = match app.log_level_filter {
         LogLevelFilter::Error => 0,
-        LogLevelFilter::Warn  => 1,
-        LogLevelFilter::Info  => 2,
+        LogLevelFilter::Warn => 1,
+        LogLevelFilter::Info => 2,
         LogLevelFilter::Debug => 3,
     };
 
     let live_dot = if app.log_ws_connected { "●" } else { "○" };
-    let live_color = if app.log_ws_connected { Color::Green } else { Color::Red };
-    let pause_str = if app.log_paused { " [PAUSED]" } else { " [LIVE]" };
+    let live_color = if app.log_ws_connected {
+        Color::Green
+    } else {
+        Color::Red
+    };
+    let pause_str = if app.log_paused {
+        " [PAUSED]"
+    } else {
+        " [LIVE]"
+    };
     let module_str = if app.log_module_filter.is_empty() {
         String::new()
     } else {
@@ -1168,7 +1285,11 @@ fn draw_logs_header(frame: &mut Frame<'_>, app: &App, area: Rect) {
         .select(selected_idx)
         .block(Block::default().borders(Borders::ALL).title(title))
         .style(Style::default().fg(Color::Gray))
-        .highlight_style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD));
+        .highlight_style(
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        );
     frame.render_widget(tabs, area);
 }
 
@@ -1194,9 +1315,9 @@ fn draw_logs_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
             let level_upper = line.level.to_uppercase();
             let (level_color, level_mod) = match level_upper.as_str() {
                 "ERROR" => (Color::Red, Modifier::BOLD),
-                "WARN"  => (Color::Yellow, Modifier::empty()),
-                "INFO"  => (Color::Cyan, Modifier::empty()),
-                _       => (Color::DarkGray, Modifier::empty()),
+                "WARN" => (Color::Yellow, Modifier::empty()),
+                "INFO" => (Color::Cyan, Modifier::empty()),
+                _ => (Color::DarkGray, Modifier::empty()),
             };
             let ts: String = line.timestamp.chars().skip(11).take(8).collect();
             let target_short: String = line.target.chars().take(24).collect();
@@ -1207,27 +1328,35 @@ fn draw_logs_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
                     Style::default().fg(level_color).add_modifier(level_mod),
                 ),
                 Span::styled(format!("{ts} "), Style::default().fg(Color::DarkGray)),
-                Span::styled(format!("{:<24} ", target_short), Style::default().fg(Color::Blue)),
+                Span::styled(
+                    format!("{:<24} ", target_short),
+                    Style::default().fg(Color::Blue),
+                ),
                 Span::raw(line.message.clone()),
             ]))
         })
         .collect();
 
     let block_title = if total > height {
-        format!("Log lines (scroll: {}/{})", start + 1, total.saturating_sub(height - 1))
+        format!(
+            "Log lines (scroll: {}/{})",
+            start + 1,
+            total.saturating_sub(height - 1)
+        )
     } else {
         "Log lines".to_string()
     };
 
-    let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(block_title));
+    let list = List::new(items).block(Block::default().borders(Borders::ALL).title(block_title));
     frame.render_widget(list, area);
 }
 
 // ── System Status tab ─────────────────────────────────────────────────────────
 
 fn draw_status_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
-    let block = Block::default().borders(Borders::ALL).title("System Status");
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title("System Status");
 
     let Some(status) = app.system_status.as_ref() else {
         let loading_msg = if app.system_status_last_refresh.is_none() {
@@ -1254,20 +1383,35 @@ fn draw_status_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
     // Left column: core stats
     let uptime_secs = status.uptime_seconds;
     let uptime_str = format_uptime(uptime_secs);
-    let started_at_str: String = status.started_at.chars().take(19).collect::<String>().replace('T', " ");
+    let started_at_str: String = status
+        .started_at
+        .chars()
+        .take(19)
+        .collect::<String>()
+        .replace('T', " ");
 
     let left_refresh = app.system_status_last_refresh.as_deref().unwrap_or("never");
     let time_label = if app.time_utc { "(UTC)" } else { "(local)" };
 
     let mut left_lines: Vec<Line> = vec![
-        Line::from(Span::styled("System", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD | Modifier::UNDERLINED))),
+        Line::from(Span::styled(
+            "System",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+        )),
         Line::from(""),
         status_detail_row("Version", &status.version),
         status_detail_row("Started", &started_at_str),
         status_detail_row("Uptime", &uptime_str),
         status_detail_row("Last refresh", &format!("{} {}", left_refresh, time_label)),
         Line::from(""),
-        Line::from(Span::styled("Automations", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD | Modifier::UNDERLINED))),
+        Line::from(Span::styled(
+            "Automations",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+        )),
         Line::from(""),
         status_detail_row("Total rules", &status.rules_total.to_string()),
         status_detail_row("Enabled", &status.rules_enabled.to_string()),
@@ -1286,12 +1430,22 @@ fn draw_status_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let history_db_kb = status.history_db_bytes / 1024;
 
     let right_lines: Vec<Line> = vec![
-        Line::from(Span::styled("Devices & Plugins", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD | Modifier::UNDERLINED))),
+        Line::from(Span::styled(
+            "Devices & Plugins",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+        )),
         Line::from(""),
         status_detail_row("Total devices", &status.devices_total.to_string()),
         status_detail_row("Active plugins", &status.plugins_active.to_string()),
         Line::from(""),
-        Line::from(Span::styled("Storage", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD | Modifier::UNDERLINED))),
+        Line::from(Span::styled(
+            "Storage",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+        )),
         Line::from(""),
         status_detail_row("State DB", &format!("{} KB", state_db_kb)),
         status_detail_row("History DB", &format!("{} KB", history_db_kb)),
@@ -1326,8 +1480,11 @@ fn format_uptime(secs: u64) -> String {
 
 fn draw_plugin_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let Some(plugin_id) = app.plugin_detail_plugin_id.as_deref() else {
-        let msg = Paragraph::new("No plugin selected")
-            .block(Block::default().borders(Borders::ALL).title("Plugin Detail"));
+        let msg = Paragraph::new("No plugin selected").block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Plugin Detail"),
+        );
         frame.render_widget(msg, area);
         return;
     };
@@ -1360,7 +1517,11 @@ fn draw_plugin_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
                 .title(format!("Plugin Detail: {}", plugin_id)),
         )
         .style(Style::default().fg(Color::Gray))
-        .highlight_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+        .highlight_style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        );
     frame.render_widget(tabs, layout[0]);
 
     match app.plugin_detail_panel {
@@ -1463,8 +1624,8 @@ fn draw_plugin_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
             };
             let button_events = count_type("device_button");
             let rotary_events = count_type("device_rotary");
-            let entertainment_events =
-                count_type("entertainment_action_applied") + count_type("entertainment_status_changed");
+            let entertainment_events = count_type("entertainment_action_applied")
+                + count_type("entertainment_status_changed");
             let metrics_events = count_type("plugin_metrics");
             let body = if let Some(p) = plugin {
                 format!(
@@ -1481,7 +1642,10 @@ fn draw_plugin_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
                     metrics_events,
                 )
             } else {
-                format!("Plugin '{}' is not present in current plugin list.", plugin_id)
+                format!(
+                    "Plugin '{}' is not present in current plugin list.",
+                    plugin_id
+                )
             };
             let widget = Paragraph::new(body)
                 .block(Block::default().borders(Borders::ALL).title("Overview"))
@@ -1498,8 +1662,11 @@ fn draw_plugin_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
                     ListItem::new(format!("{} | {} {}", e.timestamp, e.event_type, detail))
                 })
                 .collect::<Vec<_>>();
-            let list = List::new(rows)
-                .block(Block::default().borders(Borders::ALL).title("Diagnostics Events"));
+            let list = List::new(rows).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Diagnostics Events"),
+            );
             frame.render_widget(list, layout[1]);
         }
         PluginDetailPanel::Metrics => {
@@ -1516,7 +1683,11 @@ fn draw_plugin_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
             };
 
             let widget = Paragraph::new(body)
-                .block(Block::default().borders(Borders::ALL).title("Metrics Snapshot"))
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("Metrics Snapshot"),
+                )
                 .wrap(Wrap { trim: true });
             frame.render_widget(widget, layout[1]);
         }
@@ -1542,7 +1713,11 @@ fn draw_dashboard(frame: &mut Frame<'_>, app: &App, area: Rect) {
     .select(active_idx)
     .block(Block::default().borders(Borders::ALL).title("Devices"))
     .style(Style::default().fg(Color::Gray))
-    .highlight_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+    .highlight_style(
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    );
     frame.render_widget(sub_tabs, layout[0]);
 
     match app.device_sub {
@@ -1570,7 +1745,11 @@ fn draw_device_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
         build_flat_list(app)
     };
 
-    let mode_label = if app.view_mode == DeviceViewMode::Grouped { "Grouped" } else { "Flat" };
+    let mode_label = if app.view_mode == DeviceViewMode::Grouped {
+        "Grouped"
+    } else {
+        "Flat"
+    };
     let search = if app.device_search_query.trim().is_empty() {
         "-".to_string()
     } else {
@@ -1639,11 +1818,20 @@ fn build_flat_list(app: &App) -> (Vec<ListItem<'static>>, Option<usize>) {
         .enumerate()
         .map(|(i, device)| device_list_row(app, device, i == app.selected, false))
         .collect();
-    let selected = if visible.is_empty() { None } else { Some(app.selected) };
+    let selected = if visible.is_empty() {
+        None
+    } else {
+        Some(app.selected)
+    };
     (items, selected)
 }
 
-fn device_list_row(app: &App, device: &DeviceState, is_selected: bool, indent: bool) -> ListItem<'static> {
+fn device_list_row(
+    app: &App,
+    device: &DeviceState,
+    is_selected: bool,
+    indent: bool,
+) -> ListItem<'static> {
     let status = app.device_status(device);
     let sc = status_color(&status, device.available);
 
@@ -1665,7 +1853,7 @@ fn device_list_row(app: &App, device: &DeviceState, is_selected: bool, indent: b
 
     if let Some(b) = App::device_battery(device) {
         if !status_shows_battery {
-        suffix.push_str(&format!(" {b}%🔋"));
+            suffix.push_str(&format!(" {b}%🔋"));
         }
     }
     if let Some(t) = App::device_temperature(device) {
@@ -1680,10 +1868,18 @@ fn device_list_row(app: &App, device: &DeviceState, is_selected: bool, indent: b
     }
     // Timer countdown suffix
     if device.plugin_id == "core.timer" {
-        let timer_state = device.attributes.get("state").and_then(|v| v.as_str()).unwrap_or("idle");
+        let timer_state = device
+            .attributes
+            .get("state")
+            .and_then(|v| v.as_str())
+            .unwrap_or("idle");
         if matches!(timer_state, "running" | "paused") {
             let remaining_ms = timer_remaining_secs(device) * 1000;
-            let icon = if timer_state == "running" { "▶" } else { "⏸" };
+            let icon = if timer_state == "running" {
+                "▶"
+            } else {
+                "⏸"
+            };
             suffix.push_str(&format!(" {icon} {}", format_duration_ms(remaining_ms)));
         }
     }
@@ -1747,13 +1943,31 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
             .add_modifier(Modifier::BOLD),
     )]));
     lines.push(Line::from(""));
+    lines.push(detail_row(
+        "Device ID",
+        vec![Span::raw(device.device_id.clone())],
+    ));
+    if let Some(canonical_name) = &device.canonical_name {
+        if !canonical_name.is_empty() {
+            lines.push(detail_row(
+                "Canonical",
+                vec![Span::styled(
+                    canonical_name.clone(),
+                    Style::default().fg(Color::Cyan),
+                )],
+            ));
+        }
+    }
 
     // Status
     let status = app.device_status(device);
     let sc = status_color(&status, device.available);
     lines.push(detail_row(
         "Status",
-        vec![Span::styled(status, Style::default().fg(sc).add_modifier(Modifier::BOLD))],
+        vec![Span::styled(
+            status,
+            Style::default().fg(sc).add_modifier(Modifier::BOLD),
+        )],
     ));
 
     // Availability
@@ -1781,7 +1995,13 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
     // ZWave node location (from nodeInfo, distinct from the HC area field)
     if let Some(loc) = device.attributes.get("location").and_then(|v| v.as_str()) {
         if !loc.is_empty() {
-            lines.push(detail_row("ZW Location", vec![Span::styled(loc.to_string(), Style::default().fg(Color::DarkGray))]));
+            lines.push(detail_row(
+                "ZW Location",
+                vec![Span::styled(
+                    loc.to_string(),
+                    Style::default().fg(Color::DarkGray),
+                )],
+            ));
         }
     }
 
@@ -1800,28 +2020,46 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
 
     // Timer detail (core.timer devices)
     if device.plugin_id == "core.timer" {
-        let timer_state = device.attributes.get("state").and_then(|v| v.as_str()).unwrap_or("idle");
-        let duration_ms = device.attributes.get("duration_secs").and_then(|v| v.as_u64()).unwrap_or(0) * 1000;
+        let timer_state = device
+            .attributes
+            .get("state")
+            .and_then(|v| v.as_str())
+            .unwrap_or("idle");
+        let duration_ms = device
+            .attributes
+            .get("duration_secs")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0)
+            * 1000;
         let remaining_ms = timer_remaining_secs(device) * 1000;
-        let repeat = device.attributes.get("repeat").and_then(|v| v.as_bool()).unwrap_or(false);
+        let repeat = device
+            .attributes
+            .get("repeat")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
         let state_color = match timer_state {
-            "running"   => Color::Green,
-            "paused"    => Color::Yellow,
-            "finished"  => Color::Cyan,
+            "running" => Color::Green,
+            "paused" => Color::Yellow,
+            "finished" => Color::Cyan,
             "cancelled" => Color::DarkGray,
-            _           => Color::DarkGray,
+            _ => Color::DarkGray,
         };
         lines.push(detail_row(
             "Timer State",
             vec![Span::styled(
                 normalize_label(timer_state),
-                Style::default().fg(state_color).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(state_color)
+                    .add_modifier(Modifier::BOLD),
             )],
         ));
 
         if duration_ms > 0 {
-            lines.push(detail_row("Duration", vec![Span::raw(format_duration_ms(duration_ms))]));
+            lines.push(detail_row(
+                "Duration",
+                vec![Span::raw(format_duration_ms(duration_ms))],
+            ));
         }
 
         if matches!(timer_state, "running" | "paused") && duration_ms > 0 {
@@ -1840,7 +2078,10 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
         }
 
         if repeat {
-            lines.push(detail_row("Repeat", vec![Span::styled("Yes", Style::default().fg(Color::Yellow))]));
+            lines.push(detail_row(
+                "Repeat",
+                vec![Span::styled("Yes", Style::default().fg(Color::Yellow))],
+            ));
         }
 
         if let Some(lbl) = device.attributes.get("label").and_then(|v| v.as_str()) {
@@ -1852,7 +2093,10 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
         if let Some(started) = device.attributes.get("started_at").and_then(|v| v.as_str()) {
             lines.push(detail_row(
                 "Started",
-                vec![Span::styled(started.to_string(), Style::default().fg(Color::DarkGray))],
+                vec![Span::styled(
+                    started.to_string(),
+                    Style::default().fg(Color::DarkGray),
+                )],
             ));
         }
 
@@ -1883,7 +2127,10 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
             vec![
                 Span::styled(format!("{battery:3}% "), Style::default().fg(bc)),
                 Span::styled(bar, Style::default().fg(bc)),
-                Span::styled(low, Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    low,
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                ),
             ],
         ));
     }
@@ -1916,7 +2163,10 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
         lines.push(detail_row(
             "Brightness",
             vec![
-                Span::styled(format!("{brightness:3}% "), Style::default().fg(Color::Yellow)),
+                Span::styled(
+                    format!("{brightness:3}% "),
+                    Style::default().fg(Color::Yellow),
+                ),
                 Span::styled(bar, Style::default().fg(Color::Yellow)),
             ],
         ));
@@ -1935,31 +2185,52 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
         ));
 
         // Physical bolt sensor (only present when hardware supports it)
-        if let Some(bolt) = device.attributes.get("bolt_status").and_then(|v| v.as_str()) {
+        if let Some(bolt) = device
+            .attributes
+            .get("bolt_status")
+            .and_then(|v| v.as_str())
+        {
             let (s, c) = if bolt == "locked" {
                 ("Locked", Color::Red)
             } else {
                 ("Unlocked", Color::Green)
             };
-            lines.push(detail_row("Bolt", vec![Span::styled(s, Style::default().fg(c))]));
+            lines.push(detail_row(
+                "Bolt",
+                vec![Span::styled(s, Style::default().fg(c))],
+            ));
         }
         // Physical latch sensor
-        if let Some(latch) = device.attributes.get("latch_status").and_then(|v| v.as_str()) {
+        if let Some(latch) = device
+            .attributes
+            .get("latch_status")
+            .and_then(|v| v.as_str())
+        {
             let (s, c) = if latch == "closed" {
                 ("Closed", Color::Green)
             } else {
                 ("Open", Color::Yellow)
             };
-            lines.push(detail_row("Latch", vec![Span::styled(s, Style::default().fg(c))]));
+            lines.push(detail_row(
+                "Latch",
+                vec![Span::styled(s, Style::default().fg(c))],
+            ));
         }
         // Door open/closed sensor — string variant (ZWave)
-        if let Some(door) = device.attributes.get("door_status").and_then(|v| v.as_str()) {
+        if let Some(door) = device
+            .attributes
+            .get("door_status")
+            .and_then(|v| v.as_str())
+        {
             let (s, c) = if door == "closed" {
                 ("Closed", Color::Green)
             } else {
                 ("Open", Color::Yellow)
             };
-            lines.push(detail_row("Door", vec![Span::styled(s, Style::default().fg(c))]));
+            lines.push(detail_row(
+                "Door",
+                vec![Span::styled(s, Style::default().fg(c))],
+            ));
         }
         // Door open/closed sensor — bool variant (YoLink)
         if let Some(door_open) = device.attributes.get("door_open").and_then(|v| v.as_bool()) {
@@ -1968,20 +2239,37 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
             } else {
                 ("Closed", Color::Green)
             };
-            lines.push(detail_row("Door", vec![Span::styled(s, Style::default().fg(c))]));
+            lines.push(detail_row(
+                "Door",
+                vec![Span::styled(s, Style::default().fg(c))],
+            ));
         }
         // Last alert (e.g. UnLockFailed, DoorOpenAlarm)
         if let Some(alert) = device.attributes.get("last_alert").and_then(|v| v.as_str()) {
-            lines.push(detail_row("Last Alert", vec![Span::styled(alert.to_string(), Style::default().fg(Color::Yellow))]));
+            lines.push(detail_row(
+                "Last Alert",
+                vec![Span::styled(
+                    alert.to_string(),
+                    Style::default().fg(Color::Yellow),
+                )],
+            ));
         }
         // Auto-lock timeout (YoLink attributes.autoLock)
-        if let Some(secs) = device.attributes.get("auto_lock_secs").and_then(|v| v.as_u64()) {
+        if let Some(secs) = device
+            .attributes
+            .get("auto_lock_secs")
+            .and_then(|v| v.as_u64())
+        {
             if secs > 0 {
                 lines.push(detail_row("Auto-lock", vec![Span::raw(format!("{secs}s"))]));
             }
         }
         // Operation type: 1=Constant, 2=Timed (ZWave)
-        if let Some(op_type) = device.attributes.get("lock_operation_type").and_then(|v| v.as_f64()) {
+        if let Some(op_type) = device
+            .attributes
+            .get("lock_operation_type")
+            .and_then(|v| v.as_f64())
+        {
             let label = match op_type as u64 {
                 1 => "Constant",
                 2 => "Timed",
@@ -1990,28 +2278,60 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
             lines.push(detail_row("Op Mode", vec![Span::raw(label)]));
         }
         // Timed mode timeout
-        if let Some(timeout) = device.attributes.get("lock_timeout_secs").and_then(|v| v.as_f64()) {
+        if let Some(timeout) = device
+            .attributes
+            .get("lock_timeout_secs")
+            .and_then(|v| v.as_f64())
+        {
             if timeout > 0.0 {
-                lines.push(detail_row("Timeout", vec![Span::raw(format!("{timeout:.0}s"))]));
+                lines.push(detail_row(
+                    "Timeout",
+                    vec![Span::raw(format!("{timeout:.0}s"))],
+                ));
             }
         }
-        if let Some(relock) = device.attributes.get("lock_auto_relock_secs").and_then(|v| v.as_f64()) {
+        if let Some(relock) = device
+            .attributes
+            .get("lock_auto_relock_secs")
+            .and_then(|v| v.as_f64())
+        {
             if relock > 0.0 {
-                lines.push(detail_row("Auto-relock", vec![Span::raw(format!("{relock:.0}s"))]));
+                lines.push(detail_row(
+                    "Auto-relock",
+                    vec![Span::raw(format!("{relock:.0}s"))],
+                ));
             }
         }
     }
 
     // Motion sensor
     if let Some(motion) = device.attributes.get("motion").and_then(|v| v.as_bool()) {
-        let (s, c) = if motion { ("Motion", Color::Yellow) } else { ("Clear", Color::Green) };
-        lines.push(detail_row("Motion", vec![Span::styled(s, Style::default().fg(c))]));
+        let (s, c) = if motion {
+            ("Motion", Color::Yellow)
+        } else {
+            ("Clear", Color::Green)
+        };
+        lines.push(detail_row(
+            "Motion",
+            vec![Span::styled(s, Style::default().fg(c))],
+        ));
     }
 
     // Contact sensor
-    if let Some(open) = device.attributes.get("contact_open").and_then(|v| v.as_bool()) {
-        let (s, c) = if open { ("Open", Color::Red) } else { ("Closed", Color::Green) };
-        lines.push(detail_row("Contact", vec![Span::styled(s, Style::default().fg(c))]));
+    if let Some(open) = device
+        .attributes
+        .get("contact_open")
+        .and_then(|v| v.as_bool())
+    {
+        let (s, c) = if open {
+            ("Open", Color::Red)
+        } else {
+            ("Closed", Color::Green)
+        };
+        lines.push(detail_row(
+            "Contact",
+            vec![Span::styled(s, Style::default().fg(c))],
+        ));
     }
 
     // Window covering position
@@ -2028,27 +2348,63 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
 
     // Thermostat
     if let Some(mode) = device.attributes.get("mode").and_then(|v| v.as_str()) {
-        let mc = match mode { "heat" => Color::Red, "cool" => Color::Cyan, "off" => Color::DarkGray, _ => Color::White };
-        lines.push(detail_row("Mode", vec![Span::styled(normalize_label(mode), Style::default().fg(mc))]));
+        let mc = match mode {
+            "heat" => Color::Red,
+            "cool" => Color::Cyan,
+            "off" => Color::DarkGray,
+            _ => Color::White,
+        };
+        lines.push(detail_row(
+            "Mode",
+            vec![Span::styled(normalize_label(mode), Style::default().fg(mc))],
+        ));
     }
-    if let Some(action) = device.attributes.get("hvac_action").and_then(|v| v.as_str()) {
+    if let Some(action) = device
+        .attributes
+        .get("hvac_action")
+        .and_then(|v| v.as_str())
+    {
         lines.push(detail_row("HVAC", vec![Span::raw(normalize_label(action))]));
     }
-    if let Some(setpoint) = device.attributes.get("target_temp").and_then(|v| v.as_f64()) {
-        lines.push(detail_row("Setpoint", vec![Span::styled(format!("{setpoint:.1}°F"), Style::default().fg(Color::Yellow))]));
+    if let Some(setpoint) = device
+        .attributes
+        .get("target_temp")
+        .and_then(|v| v.as_f64())
+    {
+        lines.push(detail_row(
+            "Setpoint",
+            vec![Span::styled(
+                format!("{setpoint:.1}°F"),
+                Style::default().fg(Color::Yellow),
+            )],
+        ));
     }
 
     // Energy monitoring
-    let has_energy = ["power_w", "energy_kwh", "voltage", "current_a"].iter().any(|k| device.attributes.contains_key(*k));
+    let has_energy = ["power_w", "energy_kwh", "voltage", "current_a"]
+        .iter()
+        .any(|k| device.attributes.contains_key(*k));
     if has_energy {
         lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled("─── Energy ───", Style::default().fg(Color::DarkGray))));
+        lines.push(Line::from(Span::styled(
+            "─── Energy ───",
+            Style::default().fg(Color::DarkGray),
+        )));
     }
     if let Some(w) = device.attributes.get("power_w").and_then(|v| v.as_f64()) {
-        lines.push(detail_row("Power", vec![Span::styled(format!("{w:.1} W"), Style::default().fg(Color::Yellow))]));
+        lines.push(detail_row(
+            "Power",
+            vec![Span::styled(
+                format!("{w:.1} W"),
+                Style::default().fg(Color::Yellow),
+            )],
+        ));
     }
     if let Some(kwh) = device.attributes.get("energy_kwh").and_then(|v| v.as_f64()) {
-        lines.push(detail_row("Energy", vec![Span::raw(format!("{kwh:.3} kWh"))]));
+        lines.push(detail_row(
+            "Energy",
+            vec![Span::raw(format!("{kwh:.3} kWh"))],
+        ));
     }
     if let Some(v) = device.attributes.get("voltage").and_then(|v| v.as_f64()) {
         lines.push(detail_row("Voltage", vec![Span::raw(format!("{v:.1} V"))]));
@@ -2058,46 +2414,111 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
     }
 
     // Environmental extras
-    if let Some(lux) = device.attributes.get("illuminance").and_then(|v| v.as_f64()) {
-        lines.push(detail_row("Illuminance", vec![Span::raw(format!("{lux:.0} lx"))]));
+    if let Some(lux) = device
+        .attributes
+        .get("illuminance")
+        .and_then(|v| v.as_f64())
+    {
+        lines.push(detail_row(
+            "Illuminance",
+            vec![Span::raw(format!("{lux:.0} lx"))],
+        ));
     }
     if let Some(co2) = device.attributes.get("co2_ppm").and_then(|v| v.as_f64()) {
         lines.push(detail_row("CO₂", vec![Span::raw(format!("{co2:.0} ppm"))]));
     }
 
     // Alarm states (only show when active)
-    for (key, label) in &[("smoke", "Smoke"), ("co", "CO"), ("water_detected", "Water"), ("tamper", "Tamper"), ("vibration", "Vibration")] {
+    for (key, label) in &[
+        ("smoke", "Smoke"),
+        ("co", "CO"),
+        ("water_detected", "Water"),
+        ("tamper", "Tamper"),
+        ("vibration", "Vibration"),
+    ] {
         if let Some(true) = device.attributes.get(*key).and_then(|v| v.as_bool()) {
-            lines.push(detail_row(label, vec![Span::styled("ALARM", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))]));
+            lines.push(detail_row(
+                label,
+                vec![Span::styled(
+                    "ALARM",
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                )],
+            ));
         }
     }
 
     // Other attributes — everything not already rendered above, excluding ZWave
     // internal noise properties that have no user-visible meaning.
     let shown = [
-        "on", "state", "open", "online", "locked",
-        "battery", "battery_level", "battery_percent", "battery_pct", "battery_state", "battery_low",
-        "temperature", "temp", "humidity", "brightness",
-        "motion", "contact_open", "position", "location",
-        "mode", "hvac_action", "target_temp",
-        "power_w", "energy_kwh", "voltage", "current_a",
-        "illuminance", "co2_ppm", "pressure", "uv_index",
-        "smoke", "co", "water_detected", "tamper", "vibration",
-        "color_rgb", "color_temp",
+        "on",
+        "state",
+        "open",
+        "online",
+        "locked",
+        "battery",
+        "battery_level",
+        "battery_percent",
+        "battery_pct",
+        "battery_state",
+        "battery_low",
+        "temperature",
+        "temp",
+        "humidity",
+        "brightness",
+        "motion",
+        "contact_open",
+        "position",
+        "location",
+        "mode",
+        "hvac_action",
+        "target_temp",
+        "power_w",
+        "energy_kwh",
+        "voltage",
+        "current_a",
+        "illuminance",
+        "co2_ppm",
+        "pressure",
+        "uv_index",
+        "smoke",
+        "co",
+        "water_detected",
+        "tamper",
+        "vibration",
+        "color_rgb",
+        "color_temp",
         // Door lock physical sensors + config
-        "bolt_status", "latch_status", "door_status", "door_open",
-        "lock_operation_type", "lock_timeout_secs", "lock_auto_relock_secs",
-        "last_alert", "auto_lock_secs", "sound_level",
+        "bolt_status",
+        "latch_status",
+        "door_status",
+        "door_open",
+        "lock_operation_type",
+        "lock_timeout_secs",
+        "lock_auto_relock_secs",
+        "last_alert",
+        "auto_lock_secs",
+        "sound_level",
         // Timer device attributes
-        "duration_secs", "remaining_secs", "repeat", "started_at", "label",
+        "duration_secs",
+        "remaining_secs",
+        "repeat",
+        "started_at",
+        "label",
     ];
     // ZWave internal / write-echo properties with no useful display value.
     // Also includes raw nodeInfo keys that survived field_map (shouldn't normally
     // appear, but guard against config mismatches).
     let zwave_noise = [
-        "targetValue", "currentValue", "targetMode", "currentMode",
-        "duration", "restorePrevious", "targetColor", "currentColor",
-        "nodeName", "nodeLocation",  // raw nodeInfo keys (mapped → name/location)
+        "targetValue",
+        "currentValue",
+        "targetMode",
+        "currentMode",
+        "duration",
+        "restorePrevious",
+        "targetColor",
+        "currentColor",
+        "nodeName",
+        "nodeLocation", // raw nodeInfo keys (mapped → name/location)
     ];
 
     let other_attrs: Vec<(&String, &serde_json::Value)> = device
@@ -2113,10 +2534,16 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
             Style::default().fg(Color::DarkGray),
         )));
         for (key, val) in &other_attrs {
-            let val_str = val.as_str().map(|s| s.to_string()).unwrap_or_else(|| val.to_string());
+            let val_str = val
+                .as_str()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| val.to_string());
             let display_key = normalize_label(key);
             lines.push(Line::from(vec![
-                Span::styled(format!("  {:<13}", display_key), Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!("  {:<13}", display_key),
+                    Style::default().fg(Color::DarkGray),
+                ),
                 Span::raw(val_str),
             ]));
         }
@@ -2136,19 +2563,38 @@ fn draw_switches_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
         .switches
         .iter()
         .map(|s| {
-            let on = s.attributes.get("on").and_then(|v| v.as_bool()).unwrap_or(false);
-            let (dot, dot_color) = if on { ("●", Color::Green) } else { ("○", Color::DarkGray) };
-            let label = if s.name != s.device_id { format!("  {}", s.name) } else { String::new() };
+            let on = s
+                .attributes
+                .get("on")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let (dot, dot_color) = if on {
+                ("●", Color::Green)
+            } else {
+                ("○", Color::DarkGray)
+            };
+            let label = if s.name != s.device_id {
+                format!("  {}", s.name)
+            } else {
+                String::new()
+            };
             ListItem::new(Line::from(vec![
                 Span::styled(format!("  {dot} "), Style::default().fg(dot_color)),
-                Span::styled(format!("{:<36}", s.device_id), Style::default().fg(Color::White)),
+                Span::styled(
+                    format!("{:<36}", s.device_id),
+                    Style::default().fg(Color::White),
+                ),
                 Span::styled(label, Style::default().fg(Color::DarkGray)),
             ]))
         })
         .collect();
 
     let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(format!("Switches [{}]", app.switches.len())))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(format!("Switches [{}]", app.switches.len())),
+        )
         .highlight_style(highlight)
         .highlight_symbol(">> ");
 
@@ -2169,16 +2615,27 @@ fn draw_timers_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
         .timers
         .iter()
         .map(|t| {
-            let state = t.attributes.get("state").and_then(|v| v.as_str()).unwrap_or("idle");
+            let state = t
+                .attributes
+                .get("state")
+                .and_then(|v| v.as_str())
+                .unwrap_or("idle");
             let state_color = match state {
-                "running"  => Color::Green,
+                "running" => Color::Green,
                 "finished" => Color::Yellow,
-                "paused"   => Color::Cyan,
-                _          => Color::DarkGray,
+                "paused" => Color::Cyan,
+                _ => Color::DarkGray,
             };
-            let label = if t.name != t.device_id { format!("  {}", t.name) } else { String::new() };
+            let label = if t.name != t.device_id {
+                format!("  {}", t.name)
+            } else {
+                String::new()
+            };
             ListItem::new(Line::from(vec![
-                Span::styled(format!("  {:<36}", t.device_id), Style::default().fg(Color::White)),
+                Span::styled(
+                    format!("  {:<36}", t.device_id),
+                    Style::default().fg(Color::White),
+                ),
                 Span::styled(format!("{:<10}", state), Style::default().fg(state_color)),
                 Span::styled(label, Style::default().fg(Color::DarkGray)),
             ]))
@@ -2186,7 +2643,11 @@ fn draw_timers_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
         .collect();
 
     let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(format!("Timers [{}]", app.timers.len())))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(format!("Timers [{}]", app.timers.len())),
+        )
         .highlight_style(highlight)
         .highlight_symbol(">> ");
 
@@ -2209,6 +2670,7 @@ fn draw_device_editor(frame: &mut Frame<'_>, app: &App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(2),
+            Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(3),
@@ -2247,24 +2709,44 @@ fn draw_device_editor(frame: &mut Frame<'_>, app: &App) {
     );
     frame.render_widget(area, layout[2]);
 
+    let canonical_style = if matches!(editor.field, DeviceEditField::CanonicalName) {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default()
+    };
+    let canonical = Paragraph::new(editor.canonical_name.as_str()).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Canonical Name")
+            .border_style(canonical_style),
+    );
+    frame.render_widget(canonical, layout[3]);
+
     let status = app
         .devices
         .iter()
         .find(|device| device.device_id == editor.device_id)
         .map(|device| app.device_status(device))
         .unwrap_or_else(|| "Unknown".to_string());
-    let status_line = Paragraph::new(format!("Status: {status}"))
-        .block(Block::default().borders(Borders::ALL).title("Device Status"));
-    frame.render_widget(status_line, layout[3]);
+    let status_line = Paragraph::new(format!("Status: {status}")).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Device Status"),
+    );
+    frame.render_widget(status_line, layout[4]);
 
     let help = Paragraph::new("Tab switch field | Enter save | Esc cancel")
         .alignment(Alignment::Center)
         .block(Block::default().borders(Borders::ALL));
-    frame.render_widget(help, layout[4]);
+    frame.render_widget(help, layout[5]);
 }
 
 fn draw_area_editor(frame: &mut Frame<'_>, app: &App, editor: &AreaEditor) {
-    let title = if editor.id.is_none() { "New Area" } else { "Rename Area" };
+    let title = if editor.id.is_none() {
+        "New Area"
+    } else {
+        "Rename Area"
+    };
     let popup = centered_rect(60, 30, frame.area());
     frame.render_widget(Clear, popup);
 
@@ -2274,15 +2756,15 @@ fn draw_area_editor(frame: &mut Frame<'_>, app: &App, editor: &AreaEditor) {
 
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3),
-            Constraint::Min(1),
-        ])
+        .constraints([Constraint::Length(3), Constraint::Min(1)])
         .split(inner);
 
-    let name_field = Paragraph::new(editor.name.as_str())
-        .block(Block::default().borders(Borders::ALL).title("Name")
-            .border_style(Style::default().fg(Color::Yellow)));
+    let name_field = Paragraph::new(editor.name.as_str()).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Name")
+            .border_style(Style::default().fg(Color::Yellow)),
+    );
     frame.render_widget(name_field, layout[0]);
 
     let help = Paragraph::new("Enter save | Esc cancel").alignment(Alignment::Center);
@@ -2293,8 +2775,8 @@ fn draw_area_editor(frame: &mut Frame<'_>, app: &App, editor: &AreaEditor) {
 
 fn draw_user_editor(frame: &mut Frame<'_>, app: &App, editor: &UserEditor) {
     let title = match editor.mode {
-        UserEditMode::Create         => "New User",
-        UserEditMode::EditRole       => "Change Role",
+        UserEditMode::Create => "New User",
+        UserEditMode::EditRole => "Change Role",
         UserEditMode::ChangePassword => "Change Password",
     };
     let popup = centered_rect(64, 60, frame.area());
@@ -2305,7 +2787,7 @@ fn draw_user_editor(frame: &mut Frame<'_>, app: &App, editor: &UserEditor) {
     frame.render_widget(outer, popup);
 
     let focused = Style::default().fg(Color::Yellow);
-    let normal  = Style::default();
+    let normal = Style::default();
 
     match editor.mode {
         UserEditMode::Create => {
@@ -2322,32 +2804,56 @@ fn draw_user_editor(frame: &mut Frame<'_>, app: &App, editor: &UserEditor) {
 
             frame.render_widget(
                 Paragraph::new(editor.username.as_str()).block(
-                    Block::default().borders(Borders::ALL).title("Username")
-                        .border_style(if editor.field == UserEditField::Username { focused } else { normal })
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("Username")
+                        .border_style(if editor.field == UserEditField::Username {
+                            focused
+                        } else {
+                            normal
+                        }),
                 ),
                 layout[0],
             );
             let pw_mask = "*".repeat(editor.password.len());
             frame.render_widget(
                 Paragraph::new(pw_mask).block(
-                    Block::default().borders(Borders::ALL).title("Password")
-                        .border_style(if editor.field == UserEditField::Password { focused } else { normal })
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("Password")
+                        .border_style(if editor.field == UserEditField::Password {
+                            focused
+                        } else {
+                            normal
+                        }),
                 ),
                 layout[1],
             );
             let cpw_mask = "*".repeat(editor.confirm_password.len());
             frame.render_widget(
                 Paragraph::new(cpw_mask).block(
-                    Block::default().borders(Borders::ALL).title("Confirm Password")
-                        .border_style(if editor.field == UserEditField::ConfirmPassword { focused } else { normal })
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("Confirm Password")
+                        .border_style(if editor.field == UserEditField::ConfirmPassword {
+                            focused
+                        } else {
+                            normal
+                        }),
                 ),
                 layout[2],
             );
             let role_str = format!("{:?}  (Space to cycle)", editor.role);
             frame.render_widget(
                 Paragraph::new(role_str).block(
-                    Block::default().borders(Borders::ALL).title("Role")
-                        .border_style(if editor.field == UserEditField::Role { focused } else { normal })
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("Role")
+                        .border_style(if editor.field == UserEditField::Role {
+                            focused
+                        } else {
+                            normal
+                        }),
                 ),
                 layout[3],
             );
@@ -2364,15 +2870,24 @@ fn draw_user_editor(frame: &mut Frame<'_>, app: &App, editor: &UserEditor) {
                     Constraint::Min(1),
                 ])
                 .split(inner);
-            let label = Paragraph::new(format!("User: {}", editor.username))
-                .style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD));
+            let label = Paragraph::new(format!("User: {}", editor.username)).style(
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            );
             frame.render_widget(label, layout[0]);
             let role_str = format!("{:?}  (Space to cycle)", editor.role);
             frame.render_widget(
-                Paragraph::new(role_str).block(Block::default().borders(Borders::ALL).title("Role").border_style(focused)),
+                Paragraph::new(role_str).block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("Role")
+                        .border_style(focused),
+                ),
                 layout[1],
             );
-            let help = Paragraph::new("Space cycle | Enter save | Esc cancel").alignment(Alignment::Center);
+            let help = Paragraph::new("Space cycle | Enter save | Esc cancel")
+                .alignment(Alignment::Center);
             frame.render_widget(help, layout[2]);
         }
         UserEditMode::ChangePassword => {
@@ -2386,34 +2901,56 @@ fn draw_user_editor(frame: &mut Frame<'_>, app: &App, editor: &UserEditor) {
                     Constraint::Min(1),
                 ])
                 .split(inner);
-            let label = Paragraph::new(format!("User: {}", editor.username))
-                .style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD));
+            let label = Paragraph::new(format!("User: {}", editor.username)).style(
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            );
             frame.render_widget(label, layout[0]);
             let cpw_mask = "*".repeat(editor.current_password.len());
             frame.render_widget(
                 Paragraph::new(cpw_mask).block(
-                    Block::default().borders(Borders::ALL).title("Current Password")
-                        .border_style(if editor.field == UserEditField::CurrentPassword { focused } else { normal })
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("Current Password")
+                        .border_style(if editor.field == UserEditField::CurrentPassword {
+                            focused
+                        } else {
+                            normal
+                        }),
                 ),
                 layout[1],
             );
             let pw_mask = "*".repeat(editor.password.len());
             frame.render_widget(
                 Paragraph::new(pw_mask).block(
-                    Block::default().borders(Borders::ALL).title("New Password")
-                        .border_style(if editor.field == UserEditField::Password { focused } else { normal })
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("New Password")
+                        .border_style(if editor.field == UserEditField::Password {
+                            focused
+                        } else {
+                            normal
+                        }),
                 ),
                 layout[2],
             );
             let confirm_mask = "*".repeat(editor.confirm_password.len());
             frame.render_widget(
                 Paragraph::new(confirm_mask).block(
-                    Block::default().borders(Borders::ALL).title("Confirm New Password")
-                        .border_style(if editor.field == UserEditField::ConfirmPassword { focused } else { normal })
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("Confirm New Password")
+                        .border_style(if editor.field == UserEditField::ConfirmPassword {
+                            focused
+                        } else {
+                            normal
+                        }),
                 ),
                 layout[3],
             );
-            let help = Paragraph::new("Tab/↑↓ field | Enter save | Esc cancel").alignment(Alignment::Center);
+            let help = Paragraph::new("Tab/↑↓ field | Enter save | Esc cancel")
+                .alignment(Alignment::Center);
             frame.render_widget(help, layout[4]);
         }
     }
@@ -2472,7 +3009,11 @@ fn format_duration_ms(ms: u64) -> String {
 fn timer_remaining_secs(device: &DeviceState) -> u64 {
     let is_running = device.attributes.get("state").and_then(|v| v.as_str()) == Some("running");
     if is_running {
-        let duration = device.attributes.get("duration_secs").and_then(|v| v.as_u64()).unwrap_or(0);
+        let duration = device
+            .attributes
+            .get("duration_secs")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
         let started_at = device
             .attributes
             .get("started_at")
@@ -2484,7 +3025,11 @@ fn timer_remaining_secs(device: &DeviceState) -> u64 {
             return duration.saturating_sub(elapsed);
         }
     }
-    device.attributes.get("remaining_secs").and_then(|v| v.as_u64()).unwrap_or(0)
+    device
+        .attributes
+        .get("remaining_secs")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0)
 }
 
 fn clean_plugin_id(plugin_id: &str) -> String {
@@ -2575,7 +3120,11 @@ fn draw_manage_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
     .select(active_idx)
     .block(Block::default().borders(Borders::ALL).title("Manage"))
     .style(Style::default().fg(Color::Gray))
-    .highlight_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+    .highlight_style(
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    );
     frame.render_widget(sub_tabs, layout[0]);
 
     let highlight = Style::default()
@@ -2615,17 +3164,9 @@ fn draw_manage_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
             })
             .collect::<Vec<_>>();
 
-        let pending_badge = if app.matter_pending {
-            " [pending]"
-        } else {
-            ""
-        };
+        let pending_badge = if app.matter_pending { " [pending]" } else { "" };
 
-        let list_title = format!(
-            "Matter Nodes ({}){}",
-            app.matter_nodes.len(),
-            pending_badge
-        );
+        let list_title = format!("Matter Nodes ({}){}", app.matter_nodes.len(), pending_badge);
 
         let list = List::new(items)
             .block(Block::default().borders(Borders::ALL).title(list_title))
@@ -2640,7 +3181,10 @@ fn draw_manage_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
 
         let mut activity_lines = vec![Line::from(vec![
             Span::styled("Last: ", Style::default().fg(Color::DarkGray)),
-            Span::styled(app.matter_last_action.as_str(), Style::default().fg(Color::White)),
+            Span::styled(
+                app.matter_last_action.as_str(),
+                Style::default().fg(Color::White),
+            ),
         ])];
 
         activity_lines.push(Line::from(vec![
@@ -2689,7 +3233,11 @@ fn draw_manage_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
         }
 
         let activity = Paragraph::new(activity_lines)
-            .block(Block::default().borders(Borders::ALL).title("Matter Activity"))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Matter Activity"),
+            )
             .wrap(Wrap { trim: true });
         frame.render_widget(activity, matter_layout[1]);
         return;
@@ -2753,24 +3301,43 @@ fn draw_manage_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
 
     let (items, title, len): (Vec<ListItem<'_>>, &str, usize) = match app.admin_sub {
         AdminSubPanel::Modes => {
-            let items = app.modes.iter().map(|m| {
-                let on = m.state.as_ref()
-                    .and_then(|s| s.attributes.get("on"))
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
-                let (dot, dot_color) = if on { ("●", Color::Green) } else { ("○", Color::DarkGray) };
-                let kind_color = match m.config.kind.as_str() {
-                    "solar"  => Color::Yellow,
-                    "manual" => Color::Cyan,
-                    _        => Color::White,
-                };
-                ListItem::new(Line::from(vec![
-                    Span::styled(format!("  {dot} "), Style::default().fg(dot_color)),
-                    Span::styled(format!("{:<28}", m.config.id), Style::default().fg(Color::White)),
-                    Span::styled(format!("  {:<8}", m.config.kind), Style::default().fg(kind_color)),
-                    Span::styled(format!("  {}", m.config.name), Style::default().fg(Color::DarkGray)),
-                ]))
-            }).collect();
+            let items = app
+                .modes
+                .iter()
+                .map(|m| {
+                    let on = m
+                        .state
+                        .as_ref()
+                        .and_then(|s| s.attributes.get("on"))
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    let (dot, dot_color) = if on {
+                        ("●", Color::Green)
+                    } else {
+                        ("○", Color::DarkGray)
+                    };
+                    let kind_color = match m.config.kind.as_str() {
+                        "solar" => Color::Yellow,
+                        "manual" => Color::Cyan,
+                        _ => Color::White,
+                    };
+                    ListItem::new(Line::from(vec![
+                        Span::styled(format!("  {dot} "), Style::default().fg(dot_color)),
+                        Span::styled(
+                            format!("{:<28}", m.config.id),
+                            Style::default().fg(Color::White),
+                        ),
+                        Span::styled(
+                            format!("  {:<8}", m.config.kind),
+                            Style::default().fg(kind_color),
+                        ),
+                        Span::styled(
+                            format!("  {}", m.config.name),
+                            Style::default().fg(Color::DarkGray),
+                        ),
+                    ]))
+                })
+                .collect();
             let len = app.modes.len();
             (items, "Modes", len)
         }
@@ -2801,11 +3368,15 @@ fn draw_users_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
         .users
         .iter()
         .map(|u| {
-            let is_self = app.current_user.as_ref().map(|me| me.id == u.id).unwrap_or(false);
+            let is_self = app
+                .current_user
+                .as_ref()
+                .map(|me| me.id == u.id)
+                .unwrap_or(false);
             let role_str = format!("{:?}", u.role);
             let role_color = match u.role {
-                crate::api::Role::Admin    => Color::Yellow,
-                crate::api::Role::User     => Color::White,
+                crate::api::Role::Admin => Color::Yellow,
+                crate::api::Role::User => Color::White,
                 crate::api::Role::ReadOnly => Color::DarkGray,
             };
             let me_tag = if is_self { " (you)" } else { "" };
@@ -2841,31 +3412,45 @@ fn draw_switch_editor(frame: &mut Frame<'_>, editor: &SwitchEditor) {
     frame.render_widget(outer, popup);
 
     let focused = Style::default().fg(Color::Yellow);
-    let normal  = Style::default();
+    let normal = Style::default();
 
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Length(3), Constraint::Min(1)])
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Min(1),
+        ])
         .split(inner);
 
     frame.render_widget(
         Paragraph::new(editor.id.as_str()).block(
-            Block::default().borders(Borders::ALL)
+            Block::default()
+                .borders(Borders::ALL)
                 .title("ID  (switch_ prefix added automatically)")
-                .border_style(if editor.field == SwitchEditField::Id { focused } else { normal })
+                .border_style(if editor.field == SwitchEditField::Id {
+                    focused
+                } else {
+                    normal
+                }),
         ),
         layout[0],
     );
     frame.render_widget(
         Paragraph::new(editor.label.as_str()).block(
-            Block::default().borders(Borders::ALL).title("Label  (optional)")
-                .border_style(if editor.field == SwitchEditField::Label { focused } else { normal })
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Label  (optional)")
+                .border_style(if editor.field == SwitchEditField::Label {
+                    focused
+                } else {
+                    normal
+                }),
         ),
         layout[1],
     );
     frame.render_widget(
-        Paragraph::new("Tab field  |  Enter create  |  Esc cancel")
-            .alignment(Alignment::Center),
+        Paragraph::new("Tab field  |  Enter create  |  Esc cancel").alignment(Alignment::Center),
         layout[2],
     );
 }
@@ -2878,31 +3463,45 @@ fn draw_timer_editor(frame: &mut Frame<'_>, editor: &TimerEditor) {
     frame.render_widget(outer, popup);
 
     let focused = Style::default().fg(Color::Yellow);
-    let normal  = Style::default();
+    let normal = Style::default();
 
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Length(3), Constraint::Min(1)])
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Min(1),
+        ])
         .split(inner);
 
     frame.render_widget(
         Paragraph::new(editor.id.as_str()).block(
-            Block::default().borders(Borders::ALL)
+            Block::default()
+                .borders(Borders::ALL)
                 .title("ID  (timer_ prefix added automatically)")
-                .border_style(if editor.field == TimerEditField::Id { focused } else { normal })
+                .border_style(if editor.field == TimerEditField::Id {
+                    focused
+                } else {
+                    normal
+                }),
         ),
         layout[0],
     );
     frame.render_widget(
         Paragraph::new(editor.label.as_str()).block(
-            Block::default().borders(Borders::ALL).title("Label  (optional)")
-                .border_style(if editor.field == TimerEditField::Label { focused } else { normal })
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Label  (optional)")
+                .border_style(if editor.field == TimerEditField::Label {
+                    focused
+                } else {
+                    normal
+                }),
         ),
         layout[1],
     );
     frame.render_widget(
-        Paragraph::new("Tab field  |  Enter create  |  Esc cancel")
-            .alignment(Alignment::Center),
+        Paragraph::new("Tab field  |  Enter create  |  Esc cancel").alignment(Alignment::Center),
         layout[2],
     );
 }
@@ -2915,7 +3514,7 @@ fn draw_mode_editor(frame: &mut Frame<'_>, editor: &ModeEditor) {
     frame.render_widget(outer, popup);
 
     let focused = Style::default().fg(Color::Yellow);
-    let normal  = Style::default();
+    let normal = Style::default();
 
     let layout = Layout::default()
         .direction(Direction::Vertical)
@@ -2929,29 +3528,48 @@ fn draw_mode_editor(frame: &mut Frame<'_>, editor: &ModeEditor) {
 
     frame.render_widget(
         Paragraph::new(editor.id.as_str()).block(
-            Block::default().borders(Borders::ALL).title("ID  (must start with mode_)")
-                .border_style(if editor.field == ModeEditField::Id { focused } else { normal })
+            Block::default()
+                .borders(Borders::ALL)
+                .title("ID  (must start with mode_)")
+                .border_style(if editor.field == ModeEditField::Id {
+                    focused
+                } else {
+                    normal
+                }),
         ),
         layout[0],
     );
     frame.render_widget(
         Paragraph::new(editor.name.as_str()).block(
-            Block::default().borders(Borders::ALL).title("Name")
-                .border_style(if editor.field == ModeEditField::Name { focused } else { normal })
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Name")
+                .border_style(if editor.field == ModeEditField::Name {
+                    focused
+                } else {
+                    normal
+                }),
         ),
         layout[1],
     );
     let kind_color = match editor.kind {
-        ModeKind::Solar  => Color::Yellow,
+        ModeKind::Solar => Color::Yellow,
         ModeKind::Manual => Color::Cyan,
     };
     frame.render_widget(
         Paragraph::new(Span::styled(
             format!("{}  (Space to toggle)", editor.kind.as_str()),
             Style::default().fg(kind_color),
-        )).block(
-            Block::default().borders(Borders::ALL).title("Kind")
-                .border_style(if editor.field == ModeEditField::Kind { focused } else { normal })
+        ))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Kind")
+                .border_style(if editor.field == ModeEditField::Kind {
+                    focused
+                } else {
+                    normal
+                }),
         ),
         layout[2],
     );
@@ -2965,7 +3583,9 @@ fn draw_mode_editor(frame: &mut Frame<'_>, editor: &ModeEditor) {
 fn draw_matter_commission_editor(frame: &mut Frame<'_>, editor: &MatterCommissionEditor) {
     let popup = centered_rect(72, 68, frame.area());
     frame.render_widget(Clear, popup);
-    let outer = Block::default().borders(Borders::ALL).title("Matter Commission");
+    let outer = Block::default()
+        .borders(Borders::ALL)
+        .title("Matter Commission");
     let inner = outer.inner(popup);
     frame.render_widget(outer, popup);
 

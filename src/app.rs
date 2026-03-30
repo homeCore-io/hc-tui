@@ -1,6 +1,6 @@
 use crate::api::{
-    Area, DeviceState, EventEntry, HomeCoreClient, LogLine, LoginResponse, ModeRecord,
-    MatterNode, PluginRecord, Role, Rule, RuleFiring, RuleGroup, Scene, SystemStatus, UserInfo,
+    Area, DeviceState, EventEntry, HomeCoreClient, LogLine, LoginResponse, MatterNode, ModeRecord,
+    PluginRecord, Role, Rule, RuleFiring, RuleGroup, Scene, SystemStatus, UserInfo,
 };
 use crate::cache::{CacheSnapshot, CacheStore};
 use anyhow::Result;
@@ -20,6 +20,7 @@ pub enum FocusField {
 pub enum DeviceEditField {
     Name,
     Area,
+    CanonicalName,
 }
 
 #[derive(Debug, Clone)]
@@ -27,6 +28,7 @@ pub struct DeviceEditor {
     pub device_id: String,
     pub name: String,
     pub area: String,
+    pub canonical_name: String,
     pub field: DeviceEditField,
 }
 
@@ -123,8 +125,7 @@ pub enum DeviceSubPanel {
     Timers,
 }
 
-impl DeviceSubPanel {
-}
+impl DeviceSubPanel {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeviceFilterMode {
@@ -540,12 +541,7 @@ impl App {
     }
 
     pub fn tabs(&self) -> Vec<Tab> {
-        let mut tabs = vec![
-            Tab::Devices,
-            Tab::Scenes,
-            Tab::Areas,
-            Tab::Automations,
-        ];
+        let mut tabs = vec![Tab::Devices, Tab::Scenes, Tab::Areas, Tab::Automations];
         if self.is_admin() {
             tabs.push(Tab::Plugins);
         }
@@ -838,7 +834,8 @@ impl App {
                         .and_then(Value::as_object)
                         .cloned()
                         .unwrap_or_default();
-                    if let Some(device) = self.devices.iter_mut().find(|d| d.device_id == device_id) {
+                    if let Some(device) = self.devices.iter_mut().find(|d| d.device_id == device_id)
+                    {
                         device.attributes = current;
                         if !timestamp.is_empty() {
                             device.last_seen = timestamp.clone();
@@ -852,7 +849,8 @@ impl App {
                         .get("available")
                         .and_then(Value::as_bool)
                         .unwrap_or(false);
-                    if let Some(device) = self.devices.iter_mut().find(|d| d.device_id == device_id) {
+                    if let Some(device) = self.devices.iter_mut().find(|d| d.device_id == device_id)
+                    {
                         device.available = available;
                         if !timestamp.is_empty() {
                             device.last_seen = timestamp.clone();
@@ -863,7 +861,9 @@ impl App {
             "device_name_changed" => {
                 if let Some(device_id) = event.get("device_id").and_then(Value::as_str) {
                     if let Some(name) = event.get("current_name").and_then(Value::as_str) {
-                        if let Some(device) = self.devices.iter_mut().find(|d| d.device_id == device_id) {
+                        if let Some(device) =
+                            self.devices.iter_mut().find(|d| d.device_id == device_id)
+                        {
                             device.name = name.to_string();
                         }
                     }
@@ -879,9 +879,7 @@ impl App {
 
         let detail = summarize_live_event_detail(&event);
 
-        if event_type == "plugin_metrics"
-            && plugin_id.as_deref() == Some("plugin.matter")
-        {
+        if event_type == "plugin_metrics" && plugin_id.as_deref() == Some("plugin.matter") {
             self.matter_last_metric = summarize_matter_plugin_metric(&event).or(detail.clone());
             self.update_matter_commission_feedback_from_metric(&event);
         }
@@ -1053,22 +1051,25 @@ impl App {
         }
 
         // Areas tab two-pane navigation (but allow tab and other global keys)
-        if matches!(self.active_tab(), Tab::Areas) 
-            && !matches!(key.code, 
-                         KeyCode::Tab 
-                         | KeyCode::BackTab 
-                         | KeyCode::Char('1')
-                         | KeyCode::Char('2')
-                         | KeyCode::Char('3')
-                         | KeyCode::Char('4')
-                         | KeyCode::Char('5')
-                         | KeyCode::Char('6')
-                         | KeyCode::Char('7')
-                         | KeyCode::Char('8')
-                         | KeyCode::Char('9')
-                         | KeyCode::Char('q') 
-                         | KeyCode::Char('r') 
-                         | KeyCode::Char('T')) {
+        if matches!(self.active_tab(), Tab::Areas)
+            && !matches!(
+                key.code,
+                KeyCode::Tab
+                    | KeyCode::BackTab
+                    | KeyCode::Char('1')
+                    | KeyCode::Char('2')
+                    | KeyCode::Char('3')
+                    | KeyCode::Char('4')
+                    | KeyCode::Char('5')
+                    | KeyCode::Char('6')
+                    | KeyCode::Char('7')
+                    | KeyCode::Char('8')
+                    | KeyCode::Char('9')
+                    | KeyCode::Char('q')
+                    | KeyCode::Char('r')
+                    | KeyCode::Char('T')
+            )
+        {
             self.on_key_areas_pane(key).await;
             return;
         }
@@ -1086,21 +1087,19 @@ impl App {
 
         match key.code {
             KeyCode::Char('q') => self.should_quit = true,
-            KeyCode::Char('r') => {
-                match self.active_tab() {
-                    Tab::Manage if matches!(self.admin_sub, AdminSubPanel::Matter) => {
-                        self.refresh_matter_nodes().await;
-                    }
-                    Tab::Manage if matches!(self.admin_sub, AdminSubPanel::Status) => {
-                        self.refresh_system_status().await;
-                    }
-                    _ => {
-                        if let Err(err) = self.refresh_all().await {
-                            self.error = Some(err.to_string());
-                        }
+            KeyCode::Char('r') => match self.active_tab() {
+                Tab::Manage if matches!(self.admin_sub, AdminSubPanel::Matter) => {
+                    self.refresh_matter_nodes().await;
+                }
+                Tab::Manage if matches!(self.admin_sub, AdminSubPanel::Status) => {
+                    self.refresh_system_status().await;
+                }
+                _ => {
+                    if let Err(err) = self.refresh_all().await {
+                        self.error = Some(err.to_string());
                     }
                 }
-            }
+            },
             KeyCode::Left if matches!(self.active_tab(), Tab::Devices) => {
                 self.device_sub = match self.device_sub {
                     DeviceSubPanel::All => DeviceSubPanel::Timers,
@@ -1167,7 +1166,9 @@ impl App {
                 self.areas_list_selected = 0;
                 self.areas_devices_selected = 0;
                 // When entering Manage/Status sub-tab, refresh
-                if matches!(self.active_tab(), Tab::Manage) && matches!(self.admin_sub, AdminSubPanel::Status) {
+                if matches!(self.active_tab(), Tab::Manage)
+                    && matches!(self.admin_sub, AdminSubPanel::Status)
+                {
                     self.refresh_system_status().await;
                 }
             }
@@ -1182,7 +1183,9 @@ impl App {
                 self.areas_selected_devices.clear();
                 self.areas_list_selected = 0;
                 self.areas_devices_selected = 0;
-                if matches!(self.active_tab(), Tab::Manage) && matches!(self.admin_sub, AdminSubPanel::Status) {
+                if matches!(self.active_tab(), Tab::Manage)
+                    && matches!(self.admin_sub, AdminSubPanel::Status)
+                {
                     self.refresh_system_status().await;
                 }
             }
@@ -1200,191 +1203,180 @@ impl App {
                     self.areas_selected_devices.clear();
                     self.areas_list_selected = 0;
                     self.areas_devices_selected = 0;
-                    if matches!(self.active_tab(), Tab::Manage) && matches!(self.admin_sub, AdminSubPanel::Status) {
+                    if matches!(self.active_tab(), Tab::Manage)
+                        && matches!(self.admin_sub, AdminSubPanel::Status)
+                    {
                         self.refresh_system_status().await;
                     }
                 }
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                                // Exclude Logs sub-panel in Manage
-                                if matches!(self.active_tab(), Tab::Manage) && matches!(self.admin_sub, AdminSubPanel::Logs) {
-                                    if self.log_paused {
-                                        let max = self.log_lines.len().saturating_sub(1);
-                                        self.log_scroll_offset = min(self.log_scroll_offset + 1, max);
-                                    }
-                                    return;
-                                }
+                // Exclude Logs sub-panel in Manage
+                if matches!(self.active_tab(), Tab::Manage)
+                    && matches!(self.admin_sub, AdminSubPanel::Logs)
+                {
+                    if self.log_paused {
+                        let max = self.log_lines.len().saturating_sub(1);
+                        self.log_scroll_offset = min(self.log_scroll_offset + 1, max);
+                    }
+                    return;
+                }
                 let len = self.active_items_len();
                 if len > 0 {
                     self.selected = min(self.selected + 1, len - 1);
                 }
             }
             KeyCode::Up | KeyCode::Char('k') => {
-                                // Exclude Logs sub-panel in Manage
-                                if matches!(self.active_tab(), Tab::Manage) && matches!(self.admin_sub, AdminSubPanel::Logs) {
-                                    if self.log_paused {
-                                        self.log_scroll_offset = self.log_scroll_offset.saturating_sub(1);
-                                    }
-                                    return;
-                                }
+                // Exclude Logs sub-panel in Manage
+                if matches!(self.active_tab(), Tab::Manage)
+                    && matches!(self.admin_sub, AdminSubPanel::Logs)
+                {
+                    if self.log_paused {
+                        self.log_scroll_offset = self.log_scroll_offset.saturating_sub(1);
+                    }
+                    return;
+                }
                 self.selected = self.selected.saturating_sub(1);
             }
-            KeyCode::Enter => {
-                match self.active_tab() {
-                    Tab::Devices => {
-                        match self.device_sub {
-                            DeviceSubPanel::Switches => {
-                                if let Some(sw) = self.switches.get(self.selected) {
-                                    self.switch_editor = Some(SwitchEditor {
-                                        id: sw.device_id.clone(),
-                                        label: sw.name.clone(),
-                                        field: SwitchEditField::Id,
-                                    });
-                                }
-                            }
-                            DeviceSubPanel::Timers => {
-                                if let Some(t) = self.timers.get(self.selected) {
-                                    self.timer_editor = Some(TimerEditor {
-                                        id: t.device_id.clone(),
-                                        label: t.name.clone(),
-                                        field: TimerEditField::Id,
-                                    });
-                                }
-                            }
-                            DeviceSubPanel::All => self.open_selected_device_editor(),
+            KeyCode::Enter => match self.active_tab() {
+                Tab::Devices => match self.device_sub {
+                    DeviceSubPanel::Switches => {
+                        if let Some(sw) = self.switches.get(self.selected) {
+                            self.switch_editor = Some(SwitchEditor {
+                                id: sw.device_id.clone(),
+                                label: sw.name.clone(),
+                                field: SwitchEditField::Id,
+                            });
                         }
                     }
-                    Tab::Areas   => self.open_area_editor_edit(),
-                    Tab::Plugins => self.open_plugin_detail(),
-                    Tab::Manage => {
-                        if matches!(self.admin_sub, AdminSubPanel::Matter) {
-                            self.reinterview_selected_matter_node().await;
-                        } else if matches!(self.admin_sub, AdminSubPanel::Users) {
-                            if self.is_admin() {
-                                self.open_user_editor_create();
-                            } else {
-                                self.open_user_editor_role();
-                            }
+                    DeviceSubPanel::Timers => {
+                        if let Some(t) = self.timers.get(self.selected) {
+                            self.timer_editor = Some(TimerEditor {
+                                id: t.device_id.clone(),
+                                label: t.name.clone(),
+                                field: TimerEditField::Id,
+                            });
+                        }
+                    }
+                    DeviceSubPanel::All => self.open_selected_device_editor(),
+                },
+                Tab::Areas => self.open_area_editor_edit(),
+                Tab::Plugins => self.open_plugin_detail(),
+                Tab::Manage => {
+                    if matches!(self.admin_sub, AdminSubPanel::Matter) {
+                        self.reinterview_selected_matter_node().await;
+                    } else if matches!(self.admin_sub, AdminSubPanel::Users) {
+                        if self.is_admin() {
+                            self.open_user_editor_create();
                         } else {
-                            self.open_manage_editor();
+                            self.open_user_editor_role();
                         }
+                    } else {
+                        self.open_manage_editor();
                     }
-                    _ => {}
                 }
-            }
-            KeyCode::Char('n') => {
-                match self.active_tab() {
-                    Tab::Devices => {
-                        match self.device_sub {
-                            DeviceSubPanel::Switches => {
-                                self.switch_editor = Some(SwitchEditor {
-                                    id: String::new(),
-                                    label: String::new(),
-                                    field: SwitchEditField::Id,
-                                });
-                            }
-                            DeviceSubPanel::Timers => {
-                                self.timer_editor = Some(TimerEditor {
-                                    id: String::new(),
-                                    label: String::new(),
-                                    field: TimerEditField::Id,
-                                });
-                            }
-                            DeviceSubPanel::All => {}
-                        }
+                _ => {}
+            },
+            KeyCode::Char('n') => match self.active_tab() {
+                Tab::Devices => match self.device_sub {
+                    DeviceSubPanel::Switches => {
+                        self.switch_editor = Some(SwitchEditor {
+                            id: String::new(),
+                            label: String::new(),
+                            field: SwitchEditField::Id,
+                        });
                     }
-                    Tab::Areas => self.open_area_editor_create(),
-                    Tab::Manage => {
-                        if matches!(self.admin_sub, AdminSubPanel::Matter) {
-                            self.open_matter_commission_editor();
-                        } else if matches!(self.admin_sub, AdminSubPanel::Users) {
-                            if self.is_admin() {
-                                self.open_user_editor_create();
-                            }
-                        } else {
-                            self.open_manage_editor();
-                        }
+                    DeviceSubPanel::Timers => {
+                        self.timer_editor = Some(TimerEditor {
+                            id: String::new(),
+                            label: String::new(),
+                            field: TimerEditField::Id,
+                        });
                     }
-                    _ => {}
+                    DeviceSubPanel::All => {}
+                },
+                Tab::Areas => self.open_area_editor_create(),
+                Tab::Manage => {
+                    if matches!(self.admin_sub, AdminSubPanel::Matter) {
+                        self.open_matter_commission_editor();
+                    } else if matches!(self.admin_sub, AdminSubPanel::Users) {
+                        if self.is_admin() {
+                            self.open_user_editor_create();
+                        }
+                    } else {
+                        self.open_manage_editor();
+                    }
                 }
-            }
-            KeyCode::Char('d') => {
-                match self.active_tab() {
-                    Tab::Devices => {
-                        match self.device_sub {
-                            DeviceSubPanel::Switches => self.delete_selected_device_switch().await,
-                            DeviceSubPanel::Timers => self.delete_selected_device_timer().await,
-                            DeviceSubPanel::All => self.delete_selected_device().await,
-                        }
-                    }
-                    Tab::Areas   => self.delete_selected_area().await,
-                    Tab::Plugins => self.deregister_selected_plugin().await,
-                                        Tab::Manage if matches!(self.admin_sub, AdminSubPanel::Logs) => {
-                                            self.log_lines.clear();
-                                            self.log_scroll_offset = 0;
-                                            self.status = "Log buffer cleared".to_string();
-                                        }
-                    Tab::Manage => {
-                        if matches!(self.admin_sub, AdminSubPanel::Users) {
-                            self.delete_selected_user().await;
-                        } else if matches!(self.admin_sub, AdminSubPanel::Matter) {
-                            self.remove_selected_matter_node().await;
-                        } else {
-                            self.delete_selected_manage_item().await;
-                        }
-                    }
-                    Tab::Automations => self.disable_selected_automation().await,
-                    _ => {}
+                _ => {}
+            },
+            KeyCode::Char('d') => match self.active_tab() {
+                Tab::Devices => match self.device_sub {
+                    DeviceSubPanel::Switches => self.delete_selected_device_switch().await,
+                    DeviceSubPanel::Timers => self.delete_selected_device_timer().await,
+                    DeviceSubPanel::All => self.delete_selected_device().await,
+                },
+                Tab::Areas => self.delete_selected_area().await,
+                Tab::Plugins => self.deregister_selected_plugin().await,
+                Tab::Manage if matches!(self.admin_sub, AdminSubPanel::Logs) => {
+                    self.log_lines.clear();
+                    self.log_scroll_offset = 0;
+                    self.status = "Log buffer cleared".to_string();
                 }
-            }
-            KeyCode::Char('D') => {
-                match self.active_tab() {
-                    Tab::Automations => {
-                        if self.automation_bulk_select_mode && !self.automation_selected_ids.is_empty() {
-                            self.bulk_disable_automations().await;
-                        } else {
-                            self.disable_selected_automation().await;
-                        }
+                Tab::Manage => {
+                    if matches!(self.admin_sub, AdminSubPanel::Users) {
+                        self.delete_selected_user().await;
+                    } else if matches!(self.admin_sub, AdminSubPanel::Matter) {
+                        self.remove_selected_matter_node().await;
+                    } else {
+                        self.delete_selected_manage_item().await;
                     }
-                    _ => {}
                 }
-            }
-            KeyCode::Char('p') => {
-                match self.active_tab() {
-                    Tab::Manage if matches!(self.admin_sub, AdminSubPanel::Users) => self.open_user_editor_password(),
-                    Tab::Manage if matches!(self.admin_sub, AdminSubPanel::Logs) => {
-                        self.log_paused = !self.log_paused;
-                        if !self.log_paused {
-                            self.log_scroll_offset = self.log_lines.len().saturating_sub(1);
-                        }
-                        self.status = if self.log_paused {
-                            "Log stream paused".to_string()
-                        } else {
-                            "Log stream resumed".to_string()
-                        };
+                Tab::Automations => self.disable_selected_automation().await,
+                _ => {}
+            },
+            KeyCode::Char('D') => match self.active_tab() {
+                Tab::Automations => {
+                    if self.automation_bulk_select_mode && !self.automation_selected_ids.is_empty()
+                    {
+                        self.bulk_disable_automations().await;
+                    } else {
+                        self.disable_selected_automation().await;
                     }
-                    _ => {}
                 }
-            }
-            KeyCode::Char(' ') => {
-                match self.active_tab() {
-                    Tab::Devices => self.toggle_lock_or_switch().await,
-                    Tab::Automations => self.toggle_automation_selection(),
-                    Tab::Manage if matches!(self.admin_sub, AdminSubPanel::Logs) => {
-                        self.log_paused = !self.log_paused;
-                        if !self.log_paused {
-                            self.log_scroll_offset = self.log_lines.len().saturating_sub(1);
-                        }
+                _ => {}
+            },
+            KeyCode::Char('p') => match self.active_tab() {
+                Tab::Manage if matches!(self.admin_sub, AdminSubPanel::Users) => {
+                    self.open_user_editor_password()
+                }
+                Tab::Manage if matches!(self.admin_sub, AdminSubPanel::Logs) => {
+                    self.log_paused = !self.log_paused;
+                    if !self.log_paused {
+                        self.log_scroll_offset = self.log_lines.len().saturating_sub(1);
                     }
-                    _ => {}
+                    self.status = if self.log_paused {
+                        "Log stream paused".to_string()
+                    } else {
+                        "Log stream resumed".to_string()
+                    };
                 }
-            }
-            KeyCode::Char('t') => {
-                match self.active_tab() {
-                    Tab::Devices => self.toggle_selected_device().await,
-                    _ => {}
+                _ => {}
+            },
+            KeyCode::Char(' ') => match self.active_tab() {
+                Tab::Devices => self.toggle_lock_or_switch().await,
+                Tab::Automations => self.toggle_automation_selection(),
+                Tab::Manage if matches!(self.admin_sub, AdminSubPanel::Logs) => {
+                    self.log_paused = !self.log_paused;
+                    if !self.log_paused {
+                        self.log_scroll_offset = self.log_lines.len().saturating_sub(1);
+                    }
                 }
-            }
+                _ => {}
+            },
+            KeyCode::Char('t') => match self.active_tab() {
+                Tab::Devices => self.toggle_selected_device().await,
+                _ => {}
+            },
             KeyCode::Char('v') => {
                 if matches!(self.active_tab(), Tab::Devices) {
                     self.view_mode = match self.view_mode {
@@ -1466,42 +1458,44 @@ impl App {
                     && matches!(self.admin_sub, AdminSubPanel::Matter)
                 {
                     self.open_matter_commission_editor();
-                } else if matches!(self.active_tab(), Tab::Manage) && matches!(self.admin_sub, AdminSubPanel::Logs) {
+                } else if matches!(self.active_tab(), Tab::Manage)
+                    && matches!(self.admin_sub, AdminSubPanel::Logs)
+                {
                     self.log_lines.clear();
                     self.log_scroll_offset = 0;
                     self.status = "Log buffer cleared".to_string();
                 }
             }
-            KeyCode::Char('e') => {
-                match self.active_tab() {
-                    Tab::Automations => {
-                        if self.automation_bulk_select_mode && !self.automation_selected_ids.is_empty() {
-                            self.bulk_enable_automations().await;
-                        } else {
-                            self.enable_selected_automation().await;
-                        }
+            KeyCode::Char('e') => match self.active_tab() {
+                Tab::Automations => {
+                    if self.automation_bulk_select_mode && !self.automation_selected_ids.is_empty()
+                    {
+                        self.bulk_enable_automations().await;
+                    } else {
+                        self.enable_selected_automation().await;
                     }
-                    Tab::Manage if matches!(self.admin_sub, AdminSubPanel::Logs) => {
-                        self.log_level_filter = LogLevelFilter::Error;
-                        self.status = "Log level: ERROR".to_string();
-                    }
-                    _ => {}
                 }
-            }
-            KeyCode::Char('E') => {
-                match self.active_tab() {
-                    Tab::Automations => {
-                        if self.automation_bulk_select_mode && !self.automation_selected_ids.is_empty() {
-                            self.bulk_enable_automations().await;
-                        } else {
-                            self.enable_selected_automation().await;
-                        }
-                    }
-                    _ => {}
+                Tab::Manage if matches!(self.admin_sub, AdminSubPanel::Logs) => {
+                    self.log_level_filter = LogLevelFilter::Error;
+                    self.status = "Log level: ERROR".to_string();
                 }
-            }
+                _ => {}
+            },
+            KeyCode::Char('E') => match self.active_tab() {
+                Tab::Automations => {
+                    if self.automation_bulk_select_mode && !self.automation_selected_ids.is_empty()
+                    {
+                        self.bulk_enable_automations().await;
+                    } else {
+                        self.enable_selected_automation().await;
+                    }
+                }
+                _ => {}
+            },
             KeyCode::Char('w') => {
-                if matches!(self.active_tab(), Tab::Manage) && matches!(self.admin_sub, AdminSubPanel::Logs) {
+                if matches!(self.active_tab(), Tab::Manage)
+                    && matches!(self.admin_sub, AdminSubPanel::Logs)
+                {
                     self.log_level_filter = LogLevelFilter::Warn;
                     self.status = "Log level: WARN".to_string();
                 }
@@ -1511,13 +1505,17 @@ impl App {
                     && matches!(self.admin_sub, AdminSubPanel::Matter)
                 {
                     self.reinterview_selected_matter_node().await;
-                } else if matches!(self.active_tab(), Tab::Manage) && matches!(self.admin_sub, AdminSubPanel::Logs) {
+                } else if matches!(self.active_tab(), Tab::Manage)
+                    && matches!(self.admin_sub, AdminSubPanel::Logs)
+                {
                     self.log_level_filter = LogLevelFilter::Info;
                     self.status = "Log level: INFO".to_string();
                 }
             }
             KeyCode::Char('/') => {
-                if matches!(self.active_tab(), Tab::Manage) && matches!(self.admin_sub, AdminSubPanel::Logs) {
+                if matches!(self.active_tab(), Tab::Manage)
+                    && matches!(self.admin_sub, AdminSubPanel::Logs)
+                {
                     self.log_module_input_open = true;
                     self.log_module_input = self.log_module_filter.clone();
                 } else if matches!(self.active_tab(), Tab::Devices)
@@ -1556,22 +1554,20 @@ impl App {
                     self.initiate_delete_automation();
                 }
             }
-            KeyCode::Esc => {
-                match self.active_tab() {
-                    Tab::Automations => {
-                        if self.fire_history_open {
-                            self.fire_history_open = false;
-                            self.fire_history_rule_id = None;
-                            self.fire_history.clear();
-                        } else if self.automation_bulk_select_mode {
-                            self.automation_bulk_select_mode = false;
-                            self.automation_selected_ids.clear();
-                            self.status = "Selection cleared".to_string();
-                        }
+            KeyCode::Esc => match self.active_tab() {
+                Tab::Automations => {
+                    if self.fire_history_open {
+                        self.fire_history_open = false;
+                        self.fire_history_rule_id = None;
+                        self.fire_history.clear();
+                    } else if self.automation_bulk_select_mode {
+                        self.automation_bulk_select_mode = false;
+                        self.automation_selected_ids.clear();
+                        self.status = "Selection cleared".to_string();
                     }
-                    _ => {}
                 }
-            }
+                _ => {}
+            },
             _ => {}
         }
     }
@@ -1605,7 +1601,9 @@ impl App {
     // ── Automation filter bar ─────────────────────────────────────────────────
 
     async fn on_key_automation_filter_bar(&mut self, key: KeyEvent) {
-        let Some(bar) = self.automation_filter_bar.as_mut() else { return };
+        let Some(bar) = self.automation_filter_bar.as_mut() else {
+            return;
+        };
         match key.code {
             KeyCode::Esc => {
                 self.automation_filter_bar = None;
@@ -1623,8 +1621,12 @@ impl App {
                 };
             }
             KeyCode::Backspace => match bar.active_field {
-                AutomationFilterField::Tag => { bar.tag.pop(); }
-                AutomationFilterField::Trigger => { bar.trigger.pop(); }
+                AutomationFilterField::Tag => {
+                    bar.tag.pop();
+                }
+                AutomationFilterField::Trigger => {
+                    bar.trigger.pop();
+                }
             },
             KeyCode::Enter => {
                 let tag = bar.tag.clone();
@@ -1724,9 +1726,9 @@ impl App {
                     match self.client.delete_automation_group(&g.id).await {
                         Ok(_) => {
                             self.groups.retain(|gr| gr.id != g.id);
-                            self.groups_selected = self.groups_selected.min(
-                                self.groups.len().saturating_sub(1)
-                            );
+                            self.groups_selected = self
+                                .groups_selected
+                                .min(self.groups.len().saturating_sub(1));
                             self.status = format!("Deleted group '{}'", g.name);
                         }
                         Err(e) => self.error = Some(e.to_string()),
@@ -1740,7 +1742,9 @@ impl App {
     // ── Fire history ──────────────────────────────────────────────────────────
 
     async fn open_fire_history(&mut self) {
-        let Some(rule) = self.selected_automation().cloned() else { return };
+        let Some(rule) = self.selected_automation().cloned() else {
+            return;
+        };
         match self.client.get_automation_history(&rule.id).await {
             Ok(history) => {
                 self.fire_history = history;
@@ -1756,7 +1760,9 @@ impl App {
     // ── Automation enable/disable/clone/delete ────────────────────────────────
 
     async fn enable_selected_automation(&mut self) {
-        let Some(rule) = self.selected_automation().cloned() else { return };
+        let Some(rule) = self.selected_automation().cloned() else {
+            return;
+        };
         match self.client.toggle_automation(&rule.id, true).await {
             Ok(_) => {
                 if let Some(r) = self.automations.iter_mut().find(|r| r.id == rule.id) {
@@ -1769,7 +1775,9 @@ impl App {
     }
 
     async fn disable_selected_automation(&mut self) {
-        let Some(rule) = self.selected_automation().cloned() else { return };
+        let Some(rule) = self.selected_automation().cloned() else {
+            return;
+        };
         match self.client.toggle_automation(&rule.id, false).await {
             Ok(_) => {
                 if let Some(r) = self.automations.iter_mut().find(|r| r.id == rule.id) {
@@ -1782,7 +1790,9 @@ impl App {
     }
 
     async fn clone_selected_automation(&mut self) {
-        let Some(rule) = self.selected_automation().cloned() else { return };
+        let Some(rule) = self.selected_automation().cloned() else {
+            return;
+        };
         match self.client.clone_automation(&rule.id).await {
             Ok(cloned) => {
                 let name = cloned.name.clone();
@@ -1794,7 +1804,9 @@ impl App {
     }
 
     fn initiate_delete_automation(&mut self) {
-        let Some(rule) = self.selected_automation().cloned() else { return };
+        let Some(rule) = self.selected_automation().cloned() else {
+            return;
+        };
         self.automation_delete_confirm = Some(DeleteConfirm {
             rule_id: rule.id,
             rule_name: rule.name,
@@ -1802,7 +1814,9 @@ impl App {
     }
 
     async fn confirm_delete_automation(&mut self) {
-        let Some(confirm) = self.automation_delete_confirm.take() else { return };
+        let Some(confirm) = self.automation_delete_confirm.take() else {
+            return;
+        };
         match self.client.delete_automation(&confirm.rule_id).await {
             Ok(_) => {
                 self.automations.retain(|r| r.id != confirm.rule_id);
@@ -1814,7 +1828,9 @@ impl App {
     }
 
     fn toggle_automation_selection(&mut self) {
-        let Some(rule) = self.selected_automation().cloned() else { return };
+        let Some(rule) = self.selected_automation().cloned() else {
+            return;
+        };
         if self.automation_selected_ids.contains(&rule.id) {
             self.automation_selected_ids.remove(&rule.id);
         } else {
@@ -1867,9 +1883,7 @@ impl App {
     async fn refresh_system_status(&mut self) {
         match self.client.get_system_status().await {
             Ok(status) => {
-                self.system_status_last_refresh = Some(
-                    Local::now().format("%H:%M:%S").to_string()
-                );
+                self.system_status_last_refresh = Some(Local::now().format("%H:%M:%S").to_string());
                 self.system_status = Some(status);
                 self.status = "System status refreshed".to_string();
             }
@@ -1929,7 +1943,10 @@ impl App {
             payload.insert("area".to_string(), Value::String(area));
         }
         if let Some(disc) = discriminator {
-            payload.insert("discriminator".to_string(), Value::Number((disc as u64).into()));
+            payload.insert(
+                "discriminator".to_string(),
+                Value::Number((disc as u64).into()),
+            );
         }
         if let Some(pin) = passcode {
             payload.insert("passcode".to_string(), Value::Number((pin as u64).into()));
@@ -1941,7 +1958,8 @@ impl App {
             Ok(_) => {
                 self.error = None;
                 self.matter_pending = true;
-                self.matter_last_action = "Commission request accepted; waiting for device response".to_string();
+                self.matter_last_action =
+                    "Commission request accepted; waiting for device response".to_string();
                 self.push_matter_activity(self.matter_last_action.clone());
                 self.refresh_matter_nodes().await;
                 if self.error.is_none() {
@@ -2074,7 +2092,8 @@ impl App {
             match editor.discriminator.trim().parse::<u16>() {
                 Ok(v) => Some(v),
                 Err(_) => {
-                    self.error = Some("Matter discriminator must be a number (0-65535)".to_string());
+                    self.error =
+                        Some("Matter discriminator must be a number (0-65535)".to_string());
                     return;
                 }
             }
@@ -2112,10 +2131,7 @@ impl App {
                 self.refresh_matter_nodes().await;
             }
             Err(err) => {
-                let message = format!(
-                    "Matter reinterview failed for {}: {}",
-                    node.node_id, err
-                );
+                let message = format!("Matter reinterview failed for {}: {}", node.node_id, err);
                 self.matter_last_action = message.clone();
                 self.push_matter_activity(message.clone());
                 self.error = Some(message);
@@ -2138,10 +2154,7 @@ impl App {
                 self.refresh_matter_nodes().await;
             }
             Err(err) => {
-                let message = format!(
-                    "Matter remove failed for {}: {}",
-                    node.node_id, err
-                );
+                let message = format!("Matter remove failed for {}: {}", node.node_id, err);
                 self.matter_last_action = message.clone();
                 self.push_matter_activity(message.clone());
                 self.error = Some(message);
@@ -2231,7 +2244,8 @@ impl App {
                 visible.sort_by(|a, b| {
                     let sa = self.device_status(a).to_lowercase();
                     let sb = self.device_status(b).to_lowercase();
-                    sa.cmp(&sb).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+                    sa.cmp(&sb)
+                        .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
                 });
             }
             DeviceSortMode::LastSeen => {
@@ -2247,7 +2261,9 @@ impl App {
             DeviceFilterMode::All => true,
             DeviceFilterMode::Online => device.available,
             DeviceFilterMode::Offline => !device.available,
-            DeviceFilterMode::LowBattery => Self::device_battery(device).map(|b| b <= 20).unwrap_or(false),
+            DeviceFilterMode::LowBattery => Self::device_battery(device)
+                .map(|b| b <= 20)
+                .unwrap_or(false),
         }
     }
 
@@ -2259,6 +2275,11 @@ impl App {
 
         device.name.to_lowercase().contains(&q)
             || device.device_id.to_lowercase().contains(&q)
+            || device
+                .canonical_name
+                .as_deref()
+                .map(|name| name.to_lowercase().contains(&q))
+                .unwrap_or(false)
             || device.plugin_id.to_lowercase().contains(&q)
             || device
                 .area
@@ -2335,15 +2356,19 @@ impl App {
     }
 
     pub fn device_brightness(device: &DeviceState) -> Option<u8> {
-        device.attributes.get("brightness").and_then(|v| v.as_f64()).map(|n| {
-            if n <= 1.0 {
-                (n * 100.0) as u8
-            } else if n <= 100.0 {
-                n as u8
-            } else {
-                (n / 255.0 * 100.0) as u8
-            }
-        })
+        device
+            .attributes
+            .get("brightness")
+            .and_then(|v| v.as_f64())
+            .map(|n| {
+                if n <= 1.0 {
+                    (n * 100.0) as u8
+                } else if n <= 100.0 {
+                    n as u8
+                } else {
+                    (n / 255.0 * 100.0) as u8
+                }
+            })
     }
 
     pub fn device_lock_state(device: &DeviceState) -> Option<bool> {
@@ -2357,11 +2382,13 @@ impl App {
         let device_id = device.device_id.clone();
         let name = device.name.clone();
         let area = device.area.clone().unwrap_or_default();
+        let canonical_name = device.canonical_name.clone().unwrap_or_default();
 
         self.device_editor = Some(DeviceEditor {
             device_id,
             name,
             area,
+            canonical_name,
             field: DeviceEditField::Name,
         });
     }
@@ -2379,13 +2406,15 @@ impl App {
             KeyCode::Tab | KeyCode::Right => {
                 editor.field = match editor.field {
                     DeviceEditField::Name => DeviceEditField::Area,
-                    DeviceEditField::Area => DeviceEditField::Name,
+                    DeviceEditField::Area => DeviceEditField::CanonicalName,
+                    DeviceEditField::CanonicalName => DeviceEditField::Name,
                 };
             }
             KeyCode::BackTab | KeyCode::Left => {
                 editor.field = match editor.field {
-                    DeviceEditField::Name => DeviceEditField::Area,
+                    DeviceEditField::Name => DeviceEditField::CanonicalName,
                     DeviceEditField::Area => DeviceEditField::Name,
+                    DeviceEditField::CanonicalName => DeviceEditField::Area,
                 };
             }
             KeyCode::Backspace => match editor.field {
@@ -2394,6 +2423,9 @@ impl App {
                 }
                 DeviceEditField::Area => {
                     editor.area.pop();
+                }
+                DeviceEditField::CanonicalName => {
+                    editor.canonical_name.pop();
                 }
             },
             KeyCode::Enter => {
@@ -2406,6 +2438,7 @@ impl App {
                 match editor.field {
                     DeviceEditField::Name => editor.name.push(ch),
                     DeviceEditField::Area => editor.area.push(ch),
+                    DeviceEditField::CanonicalName => editor.canonical_name.push(ch),
                 }
             }
             _ => {}
@@ -2429,10 +2462,21 @@ impl App {
         } else {
             Some(area_value.clone())
         };
+        let canonical_value = editor.canonical_name.trim().to_string();
+        let canonical_name = if canonical_value.is_empty() {
+            None
+        } else {
+            Some(canonical_value.clone())
+        };
 
         match self
             .client
-            .update_device_metadata(&editor.device_id, &name, area.as_deref())
+            .update_device_metadata(
+                &editor.device_id,
+                &name,
+                area.as_deref(),
+                canonical_name.as_deref(),
+            )
             .await
         {
             Ok(_) => {
@@ -2443,6 +2487,7 @@ impl App {
                 {
                     device.name = name.clone();
                     device.area = area.clone();
+                    device.canonical_name = canonical_name.clone();
                 }
                 self.device_editor = None;
                 self.status = format!("Updated {}", editor.device_id);
@@ -2461,11 +2506,19 @@ impl App {
 
         // Lock state (ZWave CC 98, door locks)
         if let Some(locked) = attrs.get("locked").and_then(|v| v.as_bool()) {
-            return if locked { "Locked".to_string() } else { "Unlocked".to_string() };
+            return if locked {
+                "Locked".to_string()
+            } else {
+                "Unlocked".to_string()
+            };
         }
         // Explicit on/off (binary switch, most smart plugs)
         if let Some(on) = attrs.get("on").and_then(|v| v.as_bool()) {
-            return if on { "On".to_string() } else { "Off".to_string() };
+            return if on {
+                "On".to_string()
+            } else {
+                "Off".to_string()
+            };
         }
         // Generic state string
         if let Some(state) = attrs.get("state").and_then(|v| v.as_str()) {
@@ -2477,15 +2530,31 @@ impl App {
             .or_else(|| attrs.get("brightness"))
             .and_then(|v| v.as_f64())
         {
-            return if b > 0.0 { "On".to_string() } else { "Off".to_string() };
+            return if b > 0.0 {
+                "On".to_string()
+            } else {
+                "Off".to_string()
+            };
         }
         // Contact sensor (open/closed bool)
-        if let Some(open) = attrs.get("open").or_else(|| attrs.get("contact_open")).and_then(|v| v.as_bool()) {
-            return if open { "Open".to_string() } else { "Closed".to_string() };
+        if let Some(open) = attrs
+            .get("open")
+            .or_else(|| attrs.get("contact_open"))
+            .and_then(|v| v.as_bool())
+        {
+            return if open {
+                "Open".to_string()
+            } else {
+                "Closed".to_string()
+            };
         }
         // Motion sensor
         if let Some(motion) = attrs.get("motion").and_then(|v| v.as_bool()) {
-            return if motion { "Motion".to_string() } else { "Clear".to_string() };
+            return if motion {
+                "Motion".to_string()
+            } else {
+                "Clear".to_string()
+            };
         }
         // Thermostat mode
         if let Some(mode) = attrs.get("mode").and_then(|v| v.as_str()) {
@@ -2493,10 +2562,20 @@ impl App {
         }
         // Window covering position
         if let Some(pos) = attrs.get("position").and_then(|v| v.as_f64()) {
-            return if pos >= 99.0 { "Open".to_string() } else if pos <= 1.0 { "Closed".to_string() } else { format!("{pos:.0}%") };
+            return if pos >= 99.0 {
+                "Open".to_string()
+            } else if pos <= 1.0 {
+                "Closed".to_string()
+            } else {
+                format!("{pos:.0}%")
+            };
         }
         // Sensor-only devices — show primary reading as status
-        if let Some(temp) = attrs.get("temperature").or_else(|| attrs.get("temp")).and_then(|v| v.as_f64()) {
+        if let Some(temp) = attrs
+            .get("temperature")
+            .or_else(|| attrs.get("temp"))
+            .and_then(|v| v.as_f64())
+        {
             return format!("{temp:.1}°");
         }
         if let Some(hum) = attrs.get("humidity").and_then(|v| v.as_f64()) {
@@ -2534,11 +2613,19 @@ impl App {
         }
         // Online/offline from a plugin status field
         if let Some(online) = attrs.get("online").and_then(|v| v.as_bool()) {
-            return if online { "Online".to_string() } else { "Offline".to_string() };
+            return if online {
+                "Online".to_string()
+            } else {
+                "Offline".to_string()
+            };
         }
         // Occupancy sensor (Lutron occupancy groups)
         if let Some(occupied) = attrs.get("occupied").and_then(|v| v.as_bool()) {
-            return if occupied { "Occupied".to_string() } else { "Vacant".to_string() };
+            return if occupied {
+                "Occupied".to_string()
+            } else {
+                "Vacant".to_string()
+            };
         }
         // No recognisable state — device is read-only or state not yet received
         "—".to_string()
@@ -2606,16 +2693,19 @@ impl App {
         let mut ok = 0usize;
         let mut failed = Vec::new();
         for device_id in bridge_ids {
-            match self.client.send_device_action(&device_id, "pair_bridge").await {
+            match self
+                .client
+                .send_device_action(&device_id, "pair_bridge")
+                .await
+            {
                 Ok(_) => ok += 1,
                 Err(err) => failed.push(format!("{device_id}: {err}")),
             }
         }
 
         if failed.is_empty() {
-            let pairing_status = format!(
-                "Pairing requested for {ok} bridge(s). Press Hue link button if needed."
-            );
+            let pairing_status =
+                format!("Pairing requested for {ok} bridge(s). Press Hue link button if needed.");
             self.status = pairing_status.clone();
 
             if let Err(err) = self.refresh_all().await {
@@ -2653,11 +2743,7 @@ impl App {
             .iter()
             .filter(|d| {
                 d.plugin_id == plugin_id
-                    && d
-                        .attributes
-                        .get("kind")
-                        .and_then(|v| v.as_str())
-                        == Some("hue_bridge")
+                    && d.attributes.get("kind").and_then(|v| v.as_str()) == Some("hue_bridge")
             })
             .map(|d| d.device_id.clone())
             .collect::<Vec<_>>()
@@ -2671,19 +2757,32 @@ impl App {
             EventsFilterMode::HueInputs => {
                 matches!(
                     ty,
-                    "device_button" | "device_rotary" | "entertainment_action_applied" | "entertainment_status_changed" | "plugin_command_result" | "bridge_pairing_status"
+                    "device_button"
+                        | "device_rotary"
+                        | "entertainment_action_applied"
+                        | "entertainment_status_changed"
+                        | "plugin_command_result"
+                        | "bridge_pairing_status"
                 ) || matches!(
                     custom,
-                    "device_button" | "device_rotary" | "entertainment_action_applied" | "entertainment_status_changed" | "plugin_command_result" | "bridge_pairing_status"
+                    "device_button"
+                        | "device_rotary"
+                        | "entertainment_action_applied"
+                        | "entertainment_status_changed"
+                        | "plugin_command_result"
+                        | "bridge_pairing_status"
                 )
             }
             EventsFilterMode::Entertainment => {
-                matches!(ty, "entertainment_action_applied" | "entertainment_status_changed")
-                    || matches!(custom, "entertainment_action_applied" | "entertainment_status_changed")
+                matches!(
+                    ty,
+                    "entertainment_action_applied" | "entertainment_status_changed"
+                ) || matches!(
+                    custom,
+                    "entertainment_action_applied" | "entertainment_status_changed"
+                )
             }
-            EventsFilterMode::PluginMetrics => {
-                ty == "plugin_metrics" || custom == "plugin_metrics"
-            }
+            EventsFilterMode::PluginMetrics => ty == "plugin_metrics" || custom == "plugin_metrics",
         }
     }
 
@@ -2703,8 +2802,8 @@ impl App {
                 AdminSubPanel::Matter => self.matter_nodes.len(),
                 AdminSubPanel::Status => 0,
                 AdminSubPanel::Users => self.users.len(),
-                        AdminSubPanel::Logs => 0,
-                        AdminSubPanel::Events => self.filtered_events().len(),
+                AdminSubPanel::Logs => 0,
+                AdminSubPanel::Events => self.filtered_events().len(),
             },
         }
     }
@@ -2720,20 +2819,37 @@ impl App {
 
     async fn toggle_selected_device(&mut self) {
         let (device_id, device_name, current_on) = {
-            let Some(device) = self.selected_device() else { return };
-            let on = device.attributes.get("on").and_then(|v| v.as_bool()).unwrap_or(false);
+            let Some(device) = self.selected_device() else {
+                return;
+            };
+            let on = device
+                .attributes
+                .get("on")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             (device.device_id.clone(), device.name.clone(), on)
         };
         match self.client.set_device_on(&device_id, !current_on).await {
-            Ok(_) => self.status = format!("{} → {}", device_name, if !current_on { "On" } else { "Off" }),
+            Ok(_) => {
+                self.status = format!(
+                    "{} → {}",
+                    device_name,
+                    if !current_on { "On" } else { "Off" }
+                )
+            }
             Err(err) => self.error = Some(err.to_string()),
         }
     }
 
     async fn adjust_brightness(&mut self, direction: i64) {
         let (device_id, device_name, raw_pct, raw_abs) = {
-            let Some(device) = self.selected_device() else { return };
-            let pct = device.attributes.get("brightness_pct").and_then(|v| v.as_f64());
+            let Some(device) = self.selected_device() else {
+                return;
+            };
+            let pct = device
+                .attributes
+                .get("brightness_pct")
+                .and_then(|v| v.as_f64());
             let abs = device.attributes.get("brightness").and_then(|v| v.as_f64());
             (device.device_id.clone(), device.name.clone(), pct, abs)
         };
@@ -2741,7 +2857,11 @@ impl App {
         if let Some(raw) = raw_pct {
             // Hue-style 0–100% brightness
             let new_val = ((raw + direction as f64 * 10.0).clamp(0.0, 100.0) * 10.0).round() / 10.0;
-            match self.client.set_device_brightness_pct(&device_id, new_val).await {
+            match self
+                .client
+                .set_device_brightness_pct(&device_id, new_val)
+                .await
+            {
                 Ok(_) => self.status = format!("{device_name} brightness → {new_val:.0}%"),
                 Err(err) => self.error = Some(err.to_string()),
             }
@@ -2757,7 +2877,11 @@ impl App {
             };
             let new_val = ((raw + direction as f64 * step).clamp(0.0, max) * 10.0).round() / 10.0;
             let new_val_i = new_val as i64;
-            match self.client.set_device_brightness(&device_id, new_val_i).await {
+            match self
+                .client
+                .set_device_brightness(&device_id, new_val_i)
+                .await
+            {
                 Ok(_) => self.status = format!("{device_name} brightness → {new_val_i}"),
                 Err(err) => self.error = Some(err.to_string()),
             }
@@ -2766,12 +2890,18 @@ impl App {
 
     async fn lock_device(&mut self, locked: bool) {
         let (device_id, device_name) = {
-            let Some(device) = self.selected_device() else { return };
+            let Some(device) = self.selected_device() else {
+                return;
+            };
             (device.device_id.clone(), device.name.clone())
         };
         match self.client.set_device_locked(&device_id, locked).await {
             Ok(_) => {
-                self.status = format!("{} → {}", device_name, if locked { "Locked" } else { "Unlocked" });
+                self.status = format!(
+                    "{} → {}",
+                    device_name,
+                    if locked { "Locked" } else { "Unlocked" }
+                );
             }
             Err(err) => self.error = Some(err.to_string()),
         }
@@ -2779,24 +2909,34 @@ impl App {
 
     /// Space bar: toggle lock state for lock devices, or on/off for switches.
     async fn toggle_lock_or_switch(&mut self) {
-        let Some(device) = self.selected_device() else { return };
-        let device_id   = device.device_id.clone();
+        let Some(device) = self.selected_device() else {
+            return;
+        };
+        let device_id = device.device_id.clone();
         let device_name = device.name.clone();
 
         if let Some(locked) = Self::device_lock_state(device) {
             let new_locked = !locked;
             match self.client.set_device_locked(&device_id, new_locked).await {
-                Ok(_) => self.status = format!(
-                    "{} → {}",
-                    device_name,
-                    if new_locked { "Locked" } else { "Unlocked" }
-                ),
+                Ok(_) => {
+                    self.status = format!(
+                        "{} → {}",
+                        device_name,
+                        if new_locked { "Locked" } else { "Unlocked" }
+                    )
+                }
                 Err(err) => self.error = Some(err.to_string()),
             }
         } else {
-            let on = device.attributes.get("on").and_then(|v| v.as_bool()).unwrap_or(false);
+            let on = device
+                .attributes
+                .get("on")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             match self.client.set_device_on(&device_id, !on).await {
-                Ok(_) => self.status = format!("{} → {}", device_name, if !on { "On" } else { "Off" }),
+                Ok(_) => {
+                    self.status = format!("{} → {}", device_name, if !on { "On" } else { "Off" })
+                }
                 Err(err) => self.error = Some(err.to_string()),
             }
         }
@@ -2805,26 +2945,37 @@ impl App {
     // ── Area CRUD ─────────────────────────────────────────────────────────────
 
     fn open_area_editor_create(&mut self) {
-        self.area_editor = Some(AreaEditor { id: None, name: String::new() });
+        self.area_editor = Some(AreaEditor {
+            id: None,
+            name: String::new(),
+        });
     }
 
     fn open_area_editor_edit(&mut self) {
-        let Some(area) = self.areas.get(self.selected) else { return };
+        let Some(area) = self.areas.get(self.selected) else {
+            return;
+        };
         self.area_editor = Some(AreaEditor {
-            id:   Some(area.id.clone()),
+            id: Some(area.id.clone()),
             name: area.name.clone(),
         });
     }
 
     async fn on_key_area_editor(&mut self, key: KeyEvent) {
-        let Some(editor) = self.area_editor.as_mut() else { return };
+        let Some(editor) = self.area_editor.as_mut() else {
+            return;
+        };
         match key.code {
             KeyCode::Esc => {
                 self.area_editor = None;
                 self.status = "Area edit canceled".to_string();
             }
-            KeyCode::Backspace => { editor.name.pop(); }
-            KeyCode::Enter => { self.save_area_editor().await; }
+            KeyCode::Backspace => {
+                editor.name.pop();
+            }
+            KeyCode::Enter => {
+                self.save_area_editor().await;
+            }
             KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                 editor.name.push(ch);
             }
@@ -2833,42 +2984,42 @@ impl App {
     }
 
     async fn save_area_editor(&mut self) {
-        let Some(editor) = self.area_editor.clone() else { return };
+        let Some(editor) = self.area_editor.clone() else {
+            return;
+        };
         let name = editor.name.trim().to_string();
         if name.is_empty() {
             self.error = Some("area name cannot be empty".to_string());
             return;
         }
         match editor.id {
-            None => {
-                match self.client.create_area(&name).await {
-                    Ok(area) => {
-                        self.areas.push(area);
-                        self.area_editor = None;
-                        self.status = format!("Created area '{name}'");
-                        let _ = self.save_to_cache().await;
-                    }
-                    Err(e) => self.error = Some(e.to_string()),
+            None => match self.client.create_area(&name).await {
+                Ok(area) => {
+                    self.areas.push(area);
+                    self.area_editor = None;
+                    self.status = format!("Created area '{name}'");
+                    let _ = self.save_to_cache().await;
                 }
-            }
-            Some(ref id) => {
-                match self.client.rename_area(id, &name).await {
-                    Ok(updated) => {
-                        if let Some(a) = self.areas.iter_mut().find(|a| a.id == updated.id) {
-                            a.name = updated.name.clone();
-                        }
-                        self.area_editor = None;
-                        self.status = format!("Renamed area to '{}'", updated.name);
-                        let _ = self.save_to_cache().await;
+                Err(e) => self.error = Some(e.to_string()),
+            },
+            Some(ref id) => match self.client.rename_area(id, &name).await {
+                Ok(updated) => {
+                    if let Some(a) = self.areas.iter_mut().find(|a| a.id == updated.id) {
+                        a.name = updated.name.clone();
                     }
-                    Err(e) => self.error = Some(e.to_string()),
+                    self.area_editor = None;
+                    self.status = format!("Renamed area to '{}'", updated.name);
+                    let _ = self.save_to_cache().await;
                 }
-            }
+                Err(e) => self.error = Some(e.to_string()),
+            },
         }
     }
 
     async fn delete_selected_area(&mut self) {
-        let Some(area) = self.areas.get(self.selected) else { return };
+        let Some(area) = self.areas.get(self.selected) else {
+            return;
+        };
         let id = area.id.clone();
         let name = area.name.clone();
         match self.client.delete_area(&id).await {
@@ -2883,7 +3034,9 @@ impl App {
     }
 
     async fn delete_selected_area_from_pane(&mut self) {
-        let Some(area) = self.areas.get(self.areas_list_selected) else { return };
+        let Some(area) = self.areas.get(self.areas_list_selected) else {
+            return;
+        };
         let id = area.id.clone();
         let name = area.name.clone();
         match self.client.delete_area(&id).await {
@@ -2905,35 +3058,35 @@ impl App {
 
     async fn on_key_areas_pane(&mut self, key: KeyEvent) {
         use crate::app::AreasPane;
-        
+
         match key.code {
             // Pane switching (h/l keys and arrow keys)
             KeyCode::Char('h') | KeyCode::Left => {
                 self.areas_pane_focus = AreasPane::AreasList;
                 self.areas_selected_devices.clear();
-                    // Auto-select the area at current selection
-                    if let Some(area) = self.areas.get(self.areas_list_selected) {
-                        self.areas_selected_area_id = Some(area.id.clone());
-                    }
+                // Auto-select the area at current selection
+                if let Some(area) = self.areas.get(self.areas_list_selected) {
+                    self.areas_selected_area_id = Some(area.id.clone());
+                }
             }
             KeyCode::Char('l') | KeyCode::Right => {
                 if self.areas_selected_area_id.is_some() {
                     self.areas_pane_focus = AreasPane::DeviceList;
                 }
             }
-            
+
             // Navigation within current pane
             KeyCode::Up | KeyCode::Char('k') => {
                 match self.areas_pane_focus {
                     AreasPane::AreasList => {
                         self.areas_list_selected = self.areas_list_selected.saturating_sub(1);
-                            // Auto-update selected area and reset device selection
-                            if let Some(area) = self.areas.get(self.areas_list_selected) {
-                                self.areas_selected_area_id = Some(area.id.clone());
-                                self.areas_devices_selected = 0;
-                                self.areas_selected_devices.clear();
-                            }
+                        // Auto-update selected area and reset device selection
+                        if let Some(area) = self.areas.get(self.areas_list_selected) {
+                            self.areas_selected_area_id = Some(area.id.clone());
+                            self.areas_devices_selected = 0;
+                            self.areas_selected_devices.clear();
                         }
+                    }
                     AreasPane::DeviceList => {
                         self.areas_devices_selected = self.areas_devices_selected.saturating_sub(1);
                     }
@@ -2945,44 +3098,43 @@ impl App {
                     match self.areas_pane_focus {
                         AreasPane::AreasList => {
                             self.areas_list_selected = min(self.areas_list_selected + 1, len - 1);
-                                // Auto-update selected area and reset device selection
-                                if let Some(area) = self.areas.get(self.areas_list_selected) {
-                                    self.areas_selected_area_id = Some(area.id.clone());
-                                    self.areas_devices_selected = 0;
-                                    self.areas_selected_devices.clear();
-                                }
+                            // Auto-update selected area and reset device selection
+                            if let Some(area) = self.areas.get(self.areas_list_selected) {
+                                self.areas_selected_area_id = Some(area.id.clone());
+                                self.areas_devices_selected = 0;
+                                self.areas_selected_devices.clear();
                             }
+                        }
                         AreasPane::DeviceList => {
-                            self.areas_devices_selected = min(self.areas_devices_selected + 1, len - 1);
+                            self.areas_devices_selected =
+                                min(self.areas_devices_selected + 1, len - 1);
                         }
                     }
                 }
             }
-            
+
             // Enter key behavior based on pane focus
-            KeyCode::Enter => {
-                match self.areas_pane_focus {
-                    AreasPane::AreasList => {
-                        if let Some(area) = self.areas.get(self.areas_list_selected) {
-                            self.areas_selected_area_id = Some(area.id.clone());
-                            self.areas_pane_focus = AreasPane::DeviceList;
-                            self.areas_devices_selected = 0;
-                            self.areas_selected_devices.clear();
-                        }
-                    }
-                    AreasPane::DeviceList => {
-                        if self.areas_selected_area_id.is_some() {
-                            self.open_area_editor_edit();
-                        }
+            KeyCode::Enter => match self.areas_pane_focus {
+                AreasPane::AreasList => {
+                    if let Some(area) = self.areas.get(self.areas_list_selected) {
+                        self.areas_selected_area_id = Some(area.id.clone());
+                        self.areas_pane_focus = AreasPane::DeviceList;
+                        self.areas_devices_selected = 0;
+                        self.areas_selected_devices.clear();
                     }
                 }
-            }
-            
+                AreasPane::DeviceList => {
+                    if self.areas_selected_area_id.is_some() {
+                        self.open_area_editor_edit();
+                    }
+                }
+            },
+
             // Create new area
             KeyCode::Char('n') => {
                 self.open_area_editor_create();
             }
-            
+
             // Rename or delete based on pane focus
             KeyCode::Char('d') => {
                 match self.areas_pane_focus {
@@ -2995,22 +3147,24 @@ impl App {
                     }
                 }
             }
-            
+
             // Space: toggle device selection in device list pane
             KeyCode::Char(' ') => {
                 if matches!(self.areas_pane_focus, AreasPane::DeviceList) {
                     if let Some(area_id) = &self.areas_selected_area_id {
-                        let device_ids = self.areas
+                        let device_ids = self
+                            .areas
                             .iter()
                             .find(|a| &a.id == area_id)
                             .map(|a| a.device_ids.clone())
                             .unwrap_or_default();
-                        
-                        let visible_devices: Vec<_> = self.devices
+
+                        let visible_devices: Vec<_> = self
+                            .devices
                             .iter()
                             .filter(|d| device_ids.contains(&d.device_id))
                             .collect();
-                        
+
                         if let Some(device) = visible_devices.get(self.areas_devices_selected) {
                             if self.areas_selected_devices.contains(&device.device_id) {
                                 self.areas_selected_devices.remove(&device.device_id);
@@ -3021,7 +3175,7 @@ impl App {
                     }
                 }
             }
-            
+
             // Plus/Minus: add/remove devices from area
             KeyCode::Char('+') | KeyCode::Char('=') => {
                 if !self.areas_selected_devices.is_empty() {
@@ -3033,19 +3187,20 @@ impl App {
                     self.remove_selected_devices_from_area().await;
                 }
             }
-            
+
             _ => {}
         }
     }
 
     fn get_areas_pane_len(&self) -> usize {
         use crate::app::AreasPane;
-        
+
         match self.areas_pane_focus {
             AreasPane::AreasList => self.areas.len(),
             AreasPane::DeviceList => {
                 if let Some(area_id) = &self.areas_selected_area_id {
-                    let device_ids = self.areas
+                    let device_ids = self
+                        .areas
                         .iter()
                         .find(|a| &a.id == area_id)
                         .map(|a| a.device_ids.clone())
@@ -3065,22 +3220,25 @@ impl App {
         if self.areas_selected_devices.is_empty() {
             return;
         }
-        
+
         if let Some(area_id) = &self.areas_selected_area_id {
             if let Some(area) = self.areas.iter().find(|a| &a.id == area_id) {
                 let mut new_device_ids = area.device_ids.clone();
-                
+
                 // Add selected devices that aren't already in the area
                 for device_id in &self.areas_selected_devices {
                     if !new_device_ids.contains(device_id) {
                         new_device_ids.push(device_id.clone());
                     }
                 }
-                
+
                 // Call API to set area devices
                 match self.client.set_area_devices(area_id, &new_device_ids).await {
                     Ok(_) => {
-                        self.status = format!("Added {} device(s) to area", self.areas_selected_devices.len());
+                        self.status = format!(
+                            "Added {} device(s) to area",
+                            self.areas_selected_devices.len()
+                        );
                         self.areas_selected_devices.clear();
                         // Refresh to get updated area
                         if let Err(e) = self.refresh_all().await {
@@ -3096,19 +3254,22 @@ impl App {
     }
 
     async fn remove_selected_devices_from_area(&mut self) {
-        if self.areas_selected_devices.is_empty() && matches!(self.areas_pane_focus, AreasPane::AreasList) {
+        if self.areas_selected_devices.is_empty()
+            && matches!(self.areas_pane_focus, AreasPane::AreasList)
+        {
             self.delete_selected_area().await;
             return;
         }
-        
+
         if let Some(area_id) = &self.areas_selected_area_id {
             if let Some(area) = self.areas.iter().find(|a| &a.id == area_id) {
-                let new_device_ids: Vec<String> = area.device_ids
+                let new_device_ids: Vec<String> = area
+                    .device_ids
                     .iter()
                     .filter(|d| !self.areas_selected_devices.contains(*d))
                     .cloned()
                     .collect();
-                
+
                 // Call API to set area devices (now with removed devices)
                 match self.client.set_area_devices(area_id, &new_device_ids).await {
                     Ok(_) => {
@@ -3132,7 +3293,9 @@ impl App {
 
     async fn delete_selected_device(&mut self) {
         let device_id = {
-            let Some(device) = self.selected_device() else { return };
+            let Some(device) = self.selected_device() else {
+                return;
+            };
             device.device_id.clone()
         };
         match self.client.delete_device(&device_id).await {
@@ -3147,7 +3310,9 @@ impl App {
     }
 
     async fn delete_selected_device_switch(&mut self) {
-        let Some(sw) = self.switches.get(self.selected).cloned() else { return };
+        let Some(sw) = self.switches.get(self.selected).cloned() else {
+            return;
+        };
         let id = sw.device_id.clone();
         match self.client.delete_device(&id).await {
             Ok(_) => {
@@ -3162,7 +3327,9 @@ impl App {
     }
 
     async fn delete_selected_device_timer(&mut self) {
-        let Some(t) = self.timers.get(self.selected).cloned() else { return };
+        let Some(t) = self.timers.get(self.selected).cloned() else {
+            return;
+        };
         let id = t.device_id.clone();
         match self.client.delete_device(&id).await {
             Ok(_) => {
@@ -3179,7 +3346,9 @@ impl App {
     // ── Plugin deregister ─────────────────────────────────────────────────────
 
     async fn deregister_selected_plugin(&mut self) {
-        let Some(plugin) = self.plugins.get(self.selected) else { return };
+        let Some(plugin) = self.plugins.get(self.selected) else {
+            return;
+        };
         let id = plugin.plugin_id.clone();
         match self.client.deregister_plugin(&id).await {
             Ok(_) => {
@@ -3196,49 +3365,55 @@ impl App {
 
     fn open_user_editor_create(&mut self) {
         self.user_editor = Some(UserEditor {
-            mode:             UserEditMode::Create,
-            id:               None,
-            field:            UserEditField::Username,
-            username:         String::new(),
+            mode: UserEditMode::Create,
+            id: None,
+            field: UserEditField::Username,
+            username: String::new(),
             current_password: String::new(),
-            password:         String::new(),
+            password: String::new(),
             confirm_password: String::new(),
-            role:             Role::User,
+            role: Role::User,
         });
     }
 
     fn open_user_editor_role(&mut self) {
-        let Some(user) = self.users.get(self.selected) else { return };
+        let Some(user) = self.users.get(self.selected) else {
+            return;
+        };
         self.user_editor = Some(UserEditor {
-            mode:             UserEditMode::EditRole,
-            id:               Some(user.id.clone()),
-            field:            UserEditField::Role,
-            username:         user.username.clone(),
+            mode: UserEditMode::EditRole,
+            id: Some(user.id.clone()),
+            field: UserEditField::Role,
+            username: user.username.clone(),
             current_password: String::new(),
-            password:         String::new(),
+            password: String::new(),
             confirm_password: String::new(),
-            role:             user.role.clone(),
+            role: user.role.clone(),
         });
     }
 
     fn open_user_editor_password(&mut self) {
         // The backend change-password endpoint always operates on the JWT user
         // (the currently logged-in account). Always change your own password here.
-        let Some(u) = self.current_user.clone() else { return };
+        let Some(u) = self.current_user.clone() else {
+            return;
+        };
         self.user_editor = Some(UserEditor {
-            mode:             UserEditMode::ChangePassword,
-            id:               Some(u.id.clone()),
-            field:            UserEditField::CurrentPassword,
-            username:         u.username.clone(),
+            mode: UserEditMode::ChangePassword,
+            id: Some(u.id.clone()),
+            field: UserEditField::CurrentPassword,
+            username: u.username.clone(),
             current_password: String::new(),
-            password:         String::new(),
+            password: String::new(),
             confirm_password: String::new(),
-            role:             Role::User,
+            role: Role::User,
         });
     }
 
     pub async fn on_key_user_editor(&mut self, key: KeyEvent) {
-        let Some(editor) = self.user_editor.as_mut() else { return };
+        let Some(editor) = self.user_editor.as_mut() else {
+            return;
+        };
         match key.code {
             KeyCode::Esc => {
                 self.user_editor = None;
@@ -3247,12 +3422,20 @@ impl App {
             KeyCode::Tab | KeyCode::Down => {
                 editor.field = match (&editor.mode, &editor.field) {
                     (UserEditMode::Create, UserEditField::Username) => UserEditField::Password,
-                    (UserEditMode::Create, UserEditField::Password) => UserEditField::ConfirmPassword,
+                    (UserEditMode::Create, UserEditField::Password) => {
+                        UserEditField::ConfirmPassword
+                    }
                     (UserEditMode::Create, UserEditField::ConfirmPassword) => UserEditField::Role,
                     (UserEditMode::Create, UserEditField::Role) => UserEditField::Username,
-                    (UserEditMode::ChangePassword, UserEditField::CurrentPassword) => UserEditField::Password,
-                    (UserEditMode::ChangePassword, UserEditField::Password) => UserEditField::ConfirmPassword,
-                    (UserEditMode::ChangePassword, UserEditField::ConfirmPassword) => UserEditField::CurrentPassword,
+                    (UserEditMode::ChangePassword, UserEditField::CurrentPassword) => {
+                        UserEditField::Password
+                    }
+                    (UserEditMode::ChangePassword, UserEditField::Password) => {
+                        UserEditField::ConfirmPassword
+                    }
+                    (UserEditMode::ChangePassword, UserEditField::ConfirmPassword) => {
+                        UserEditField::CurrentPassword
+                    }
                     _ => editor.field,
                 };
             }
@@ -3260,40 +3443,56 @@ impl App {
                 editor.field = match (&editor.mode, &editor.field) {
                     (UserEditMode::Create, UserEditField::Username) => UserEditField::Role,
                     (UserEditMode::Create, UserEditField::Password) => UserEditField::Username,
-                    (UserEditMode::Create, UserEditField::ConfirmPassword) => UserEditField::Password,
+                    (UserEditMode::Create, UserEditField::ConfirmPassword) => {
+                        UserEditField::Password
+                    }
                     (UserEditMode::Create, UserEditField::Role) => UserEditField::ConfirmPassword,
-                    (UserEditMode::ChangePassword, UserEditField::CurrentPassword) => UserEditField::ConfirmPassword,
-                    (UserEditMode::ChangePassword, UserEditField::Password) => UserEditField::CurrentPassword,
-                    (UserEditMode::ChangePassword, UserEditField::ConfirmPassword) => UserEditField::Password,
+                    (UserEditMode::ChangePassword, UserEditField::CurrentPassword) => {
+                        UserEditField::ConfirmPassword
+                    }
+                    (UserEditMode::ChangePassword, UserEditField::Password) => {
+                        UserEditField::CurrentPassword
+                    }
+                    (UserEditMode::ChangePassword, UserEditField::ConfirmPassword) => {
+                        UserEditField::Password
+                    }
                     _ => editor.field,
                 };
             }
-            KeyCode::Backspace => {
-                match editor.field {
-                    UserEditField::Username        => { editor.username.pop(); }
-                    UserEditField::CurrentPassword => { editor.current_password.pop(); }
-                    UserEditField::Password        => { editor.password.pop(); }
-                    UserEditField::ConfirmPassword => { editor.confirm_password.pop(); }
-                    UserEditField::Role            => {}
+            KeyCode::Backspace => match editor.field {
+                UserEditField::Username => {
+                    editor.username.pop();
                 }
-            }
+                UserEditField::CurrentPassword => {
+                    editor.current_password.pop();
+                }
+                UserEditField::Password => {
+                    editor.password.pop();
+                }
+                UserEditField::ConfirmPassword => {
+                    editor.confirm_password.pop();
+                }
+                UserEditField::Role => {}
+            },
             KeyCode::Char(' ') if editor.field == UserEditField::Role => {
                 // Cycle role
                 editor.role = match editor.role {
-                    Role::Admin    => Role::User,
-                    Role::User     => Role::ReadOnly,
+                    Role::Admin => Role::User,
+                    Role::User => Role::ReadOnly,
                     Role::ReadOnly => Role::Admin,
                 };
             }
-            KeyCode::Enter => { self.save_user_editor().await; }
+            KeyCode::Enter => {
+                self.save_user_editor().await;
+            }
             KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                 let editor = self.user_editor.as_mut().unwrap();
                 match editor.field {
-                    UserEditField::Username        => editor.username.push(ch),
+                    UserEditField::Username => editor.username.push(ch),
                     UserEditField::CurrentPassword => editor.current_password.push(ch),
-                    UserEditField::Password        => editor.password.push(ch),
+                    UserEditField::Password => editor.password.push(ch),
                     UserEditField::ConfirmPassword => editor.confirm_password.push(ch),
-                    UserEditField::Role            => {}
+                    UserEditField::Role => {}
                 }
             }
             _ => {}
@@ -3301,7 +3500,9 @@ impl App {
     }
 
     async fn save_user_editor(&mut self) {
-        let Some(editor) = self.user_editor.clone() else { return };
+        let Some(editor) = self.user_editor.clone() else {
+            return;
+        };
         match editor.mode {
             UserEditMode::Create => {
                 let username = editor.username.trim().to_string();
@@ -3317,7 +3518,11 @@ impl App {
                     self.error = Some("passwords do not match".to_string());
                     return;
                 }
-                match self.client.create_user(&username, &editor.password, &editor.role).await {
+                match self
+                    .client
+                    .create_user(&username, &editor.password, &editor.role)
+                    .await
+                {
                     Ok(user) => {
                         self.users.push(user);
                         self.user_editor = None;
@@ -3350,7 +3555,11 @@ impl App {
                     self.error = Some("passwords do not match".to_string());
                     return;
                 }
-                match self.client.change_password(&editor.current_password, &editor.password).await {
+                match self
+                    .client
+                    .change_password(&editor.current_password, &editor.password)
+                    .await
+                {
                     Ok(_) => {
                         self.user_editor = None;
                         self.status = format!("Password changed for '{}'", editor.username);
@@ -3362,9 +3571,16 @@ impl App {
     }
 
     async fn delete_selected_user(&mut self) {
-        let Some(user) = self.users.get(self.selected) else { return };
+        let Some(user) = self.users.get(self.selected) else {
+            return;
+        };
         // Guard: cannot delete yourself
-        if self.current_user.as_ref().map(|u| u.id == user.id).unwrap_or(false) {
+        if self
+            .current_user
+            .as_ref()
+            .map(|u| u.id == user.id)
+            .unwrap_or(false)
+        {
             self.error = Some("cannot delete your own account".to_string());
             return;
         }
@@ -3385,7 +3601,7 @@ impl App {
         let Some(scene) = self.scenes.get(self.selected) else {
             return;
         };
-        let scene_id   = scene.id.clone();
+        let scene_id = scene.id.clone();
         let scene_name = scene.name.clone();
         let is_hue_scene = self.devices.iter().any(|d| {
             d.device_id == scene_id
@@ -3455,7 +3671,9 @@ impl App {
     async fn delete_selected_manage_item(&mut self) {
         match self.admin_sub {
             AdminSubPanel::Modes => {
-                let Some(m) = self.modes.get(self.selected).cloned() else { return };
+                let Some(m) = self.modes.get(self.selected).cloned() else {
+                    return;
+                };
                 let id = m.config.id.clone();
                 match self.client.delete_mode(&id).await {
                     Ok(_) => {
@@ -3473,7 +3691,9 @@ impl App {
                 // No delete action for system status panel.
             }
             AdminSubPanel::Users => {
-                let Some(u) = self.users.get(self.selected).cloned() else { return };
+                let Some(u) = self.users.get(self.selected).cloned() else {
+                    return;
+                };
                 let id = u.id.clone();
                 match self.client.delete_user(&id).await {
                     Ok(_) => {
@@ -3494,7 +3714,9 @@ impl App {
     }
 
     async fn on_key_switch_editor(&mut self, key: KeyEvent) {
-        let Some(editor) = self.switch_editor.as_mut() else { return };
+        let Some(editor) = self.switch_editor.as_mut() else {
+            return;
+        };
         match key.code {
             KeyCode::Esc => {
                 self.switch_editor = None;
@@ -3502,18 +3724,24 @@ impl App {
             }
             KeyCode::Tab | KeyCode::BackTab => {
                 editor.field = match editor.field {
-                    SwitchEditField::Id    => SwitchEditField::Label,
+                    SwitchEditField::Id => SwitchEditField::Label,
                     SwitchEditField::Label => SwitchEditField::Id,
                 };
             }
             KeyCode::Backspace => match editor.field {
-                SwitchEditField::Id    => { editor.id.pop(); }
-                SwitchEditField::Label => { editor.label.pop(); }
+                SwitchEditField::Id => {
+                    editor.id.pop();
+                }
+                SwitchEditField::Label => {
+                    editor.label.pop();
+                }
             },
-            KeyCode::Enter => { self.save_switch_editor().await; }
+            KeyCode::Enter => {
+                self.save_switch_editor().await;
+            }
             KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                 match editor.field {
-                    SwitchEditField::Id    => editor.id.push(ch),
+                    SwitchEditField::Id => editor.id.push(ch),
                     SwitchEditField::Label => editor.label.push(ch),
                 }
             }
@@ -3522,13 +3750,19 @@ impl App {
     }
 
     async fn save_switch_editor(&mut self) {
-        let Some(editor) = self.switch_editor.clone() else { return };
+        let Some(editor) = self.switch_editor.clone() else {
+            return;
+        };
         let id = editor.id.trim().to_string();
         if id.is_empty() {
             self.error = Some("switch id cannot be empty".to_string());
             return;
         }
-        let label = if editor.label.trim().is_empty() { editor.id.trim() } else { editor.label.trim() };
+        let label = if editor.label.trim().is_empty() {
+            editor.id.trim()
+        } else {
+            editor.label.trim()
+        };
         match self.client.create_switch(&id, label).await {
             Ok(dev) => {
                 let device_id = dev.device_id.clone();
@@ -3543,7 +3777,9 @@ impl App {
     }
 
     async fn on_key_timer_editor(&mut self, key: KeyEvent) {
-        let Some(editor) = self.timer_editor.as_mut() else { return };
+        let Some(editor) = self.timer_editor.as_mut() else {
+            return;
+        };
         match key.code {
             KeyCode::Esc => {
                 self.timer_editor = None;
@@ -3551,18 +3787,24 @@ impl App {
             }
             KeyCode::Tab | KeyCode::BackTab => {
                 editor.field = match editor.field {
-                    TimerEditField::Id    => TimerEditField::Label,
+                    TimerEditField::Id => TimerEditField::Label,
                     TimerEditField::Label => TimerEditField::Id,
                 };
             }
             KeyCode::Backspace => match editor.field {
-                TimerEditField::Id    => { editor.id.pop(); }
-                TimerEditField::Label => { editor.label.pop(); }
+                TimerEditField::Id => {
+                    editor.id.pop();
+                }
+                TimerEditField::Label => {
+                    editor.label.pop();
+                }
             },
-            KeyCode::Enter => { self.save_timer_editor().await; }
+            KeyCode::Enter => {
+                self.save_timer_editor().await;
+            }
             KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                 match editor.field {
-                    TimerEditField::Id    => editor.id.push(ch),
+                    TimerEditField::Id => editor.id.push(ch),
                     TimerEditField::Label => editor.label.push(ch),
                 }
             }
@@ -3571,13 +3813,19 @@ impl App {
     }
 
     async fn save_timer_editor(&mut self) {
-        let Some(editor) = self.timer_editor.clone() else { return };
+        let Some(editor) = self.timer_editor.clone() else {
+            return;
+        };
         let id = editor.id.trim().to_string();
         if id.is_empty() {
             self.error = Some("timer id cannot be empty".to_string());
             return;
         }
-        let label = if editor.label.trim().is_empty() { editor.id.trim() } else { editor.label.trim() };
+        let label = if editor.label.trim().is_empty() {
+            editor.id.trim()
+        } else {
+            editor.label.trim()
+        };
         match self.client.create_timer(&id, label).await {
             Ok(dev) => {
                 let device_id = dev.device_id.clone();
@@ -3592,7 +3840,9 @@ impl App {
     }
 
     async fn on_key_mode_editor(&mut self, key: KeyEvent) {
-        let Some(editor) = self.mode_editor.as_mut() else { return };
+        let Some(editor) = self.mode_editor.as_mut() else {
+            return;
+        };
         match key.code {
             KeyCode::Esc => {
                 self.mode_editor = None;
@@ -3600,7 +3850,7 @@ impl App {
             }
             KeyCode::Tab | KeyCode::BackTab => {
                 editor.field = match editor.field {
-                    ModeEditField::Id   => ModeEditField::Name,
+                    ModeEditField::Id => ModeEditField::Name,
                     ModeEditField::Name => ModeEditField::Kind,
                     ModeEditField::Kind => ModeEditField::Id,
                 };
@@ -3609,14 +3859,20 @@ impl App {
                 editor.kind = editor.kind.next();
             }
             KeyCode::Backspace => match editor.field {
-                ModeEditField::Id   => { editor.id.pop(); }
-                ModeEditField::Name => { editor.name.pop(); }
+                ModeEditField::Id => {
+                    editor.id.pop();
+                }
+                ModeEditField::Name => {
+                    editor.name.pop();
+                }
                 ModeEditField::Kind => {}
             },
-            KeyCode::Enter => { self.save_mode_editor().await; }
+            KeyCode::Enter => {
+                self.save_mode_editor().await;
+            }
             KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                 match editor.field {
-                    ModeEditField::Id   => editor.id.push(ch),
+                    ModeEditField::Id => editor.id.push(ch),
                     ModeEditField::Name => editor.name.push(ch),
                     ModeEditField::Kind => {}
                 }
@@ -3626,7 +3882,9 @@ impl App {
     }
 
     async fn save_mode_editor(&mut self) {
-        let Some(editor) = self.mode_editor.clone() else { return };
+        let Some(editor) = self.mode_editor.clone() else {
+            return;
+        };
         let id = editor.id.trim().to_string();
         if id.is_empty() {
             self.error = Some("mode id cannot be empty".to_string());
@@ -3636,11 +3894,22 @@ impl App {
             self.error = Some("mode id must start with 'mode_'".to_string());
             return;
         }
-        let name = if editor.name.trim().is_empty() { editor.id.trim() } else { editor.name.trim() };
-        match self.client.create_mode(&id, name, editor.kind.as_str()).await {
+        let name = if editor.name.trim().is_empty() {
+            editor.id.trim()
+        } else {
+            editor.name.trim()
+        };
+        match self
+            .client
+            .create_mode(&id, name, editor.kind.as_str())
+            .await
+        {
             Ok(cfg) => {
                 let cfg_id = cfg.id.clone();
-                self.modes.push(ModeRecord { config: cfg, state: None });
+                self.modes.push(ModeRecord {
+                    config: cfg,
+                    state: None,
+                });
                 self.mode_editor = None;
                 self.error = None;
                 self.status = format!("Created {cfg_id}");
@@ -3675,7 +3944,10 @@ fn is_hidden_in_devices_view(device: &DeviceState) -> bool {
     false
 }
 
-fn is_hidden_in_devices_view_with_context(device: &DeviceState, all_devices: &[DeviceState]) -> bool {
+fn is_hidden_in_devices_view_with_context(
+    device: &DeviceState,
+    all_devices: &[DeviceState],
+) -> bool {
     if is_hidden_in_devices_view(device) {
         return true;
     }
@@ -3685,7 +3957,10 @@ fn is_hidden_in_devices_view_with_context(device: &DeviceState, all_devices: &[D
     let Some(kind) = device.attributes.get("kind").and_then(Value::as_str) else {
         return false;
     };
-    if !matches!(kind, "hue_temperature" | "hue_light_level" | "hue_device_power") {
+    if !matches!(
+        kind,
+        "hue_temperature" | "hue_light_level" | "hue_device_power"
+    ) {
         return false;
     }
 
@@ -3693,11 +3968,7 @@ fn is_hidden_in_devices_view_with_context(device: &DeviceState, all_devices: &[D
         if other.plugin_id != device.plugin_id || other.name != device.name {
             return false;
         }
-        other
-            .attributes
-            .get("kind")
-            .and_then(Value::as_str)
-            == Some("hue_motion")
+        other.attributes.get("kind").and_then(Value::as_str) == Some("hue_motion")
     })
 }
 
@@ -3707,16 +3978,22 @@ fn hue_scenes_from_devices(devices: &[DeviceState]) -> Vec<Scene> {
         .iter()
         .filter(|d| is_scene_device(d))
         .map(|d| {
-            let scene_name = d.attributes.get("name")
+            let scene_name = d
+                .attributes
+                .get("name")
                 .and_then(Value::as_str)
                 .unwrap_or(&d.name)
                 .to_string();
-            let area = d.area.clone()
-                .or_else(|| d.attributes.get("group_name").and_then(Value::as_str).map(str::to_string));
+            let area = d.area.clone().or_else(|| {
+                d.attributes
+                    .get("group_name")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            });
             let active = d.attributes.get("active").and_then(Value::as_bool);
             Scene {
-                id:        d.device_id.clone(),
-                name:      scene_name,
+                id: d.device_id.clone(),
+                name: scene_name,
                 plugin_id: Some(d.plugin_id.clone()),
                 area,
                 active,
@@ -3726,7 +4003,10 @@ fn hue_scenes_from_devices(devices: &[DeviceState]) -> Vec<Scene> {
 }
 
 fn summarize_live_event_detail(event: &Value) -> Option<String> {
-    let event_type = event.get("type").and_then(Value::as_str).unwrap_or("unknown");
+    let event_type = event
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
     match event_type {
         "device_button" => event
             .get("event")
@@ -3753,8 +4033,14 @@ fn summarize_live_event_detail(event: &Value) -> Option<String> {
             }
         }
         "plugin_command_result" => {
-            let operation = event.get("operation").and_then(Value::as_str).unwrap_or("unknown");
-            let success = event.get("success").and_then(Value::as_bool).unwrap_or(false);
+            let operation = event
+                .get("operation")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            let success = event
+                .get("success")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
             let error_code = event.get("error_code").and_then(Value::as_str);
             let latency_ms = event.get("latency_ms").and_then(Value::as_u64);
             let error = event.get("error").and_then(Value::as_str);
@@ -3791,13 +4077,20 @@ fn summarize_live_event_detail(event: &Value) -> Option<String> {
             }
         }
         "bridge_pairing_status" => {
-            let phase = event.get("phase").and_then(Value::as_str).unwrap_or("unknown");
+            let phase = event
+                .get("phase")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
             let success = event.get("success").and_then(Value::as_bool);
             let error = event.get("error").and_then(Value::as_str);
 
             let mut parts = vec![format!("phase={phase}")];
             if let Some(v) = success {
-                parts.push(if v { "success".to_string() } else { "failed".to_string() });
+                parts.push(if v {
+                    "success".to_string()
+                } else {
+                    "failed".to_string()
+                });
             }
             if let Some(msg) = error {
                 let msg_short = if msg.len() > 30 {
@@ -3831,10 +4124,14 @@ fn summarize_live_event_detail(event: &Value) -> Option<String> {
 
             let mut parts = Vec::new();
             if let (Some(f), Some(a), Some(r)) = (fallback, applied, ratio) {
-                parts.push(format!("fallback={f} incremental={a} fallback_ratio={r:.2}%"));
+                parts.push(format!(
+                    "fallback={f} incremental={a} fallback_ratio={r:.2}%"
+                ));
             }
             if let (Some(f), Some(a), Some(r)) = (recent_fallback, recent_applied, recent_ratio) {
-                parts.push(format!("recent_fallback={f} recent_incremental={a} recent_ratio={r:.2}%"));
+                parts.push(format!(
+                    "recent_fallback={f} recent_incremental={a} recent_ratio={r:.2}%"
+                ));
             }
 
             if parts.is_empty() {
@@ -4059,7 +4356,10 @@ pub fn format_timestamp_utc(ts: &str, utc: bool) -> String {
     if utc {
         // Show as UTC with date+time
         if let Ok(dt) = DateTime::parse_from_rfc3339(ts) {
-            return dt.with_timezone(&Utc).format("%Y-%m-%d %H:%M:%S UTC").to_string();
+            return dt
+                .with_timezone(&Utc)
+                .format("%Y-%m-%d %H:%M:%S UTC")
+                .to_string();
         }
     } else {
         // Show as local time (time only for brevity)
@@ -4174,5 +4474,23 @@ mod tests {
         };
         assert!(!app.automation_matches_filter(&rule_ok));
         assert!(app.automation_matches_filter(&rule_stale));
+    }
+
+    #[test]
+    fn test_device_search_matches_canonical_name() {
+        let mut app = test_app();
+        app.device_search_query = "living_room.floor_lamp".to_string();
+        app.devices.push(DeviceState {
+            device_id: "light_living".to_string(),
+            canonical_name: Some("living_room.floor_lamp".to_string()),
+            name: "Living Floor Lamp".to_string(),
+            plugin_id: "plugin.hue".to_string(),
+            area: Some("Living Room".to_string()),
+            available: true,
+            attributes: serde_json::Map::new(),
+            last_seen: "2026-03-21T00:00:00Z".to_string(),
+        });
+
+        assert_eq!(app.visible_devices().len(), 1);
     }
 }

@@ -16,6 +16,7 @@ It is built with:
   - `admin`: all of the above + users + plugins
 - Device control:
   - Toggle selected device `on` state
+  - View and edit device `canonical_name` alongside name and area
 - Scene control:
   - Activate selected scene
 - Data views:
@@ -34,6 +35,7 @@ It is built with:
 - Live updates:
   - Connects to `/api/v1/events/stream?token=...` via WebSocket
   - Applies device state/availability/name changes in real time
+  - Device search matches display names, raw `device_id`, and `canonical_name`
 
 ## Run
 
@@ -64,6 +66,7 @@ cargo run -- --base-url http://127.0.0.1:8080 --cache-dir ./cache
   - `r` refresh data
   - `q` quit
   - `t` toggle selected device (Devices tab)
+  - `e` edit selected device metadata including canonical name (Devices tab, admin)
   - `a` activate selected scene (Scenes tab)
 
 - Manage > Matter (admin):
