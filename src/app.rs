@@ -777,6 +777,12 @@ impl App {
         tabs[self.tab.min(tabs.len().saturating_sub(1))]
     }
 
+    pub fn wants_log_stream(&self) -> bool {
+        self.authenticated
+            && matches!(self.active_tab(), Tab::Manage)
+            && matches!(self.admin_sub, AdminSubPanel::Logs)
+    }
+
     pub fn is_admin(&self) -> bool {
         self.current_user
             .as_ref()

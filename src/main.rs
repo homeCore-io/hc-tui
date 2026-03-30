@@ -111,16 +111,6 @@ async fn run_app(
         if let Some(token) = app.ws_token() {
             spawn_events_stream(app.ws_endpoint(), token.clone(), ws_tx.clone());
             ws_started = true;
-            // Start log stream too
-            let log_url = app.ws_logs_endpoint();
-            spawn_log_stream(
-                log_url,
-                token,
-                "INFO".to_string(),
-                String::new(),
-                ws_tx.clone(),
-            );
-            log_ws_started = true;
         }
     }
 
@@ -193,14 +183,6 @@ async fn run_app(
                             ws_started = true;
                         }
                     }
-                    if app.authenticated && !log_ws_started {
-                        if let Some(token) = app.ws_token() {
-                            let log_url = app.ws_logs_endpoint();
-                            let level = app.log_level_filter.as_str().to_string();
-                            spawn_log_stream(log_url, token, level, String::new(), ws_tx.clone());
-                            log_ws_started = true;
-                        }
-                    }
                 }
                 AsyncMsg::LoginFinished(Err(error)) => app.apply_login_failure(error),
                 AsyncMsg::LoginPhaseSynthesizing => app.set_login_phase_synthesizing(),
@@ -209,6 +191,16 @@ async fn run_app(
         }
         if saw_async_update {
             needs_draw = true;
+        }
+
+        if app.wants_log_stream() && !log_ws_started {
+            if let Some(token) = app.ws_token() {
+                let log_url = app.ws_logs_endpoint();
+                let level = app.log_level_filter.as_str().to_string();
+                spawn_log_stream(log_url, token, level, String::new(), ws_tx.clone());
+                log_ws_started = true;
+                needs_draw = true;
+            }
         }
 
         if event::poll(Duration::from_millis(100))? {
