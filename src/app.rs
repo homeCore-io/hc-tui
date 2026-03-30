@@ -876,8 +876,12 @@ impl App {
 
     pub async fn refresh_all(&mut self) -> Result<()> {
         self.status = "Refreshing...".to_string();
+        let mut warnings = Vec::new();
         self.devices = self.client.list_devices().await?;
-        self.dashboards = self.client.list_dashboards().await.unwrap_or_default();
+        match self.client.list_dashboards().await {
+            Ok(dashboards) => self.dashboards = dashboards,
+            Err(err) => warnings.push(format!("dashboards: {err}")),
+        }
         let mut scenes = self.client.list_scenes().await?;
         scenes.extend(hue_scenes_from_devices(&self.devices));
         self.scenes = scenes;
@@ -897,7 +901,11 @@ impl App {
         }
         self.save_to_cache().await?;
         self.clamp_selection();
-        self.status = "Data refreshed and cached".to_string();
+        self.status = if warnings.is_empty() {
+            "Data refreshed and cached".to_string()
+        } else {
+            format!("Data refreshed with warnings: {}", warnings.join(" | "))
+        };
         Ok(())
     }
 
@@ -4940,12 +4948,12 @@ pub async fn login_workflow_from_auth(
 
     let fetched = fetch_remote_snapshot(&client, auth.user.role.clone()).await;
     match fetched {
-        Ok(snapshot) => {
+        Ok((snapshot, warning)) => {
             cache.save_snapshot(&auth.user.username, &snapshot).await?;
             Ok(LoginWorkflowResult {
                 auth,
                 snapshot,
-                warning: None,
+                warning,
             })
         }
         Err(err) => {
@@ -4962,9 +4970,19 @@ pub async fn login_workflow_from_auth(
     }
 }
 
-async fn fetch_remote_snapshot(client: &HomeCoreClient, role: Role) -> Result<CacheSnapshot> {
+async fn fetch_remote_snapshot(
+    client: &HomeCoreClient,
+    role: Role,
+) -> Result<(CacheSnapshot, Option<String>)> {
     let devices = client.list_devices().await.unwrap_or_default();
-    let dashboards = client.list_dashboards().await.unwrap_or_default();
+    let mut warnings = Vec::new();
+    let dashboards = match client.list_dashboards().await {
+        Ok(dashboards) => dashboards,
+        Err(err) => {
+            warnings.push(format!("dashboards: {err}"));
+            Vec::new()
+        }
+    };
     let mut scenes = client.list_scenes().await.unwrap_or_default();
     scenes.extend(hue_scenes_from_devices(&devices));
     let areas = client.list_areas().await.unwrap_or_default();
@@ -4982,19 +5000,26 @@ async fn fetch_remote_snapshot(client: &HomeCoreClient, role: Role) -> Result<Ca
         (Vec::new(), Vec::new())
     };
 
-    Ok(CacheSnapshot {
-        devices,
-        dashboards,
-        scenes,
-        areas,
-        automations,
-        events,
-        users,
-        plugins,
-        switches,
-        timers,
-        modes,
-    })
+    Ok((
+        CacheSnapshot {
+            devices,
+            dashboards,
+            scenes,
+            areas,
+            automations,
+            events,
+            users,
+            plugins,
+            switches,
+            timers,
+            modes,
+        },
+        if warnings.is_empty() {
+            None
+        } else {
+            Some(warnings.join(" | "))
+        },
+    ))
 }
 
 fn snapshot_is_empty(snapshot: &CacheSnapshot) -> bool {

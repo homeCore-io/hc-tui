@@ -228,6 +228,20 @@ pub struct Dashboard {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+struct NestedDashboardResponse {
+    pub dashboard: Dashboard,
+    #[serde(default)]
+    pub is_default: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+enum DashboardListResponseItem {
+    Flat(Dashboard),
+    Nested(NestedDashboardResponse),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MatterNode {
     pub node_id: String,
     pub commissioned_at_unix: u64,
@@ -542,7 +556,7 @@ impl HomeCoreClient {
 
     pub async fn list_dashboards(&self) -> Result<Vec<Dashboard>> {
         let resp = self.request(Method::GET, "/dashboards").await?;
-        Self::parse_json(resp).await
+        Self::parse_dashboards_response(resp).await
     }
 
     pub async fn create_mode(&self, id: &str, name: &str, kind: &str) -> Result<ModeConfig> {
@@ -768,6 +782,50 @@ impl HomeCoreClient {
         }
         let message = Self::extract_error_message(resp).await;
         Err(anyhow!("{}: {}", status, message))
+    }
+
+    async fn parse_dashboards_response(resp: Response) -> Result<Vec<Dashboard>> {
+        let status = resp.status();
+        if !status.is_success() {
+            let message = Self::extract_error_message(resp).await;
+            return Err(anyhow!("{}: {}", status, message));
+        }
+
+        let text = resp
+            .text()
+            .await
+            .context("failed to read dashboards response body")?;
+        let parsed = serde_json::from_str::<Value>(&text).with_context(|| {
+            let snippet = text.chars().take(300).collect::<String>();
+            format!("failed to parse dashboards json: {snippet}")
+        })?;
+        let items = match parsed {
+            Value::Array(items) => items,
+            Value::Object(mut obj) => obj
+                .remove("dashboards")
+                .and_then(|value| value.as_array().cloned())
+                .ok_or_else(|| anyhow!("dashboards payload was not a JSON array"))?,
+            _ => {
+                return Err(anyhow!(
+                    "dashboards payload was not a JSON array or object wrapper"
+                ));
+            }
+        };
+
+        items.into_iter().map(Self::decode_dashboard_item).collect()
+    }
+
+    fn decode_dashboard_item(value: Value) -> Result<Dashboard> {
+        match serde_json::from_value::<DashboardListResponseItem>(value.clone()) {
+            Ok(DashboardListResponseItem::Flat(dashboard)) => Ok(dashboard),
+            Ok(DashboardListResponseItem::Nested(mut response)) => {
+                response.dashboard.is_default = response.is_default;
+                Ok(response.dashboard)
+            }
+            Err(err) => Err(anyhow!(
+                "failed to decode dashboard item: {err}; payload={value}"
+            )),
+        }
     }
 
     async fn parse_empty(resp: Response) -> Result<()> {
@@ -1210,5 +1268,54 @@ fn summarize_event_detail(
             }
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn dashboard_decoder_accepts_flat_and_nested_shapes() {
+        let flat = json!({
+            "id": "starter_getting_started",
+            "name": "Getting Started",
+            "description": "Starter dashboard",
+            "owner_user_id": "user_1",
+            "visibility": "private",
+            "tags": ["starter"],
+            "icon": "home",
+            "created_at": "2026-03-30T00:00:00Z",
+            "updated_at": "2026-03-30T00:00:00Z",
+            "widgets": [],
+            "layouts": [],
+            "is_default": true
+        });
+        let nested = json!({
+            "dashboard": {
+                "id": "starter_getting_started",
+                "name": "Getting Started",
+                "description": "Starter dashboard",
+                "owner_user_id": "user_1",
+                "visibility": "private",
+                "tags": ["starter"],
+                "icon": "home",
+                "created_at": "2026-03-30T00:00:00Z",
+                "updated_at": "2026-03-30T00:00:00Z",
+                "widgets": [],
+                "layouts": []
+            },
+            "is_default": true
+        });
+
+        let flat_dashboard = HomeCoreClient::decode_dashboard_item(flat).expect("flat dashboard");
+        let nested_dashboard =
+            HomeCoreClient::decode_dashboard_item(nested).expect("nested dashboard");
+
+        assert_eq!(flat_dashboard.id, "starter_getting_started");
+        assert!(flat_dashboard.is_default);
+        assert_eq!(nested_dashboard.id, "starter_getting_started");
+        assert!(nested_dashboard.is_default);
     }
 }

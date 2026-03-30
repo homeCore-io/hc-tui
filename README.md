@@ -58,6 +58,7 @@ cargo run -- --base-url http://127.0.0.1:8080 --cache-dir ./cache
 - Real-time device status comes from WebSocket events. If the stream drops, the TUI auto-reconnects.
 - The terminal redraw path is event-driven during normal use, so idle screens should not continuously repaint or burn CPU. The login screen still animates while an authentication/sync is in progress.
 - The live log WebSocket is opened only when the `Manage > Logs` panel is actually used.
+- Dashboard sync now accepts both flat and wrapped dashboard API response shapes. If dashboard fetch fails during login or refresh, the TUI keeps working and reports the dashboard-specific warning in the status line instead of silently showing an empty dashboard list.
 
 ## Key Bindings
 
