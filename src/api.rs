@@ -48,6 +48,8 @@ pub struct DeviceState {
     pub canonical_name: Option<String>,
     pub name: String,
     pub plugin_id: String,
+    #[serde(default)]
+    pub device_type: Option<String>,
     pub area: Option<String>,
     pub available: bool,
     pub attributes: Map<String, Value>,
@@ -819,6 +821,10 @@ impl HomeCoreClient {
                 .and_then(Value::as_str)
                 .unwrap_or("unknown")
                 .to_string();
+            let device_type = obj
+                .get("device_type")
+                .and_then(Value::as_str)
+                .map(ToString::to_string);
             let area = obj
                 .get("area")
                 .or_else(|| obj.get("room"))
@@ -845,6 +851,7 @@ impl HomeCoreClient {
                 canonical_name,
                 name,
                 plugin_id,
+                device_type,
                 area,
                 available,
                 attributes,

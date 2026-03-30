@@ -183,7 +183,7 @@ fn status_hints(app: &App) -> Vec<&'static str> {
             match app.device_sub {
                 DeviceSubPanel::All => {
                     hints.push("Spc toggle");
-                    hints.push("t on/off");
+                    hints.push("t toggle");
                     hints.push("+/- brightness");
                     hints.push("l/u lock");
                     hints.push("v grouped/flat");

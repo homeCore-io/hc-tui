@@ -450,6 +450,30 @@ pub enum LoginPhase {
 }
 
 impl App {
+    fn is_media_player(device: &DeviceState) -> bool {
+        device.device_type.as_deref() == Some("media_player")
+            || device.attributes.get("kind").and_then(Value::as_str) == Some("media_player")
+    }
+
+    fn media_player_toggle_action(device: &DeviceState) -> Option<&'static str> {
+        if !Self::is_media_player(device) {
+            return None;
+        }
+
+        let state = device
+            .attributes
+            .get("state")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+
+        if matches!(state.as_str(), "playing" | "buffering") {
+            Some("stop")
+        } else {
+            Some("play")
+        }
+    }
+
     pub fn new(base_url: String, cache: CacheStore) -> Self {
         Self {
             client: HomeCoreClient::new(base_url),
@@ -2818,7 +2842,7 @@ impl App {
     }
 
     async fn toggle_selected_device(&mut self) {
-        let (device_id, device_name, current_on) = {
+        let (device_id, device_name, current_on, media_action) = {
             let Some(device) = self.selected_device() else {
                 return;
             };
@@ -2827,8 +2851,41 @@ impl App {
                 .get("on")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
-            (device.device_id.clone(), device.name.clone(), on)
+            (
+                device.device_id.clone(),
+                device.name.clone(),
+                on,
+                Self::media_player_toggle_action(device),
+            )
         };
+
+        if let Some(action) = media_action {
+            match self.client.send_device_action(&device_id, action).await {
+                Ok(_) => {
+                    self.status = format!(
+                        "{} → {}",
+                        device_name,
+                        if action == "play" { "Play" } else { "Stop" }
+                    );
+                }
+                Err(stop_err) if action == "stop" => {
+                    match self.client.send_device_action(&device_id, "pause").await {
+                        Ok(_) => {
+                            self.status = format!("{} → Pause", device_name);
+                        }
+                        Err(pause_err) => {
+                            self.error = Some(format!(
+                                "stop failed: {}; pause fallback failed: {}",
+                                stop_err, pause_err
+                            ));
+                        }
+                    }
+                }
+                Err(err) => self.error = Some(err.to_string()),
+            }
+            return;
+        }
+
         match self.client.set_device_on(&device_id, !current_on).await {
             Ok(_) => {
                 self.status = format!(
@@ -2914,6 +2971,33 @@ impl App {
         };
         let device_id = device.device_id.clone();
         let device_name = device.name.clone();
+
+        if let Some(action) = Self::media_player_toggle_action(device) {
+            match self.client.send_device_action(&device_id, action).await {
+                Ok(_) => {
+                    self.status = format!(
+                        "{} → {}",
+                        device_name,
+                        if action == "play" { "Play" } else { "Stop" }
+                    );
+                }
+                Err(stop_err) if action == "stop" => {
+                    match self.client.send_device_action(&device_id, "pause").await {
+                        Ok(_) => {
+                            self.status = format!("{} → Pause", device_name);
+                        }
+                        Err(pause_err) => {
+                            self.error = Some(format!(
+                                "stop failed: {}; pause fallback failed: {}",
+                                stop_err, pause_err
+                            ));
+                        }
+                    }
+                }
+                Err(err) => self.error = Some(err.to_string()),
+            }
+            return;
+        }
 
         if let Some(locked) = Self::device_lock_state(device) {
             let new_locked = !locked;
@@ -4485,6 +4569,7 @@ mod tests {
             canonical_name: Some("living_room.floor_lamp".to_string()),
             name: "Living Floor Lamp".to_string(),
             plugin_id: "plugin.hue".to_string(),
+            device_type: Some("light".to_string()),
             area: Some("Living Room".to_string()),
             available: true,
             attributes: serde_json::Map::new(),
@@ -4492,5 +4577,45 @@ mod tests {
         });
 
         assert_eq!(app.visible_devices().len(), 1);
+    }
+
+    #[test]
+    fn test_media_player_toggle_action_prefers_stop_when_playing() {
+        let mut attributes = serde_json::Map::new();
+        attributes.insert("state".to_string(), Value::String("playing".to_string()));
+
+        let device = DeviceState {
+            device_id: "sonos_living".to_string(),
+            canonical_name: None,
+            name: "Living Room".to_string(),
+            plugin_id: "plugin.sonos".to_string(),
+            device_type: Some("media_player".to_string()),
+            area: None,
+            available: true,
+            attributes,
+            last_seen: String::new(),
+        };
+
+        assert_eq!(App::media_player_toggle_action(&device), Some("stop"));
+    }
+
+    #[test]
+    fn test_media_player_toggle_action_prefers_play_when_idle() {
+        let mut attributes = serde_json::Map::new();
+        attributes.insert("state".to_string(), Value::String("paused".to_string()));
+
+        let device = DeviceState {
+            device_id: "sonos_living".to_string(),
+            canonical_name: None,
+            name: "Living Room".to_string(),
+            plugin_id: "plugin.sonos".to_string(),
+            device_type: Some("media_player".to_string()),
+            area: None,
+            available: true,
+            attributes,
+            last_seen: String::new(),
+        };
+
+        assert_eq!(App::media_player_toggle_action(&device), Some("play"));
     }
 }
