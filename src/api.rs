@@ -177,6 +177,57 @@ pub struct ModeRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DashboardWidgetType {
+    DeviceGrid,
+    DeviceList,
+    DeviceTile,
+    StatSummary,
+    ModeChips,
+    SceneRow,
+    EventFeed,
+    HistoryChart,
+    MediaPlayer,
+    CameraVideo,
+    WebEmbed,
+    Markdown,
+    DashboardLink,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DashboardWidget {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub widget_type: DashboardWidgetType,
+    pub title: String,
+    #[serde(default)]
+    pub subtitle: Option<String>,
+    #[serde(default)]
+    pub config: Map<String, Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Dashboard {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    pub owner_user_id: String,
+    pub visibility: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    pub icon: String,
+    #[serde(default)]
+    pub created_at: String,
+    #[serde(default)]
+    pub updated_at: String,
+    #[serde(default)]
+    pub widgets: Vec<DashboardWidget>,
+    #[serde(default)]
+    pub is_default: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MatterNode {
     pub node_id: String,
     pub commissioned_at_unix: u64,
@@ -486,6 +537,11 @@ impl HomeCoreClient {
 
     pub async fn list_modes(&self) -> Result<Vec<ModeRecord>> {
         let resp = self.request(Method::GET, "/modes").await?;
+        Self::parse_json(resp).await
+    }
+
+    pub async fn list_dashboards(&self) -> Result<Vec<Dashboard>> {
+        let resp = self.request(Method::GET, "/dashboards").await?;
         Self::parse_json(resp).await
     }
 

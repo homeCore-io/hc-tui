@@ -33,7 +33,9 @@ pub struct ServerConfig {
 
 impl Default for ServerConfig {
     fn default() -> Self {
-        Self { base_url: "http://127.0.0.1:8080".to_string() }
+        Self {
+            base_url: "http://127.0.0.1:8080".to_string(),
+        }
     }
 }
 
@@ -44,7 +46,9 @@ pub struct CacheConfig {
 
 impl Default for CacheConfig {
     fn default() -> Self {
-        Self { dir: "./cache".to_string() }
+        Self {
+            dir: "./cache".to_string(),
+        }
     }
 }
 
@@ -58,11 +62,15 @@ pub struct SessionConfig {
 
 impl Default for SessionConfig {
     fn default() -> Self {
-        Self { persist_token: true }
+        Self {
+            persist_token: true,
+        }
     }
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct AutoLoginConfig {
@@ -84,7 +92,6 @@ impl Config {
         }
         let text = std::fs::read_to_string(path)
             .with_context(|| format!("failed to read {}", path.display()))?;
-        toml::from_str(&text)
-            .with_context(|| format!("failed to parse {}", path.display()))
+        toml::from_str(&text).with_context(|| format!("failed to parse {}", path.display()))
     }
 }

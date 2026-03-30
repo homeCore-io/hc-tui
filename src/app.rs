@@ -1,6 +1,7 @@
 use crate::api::{
-    Area, DeviceState, EventEntry, HomeCoreClient, LogLine, LoginResponse, MatterNode, ModeRecord,
-    PluginRecord, Role, Rule, RuleFiring, RuleGroup, Scene, SystemStatus, UserInfo,
+    Area, Dashboard, DashboardWidgetType, DeviceState, EventEntry, HomeCoreClient, LogLine,
+    LoginResponse, MatterNode, ModeRecord, PluginRecord, Role, Rule, RuleFiring, RuleGroup, Scene,
+    SystemStatus, UserInfo,
 };
 use crate::cache::{CacheSnapshot, CacheStore};
 use anyhow::Result;
@@ -367,6 +368,7 @@ pub enum AutomationFilterField {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Devices,
+    Dashboards,
     Scenes,
     Areas,
     Automations,
@@ -378,6 +380,7 @@ impl Tab {
     pub fn title(self) -> &'static str {
         match self {
             Self::Devices => "Devices",
+            Self::Dashboards => "Dashboards",
             Self::Scenes => "Scenes",
             Self::Areas => "Areas",
             Self::Automations => "Automations",
@@ -406,6 +409,7 @@ pub struct App {
     pub plugin_detail_plugin_id: Option<String>,
     pub plugin_detail_panel: PluginDetailPanel,
     pub devices: Vec<DeviceState>,
+    pub dashboards: Vec<Dashboard>,
     pub scenes: Vec<Scene>,
     pub areas: Vec<Area>,
     pub automations: Vec<Rule>,
@@ -682,6 +686,7 @@ impl App {
             plugin_detail_plugin_id: None,
             plugin_detail_panel: PluginDetailPanel::Overview,
             devices: Vec::new(),
+            dashboards: Vec::new(),
             scenes: Vec::new(),
             areas: Vec::new(),
             automations: Vec::new(),
@@ -753,7 +758,13 @@ impl App {
     }
 
     pub fn tabs(&self) -> Vec<Tab> {
-        let mut tabs = vec![Tab::Devices, Tab::Scenes, Tab::Areas, Tab::Automations];
+        let mut tabs = vec![
+            Tab::Devices,
+            Tab::Dashboards,
+            Tab::Scenes,
+            Tab::Areas,
+            Tab::Automations,
+        ];
         if self.is_admin() {
             tabs.push(Tab::Plugins);
         }
@@ -860,6 +871,7 @@ impl App {
     pub async fn refresh_all(&mut self) -> Result<()> {
         self.status = "Refreshing...".to_string();
         self.devices = self.client.list_devices().await?;
+        self.dashboards = self.client.list_dashboards().await.unwrap_or_default();
         let mut scenes = self.client.list_scenes().await?;
         scenes.extend(hue_scenes_from_devices(&self.devices));
         self.scenes = scenes;
@@ -896,6 +908,7 @@ impl App {
     fn snapshot(&self) -> CacheSnapshot {
         CacheSnapshot {
             devices: self.devices.clone(),
+            dashboards: self.dashboards.clone(),
             scenes: self.scenes.clone(),
             areas: self.areas.clone(),
             automations: self.automations.clone(),
@@ -910,6 +923,7 @@ impl App {
 
     fn apply_snapshot(&mut self, snapshot: CacheSnapshot) {
         self.devices = snapshot.devices;
+        self.dashboards = snapshot.dashboards;
         self.scenes = snapshot.scenes;
         self.areas = snapshot.areas;
         self.automations = snapshot.automations;
@@ -3046,6 +3060,7 @@ impl App {
                 DeviceSubPanel::Switches => self.switches.len(),
                 DeviceSubPanel::Timers => self.timers.len(),
             },
+            Tab::Dashboards => self.dashboards.len(),
             Tab::Scenes => self.scenes.len(),
             Tab::Areas => self.areas.len(),
             Tab::Automations => self.visible_automations().len(),
@@ -3068,6 +3083,169 @@ impl App {
         } else if self.selected >= len {
             self.selected = len - 1;
         }
+    }
+
+    pub fn selected_dashboard(&self) -> Option<&Dashboard> {
+        self.dashboards.get(self.selected)
+    }
+
+    pub fn dashboard_widget_preview(&self, dashboard: &Dashboard, limit: usize) -> Vec<String> {
+        dashboard
+            .widgets
+            .iter()
+            .take(limit)
+            .map(|widget| match widget.widget_type {
+                DashboardWidgetType::StatSummary => format!(
+                    "{}: devices={} on={} offline={}",
+                    widget.title,
+                    self.devices.len(),
+                    self.devices
+                        .iter()
+                        .filter(|device| {
+                            device
+                                .attributes
+                                .get("on")
+                                .and_then(Value::as_bool)
+                                .unwrap_or(false)
+                        })
+                        .count(),
+                    self.devices
+                        .iter()
+                        .filter(|device| !device.available)
+                        .count()
+                ),
+                DashboardWidgetType::DeviceGrid
+                | DashboardWidgetType::DeviceList
+                | DashboardWidgetType::DeviceTile => format!(
+                    "{}: {} device entries",
+                    widget.title,
+                    self.dashboard_widget_device_count(widget)
+                ),
+                DashboardWidgetType::SceneRow => {
+                    format!("{}: {} scenes available", widget.title, self.scenes.len())
+                }
+                DashboardWidgetType::ModeChips => {
+                    format!("{}: {} modes available", widget.title, self.modes.len())
+                }
+                DashboardWidgetType::EventFeed => {
+                    format!(
+                        "{}: {} recent events cached",
+                        widget.title,
+                        self.events.len()
+                    )
+                }
+                DashboardWidgetType::MediaPlayer => format!(
+                    "{}: {} media players",
+                    widget.title,
+                    self.visible_media_players().len()
+                ),
+                DashboardWidgetType::Markdown => widget
+                    .config
+                    .get("markdown")
+                    .and_then(Value::as_str)
+                    .map(|text| {
+                        let compact = text.replace('\n', " ");
+                        let preview = compact.chars().take(72).collect::<String>();
+                        format!("{}: {}", widget.title, preview)
+                    })
+                    .unwrap_or_else(|| format!("{}: notes", widget.title)),
+                DashboardWidgetType::DashboardLink => format!(
+                    "{}: {} linked dashboards",
+                    widget.title,
+                    widget
+                        .config
+                        .get("dashboard_ids")
+                        .and_then(Value::as_array)
+                        .map(|items| items.len())
+                        .unwrap_or(self.dashboards.len())
+                ),
+                DashboardWidgetType::HistoryChart => format!("{}: history chart", widget.title),
+                DashboardWidgetType::CameraVideo => {
+                    format!("{}: camera/video source", widget.title)
+                }
+                DashboardWidgetType::WebEmbed => format!("{}: embedded web content", widget.title),
+            })
+            .collect()
+    }
+
+    fn dashboard_widget_device_count(&self, widget: &crate::api::DashboardWidget) -> usize {
+        let selection_mode = widget
+            .config
+            .get("selection_mode")
+            .and_then(Value::as_str)
+            .unwrap_or("query");
+        let devices = match selection_mode {
+            "manual" => {
+                let ids: HashSet<String> = widget
+                    .config
+                    .get("device_ids")
+                    .and_then(Value::as_array)
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .map(|item| item.to_string())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                self.devices
+                    .iter()
+                    .filter(|device| ids.contains(&device.device_id))
+                    .collect::<Vec<_>>()
+            }
+            "area" => {
+                let area = widget
+                    .config
+                    .get("area_name")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                self.devices
+                    .iter()
+                    .filter(|device| {
+                        device
+                            .area
+                            .as_deref()
+                            .map(|value| value.eq_ignore_ascii_case(area))
+                            .unwrap_or(false)
+                    })
+                    .collect::<Vec<_>>()
+            }
+            _ => {
+                let query = widget
+                    .config
+                    .get("query")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_lowercase();
+                self.devices
+                    .iter()
+                    .filter(|device| {
+                        query.is_empty()
+                            || device.name.to_lowercase().contains(&query)
+                            || device.device_id.to_lowercase().contains(&query)
+                            || device
+                                .canonical_name
+                                .as_deref()
+                                .map(|value| value.to_lowercase().contains(&query))
+                                .unwrap_or(false)
+                            || device
+                                .device_type
+                                .as_deref()
+                                .map(|value| value.to_lowercase().contains(&query))
+                                .unwrap_or(false)
+                    })
+                    .collect::<Vec<_>>()
+            }
+        };
+
+        let limit = widget
+            .config
+            .get("limit")
+            .and_then(Value::as_u64)
+            .map(|value| value as usize);
+        limit
+            .map(|limit| devices.len().min(limit))
+            .unwrap_or(devices.len())
     }
 
     async fn toggle_selected_device(&mut self) {
@@ -4780,6 +4958,7 @@ pub async fn login_workflow_from_auth(
 
 async fn fetch_remote_snapshot(client: &HomeCoreClient, role: Role) -> Result<CacheSnapshot> {
     let devices = client.list_devices().await.unwrap_or_default();
+    let dashboards = client.list_dashboards().await.unwrap_or_default();
     let mut scenes = client.list_scenes().await.unwrap_or_default();
     scenes.extend(hue_scenes_from_devices(&devices));
     let areas = client.list_areas().await.unwrap_or_default();
@@ -4799,6 +4978,7 @@ async fn fetch_remote_snapshot(client: &HomeCoreClient, role: Role) -> Result<Ca
 
     Ok(CacheSnapshot {
         devices,
+        dashboards,
         scenes,
         areas,
         automations,
@@ -4813,6 +4993,7 @@ async fn fetch_remote_snapshot(client: &HomeCoreClient, role: Role) -> Result<Ca
 
 fn snapshot_is_empty(snapshot: &CacheSnapshot) -> bool {
     snapshot.devices.is_empty()
+        && snapshot.dashboards.is_empty()
         && snapshot.scenes.is_empty()
         && snapshot.areas.is_empty()
         && snapshot.automations.is_empty()

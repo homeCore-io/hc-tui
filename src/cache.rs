@@ -1,4 +1,6 @@
-use crate::api::{Area, DeviceState, EventEntry, ModeRecord, PluginRecord, Rule, UserInfo};
+use crate::api::{
+    Area, Dashboard, DeviceState, EventEntry, ModeRecord, PluginRecord, Rule, UserInfo,
+};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -29,6 +31,8 @@ pub struct CacheSnapshot {
     pub timers: Vec<DeviceState>,
     #[serde(default)]
     pub modes: Vec<ModeRecord>,
+    #[serde(default)]
+    pub dashboards: Vec<Dashboard>,
 }
 
 #[derive(Clone)]
@@ -47,16 +51,28 @@ impl CacheStore {
             .await
             .with_context(|| format!("failed to create cache directory {}", dir.display()))?;
 
-        self.write_json(dir.join("devices.json"), &snapshot.devices).await?;
-        self.write_json(dir.join("scenes.json"), &snapshot.scenes).await?;
-        self.write_json(dir.join("areas.json"), &snapshot.areas).await?;
-        self.write_json(dir.join("automations.json"), &snapshot.automations).await?;
-        self.write_json(dir.join("events.json"), &snapshot.events).await?;
-        self.write_json(dir.join("users.json"), &snapshot.users).await?;
-        self.write_json(dir.join("plugins.json"), &snapshot.plugins).await?;
-        self.write_json(dir.join("switches.json"), &snapshot.switches).await?;
-        self.write_json(dir.join("timers.json"), &snapshot.timers).await?;
-        self.write_json(dir.join("modes.json"), &snapshot.modes).await?;
+        self.write_json(dir.join("devices.json"), &snapshot.devices)
+            .await?;
+        self.write_json(dir.join("scenes.json"), &snapshot.scenes)
+            .await?;
+        self.write_json(dir.join("areas.json"), &snapshot.areas)
+            .await?;
+        self.write_json(dir.join("automations.json"), &snapshot.automations)
+            .await?;
+        self.write_json(dir.join("events.json"), &snapshot.events)
+            .await?;
+        self.write_json(dir.join("users.json"), &snapshot.users)
+            .await?;
+        self.write_json(dir.join("plugins.json"), &snapshot.plugins)
+            .await?;
+        self.write_json(dir.join("switches.json"), &snapshot.switches)
+            .await?;
+        self.write_json(dir.join("timers.json"), &snapshot.timers)
+            .await?;
+        self.write_json(dir.join("modes.json"), &snapshot.modes)
+            .await?;
+        self.write_json(dir.join("dashboards.json"), &snapshot.dashboards)
+            .await?;
         Ok(())
     }
 
@@ -70,13 +86,18 @@ impl CacheStore {
             devices: self.read_json_or_default(dir.join("devices.json")).await?,
             scenes: self.read_json_or_default(dir.join("scenes.json")).await?,
             areas: self.read_json_or_default(dir.join("areas.json")).await?,
-            automations: self.read_json_or_default(dir.join("automations.json")).await?,
+            automations: self
+                .read_json_or_default(dir.join("automations.json"))
+                .await?,
             events: self.read_json_or_default(dir.join("events.json")).await?,
             users: self.read_json_or_default(dir.join("users.json")).await?,
             plugins: self.read_json_or_default(dir.join("plugins.json")).await?,
             switches: self.read_json_or_default(dir.join("switches.json")).await?,
             timers: self.read_json_or_default(dir.join("timers.json")).await?,
             modes: self.read_json_or_default(dir.join("modes.json")).await?,
+            dashboards: self
+                .read_json_or_default(dir.join("dashboards.json"))
+                .await?,
         })
     }
 
@@ -86,8 +107,12 @@ impl CacheStore {
         tokio::fs::create_dir_all(&self.root)
             .await
             .with_context(|| format!("failed to create cache dir {}", self.root.display()))?;
-        let session = SavedSession { username: username.to_string(), token: token.to_string() };
-        self.write_json(self.root.join("session.json"), &session).await
+        let session = SavedSession {
+            username: username.to_string(),
+            token: token.to_string(),
+        };
+        self.write_json(self.root.join("session.json"), &session)
+            .await
     }
 
     pub async fn load_session(&self) -> Result<Option<SavedSession>> {

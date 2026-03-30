@@ -23,6 +23,7 @@ It is built with:
   - Activate selected scene
 - Data views:
   - Devices
+  - Dashboards
   - Scenes
   - Areas
   - Automations
@@ -73,6 +74,7 @@ cargo run -- --base-url http://127.0.0.1:8080 --cache-dir ./cache
   - `p` play/pause, `x` stop, `n` next, `b` previous, `+`/`-` volume, `m` mute (Devices > Media Players)
   - `e` edit selected device metadata including canonical name (Devices tab, admin)
   - `a` activate selected scene (Scenes tab)
+  - `Enter` inspect selected dashboard summary (Dashboards tab)
 
 - Manage > Matter (admin):
   - `c` open commission form (pairing code, optional name/room/discriminator/passcode)
@@ -86,6 +88,7 @@ This client targets the existing endpoints in `homeCore`:
 - `POST /api/v1/auth/login`
 - `GET /api/v1/auth/me`
 - `GET /api/v1/devices`
+- `GET /api/v1/dashboards`
 - `PATCH /api/v1/devices/{id}/state`
 - `GET /api/v1/scenes`
 - `POST /api/v1/scenes/{id}/activate`

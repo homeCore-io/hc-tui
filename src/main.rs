@@ -6,19 +6,19 @@ mod ui;
 mod ws;
 
 use anyhow::Result;
-use app::{login_workflow_from_auth, App, LoginWorkflowResult};
+use app::{App, LoginWorkflowResult, login_workflow_from_auth};
 use cache::CacheStore;
 use clap::Parser;
 use config::Config;
 use crossterm::{
     event::{self, Event},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui::{Terminal, backend::CrosstermBackend};
 use std::{io, path::PathBuf, time::Duration};
 use tokio::sync::mpsc;
-use ws::{spawn_events_stream, spawn_log_stream, WsAppMsg};
+use ws::{WsAppMsg, spawn_events_stream, spawn_log_stream};
 
 enum AsyncMsg {
     LoginFinished(Result<LoginWorkflowResult, String>),
@@ -48,7 +48,9 @@ async fn main() -> Result<()> {
 
     // CLI overrides take priority over config file
     let base_url = args.base_url.unwrap_or(cfg.server.base_url);
-    let cache_dir = args.cache_dir.unwrap_or_else(|| PathBuf::from(&cfg.cache.dir));
+    let cache_dir = args
+        .cache_dir
+        .unwrap_or_else(|| PathBuf::from(&cfg.cache.dir));
     let persist_token = cfg.session.persist_token;
     let auto_login = cfg.auto_login;
 
@@ -105,7 +107,13 @@ async fn run_app(
             ws_started = true;
             // Start log stream too
             let log_url = app.ws_logs_endpoint();
-            spawn_log_stream(log_url, token, "INFO".to_string(), String::new(), ws_tx.clone());
+            spawn_log_stream(
+                log_url,
+                token,
+                "INFO".to_string(),
+                String::new(),
+                ws_tx.clone(),
+            );
             log_ws_started = true;
         }
     }

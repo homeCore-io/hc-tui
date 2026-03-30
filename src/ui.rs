@@ -215,6 +215,9 @@ fn status_hints(app: &App) -> Vec<&'static str> {
                 }
             }
         }
+        Tab::Dashboards => {
+            hints.push("Enter inspect");
+        }
         Tab::Scenes => {
             hints.push("a activate");
         }
@@ -461,6 +464,10 @@ fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
         draw_dashboard(frame, app, area);
         return;
     }
+    if matches!(app.active_tab(), Tab::Dashboards) {
+        draw_dashboards_tab(frame, app, area);
+        return;
+    }
     if matches!(app.active_tab(), Tab::Scenes) {
         draw_scenes_table(frame, app, area);
         return;
@@ -487,7 +494,7 @@ fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
     }
 
     let items = match app.active_tab() {
-        Tab::Devices | Tab::Scenes | Tab::Automations | Tab::Manage => Vec::new(),
+        Tab::Devices | Tab::Dashboards | Tab::Scenes | Tab::Automations | Tab::Manage => Vec::new(),
         Tab::Areas => app
             .areas
             .iter()
@@ -3323,12 +3330,110 @@ fn normalize_label(value: &str) -> String {
 fn list_is_empty(app: &App) -> bool {
     match app.active_tab() {
         Tab::Devices => app.devices.is_empty(),
+        Tab::Dashboards => app.dashboards.is_empty(),
         Tab::Scenes => app.scenes.is_empty(),
         Tab::Areas => app.areas.is_empty(),
         Tab::Automations => app.visible_automations().is_empty(),
         Tab::Plugins => app.plugins.is_empty(),
         Tab::Manage => false,
     }
+}
+
+fn draw_dashboards_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let panes = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(38), Constraint::Percentage(62)])
+        .split(area);
+
+    let items: Vec<ListItem> = app
+        .dashboards
+        .iter()
+        .enumerate()
+        .map(|(i, dashboard)| {
+            let style = if i == app.selected {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
+            let mut meta = vec![];
+            if dashboard.is_default {
+                meta.push("default");
+            }
+            meta.push(dashboard.visibility.as_str());
+            let meta_str = meta.join(" · ");
+            ListItem::new(Line::from(vec![
+                Span::styled(format!("  {:<24}", dashboard.name), style),
+                Span::styled(meta_str, Style::default().fg(Color::DarkGray)),
+            ]))
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(format!("Dashboards [{}]", app.dashboards.len())),
+        )
+        .highlight_style(
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol(">> ");
+    let mut state = ratatui::widgets::ListState::default();
+    if !app.dashboards.is_empty() {
+        state.select(Some(app.selected));
+    }
+    frame.render_stateful_widget(list, panes[0], &mut state);
+
+    let body = if let Some(dashboard) = app.selected_dashboard() {
+        let mut lines = vec![Line::from(vec![
+            Span::styled(
+                &dashboard.name,
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            Span::styled(
+                if dashboard.is_default {
+                    "DEFAULT"
+                } else {
+                    &dashboard.visibility
+                },
+                Style::default().fg(Color::DarkGray),
+            ),
+        ])];
+        if let Some(description) = dashboard.description.as_deref() {
+            lines.push(Line::from(description.to_string()));
+        }
+        if !dashboard.tags.is_empty() {
+            lines.push(Line::from(format!("tags: {}", dashboard.tags.join(", "))));
+        }
+        lines.push(Line::from(format!("widgets: {}", dashboard.widgets.len())));
+        lines.push(Line::from(String::new()));
+        lines.push(Line::from(Span::styled(
+            "Widget Preview",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )));
+        for line in app.dashboard_widget_preview(dashboard, 8) {
+            lines.push(Line::from(format!("- {line}")));
+        }
+        Paragraph::new(lines)
+            .block(Block::default().borders(Borders::ALL).title("Dashboard"))
+            .wrap(Wrap { trim: true })
+    } else {
+        Paragraph::new("No dashboards available.")
+            .block(Block::default().borders(Borders::ALL).title("Dashboard"))
+            .wrap(Wrap { trim: true })
+    };
+    frame.render_widget(body, panes[1]);
 }
 
 fn draw_manage_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {

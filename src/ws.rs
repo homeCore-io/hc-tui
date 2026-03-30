@@ -2,7 +2,7 @@ use crate::api::LogLine;
 use futures_util::StreamExt;
 use serde_json::Value;
 use tokio::sync::mpsc;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -16,7 +16,11 @@ pub enum WsAppMsg {
     LogLine(LogLine),
 }
 
-pub fn spawn_events_stream(base_ws_url: String, token: String, tx: mpsc::UnboundedSender<WsAppMsg>) {
+pub fn spawn_events_stream(
+    base_ws_url: String,
+    token: String,
+    tx: mpsc::UnboundedSender<WsAppMsg>,
+) {
     tokio::spawn(async move {
         let stream_url = format!("{}?token={}", base_ws_url, urlencoding::encode(&token));
         loop {
