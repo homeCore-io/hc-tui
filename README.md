@@ -56,6 +56,7 @@ cargo run -- --base-url http://127.0.0.1:8080 --cache-dir ./cache
 - Device/scene actions sync and re-cache after completion.
 - There is no background auto-refresh loop while navigating selections.
 - Real-time device status comes from WebSocket events. If the stream drops, the TUI auto-reconnects.
+- The terminal redraw path is event-driven during normal use, so idle screens should not continuously repaint or burn CPU. The login screen still animates while an authentication/sync is in progress.
 
 ## Key Bindings
 

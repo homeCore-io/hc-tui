@@ -16,7 +16,11 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
-use std::{io, path::PathBuf, time::Duration};
+use std::{
+    io,
+    path::PathBuf,
+    time::{Duration, Instant},
+};
 use tokio::sync::mpsc;
 use ws::{WsAppMsg, spawn_events_stream, spawn_log_stream};
 
@@ -99,6 +103,8 @@ async fn run_app(
     let mut ws_started = false;
     let mut auto_login_fired = false;
     let mut log_ws_started = false;
+    let mut needs_draw = true;
+    let mut last_login_animation_tick = Instant::now();
 
     // If already authenticated (restored session), start WS immediately
     if app.authenticated {
@@ -119,8 +125,10 @@ async fn run_app(
     }
 
     loop {
-        app.tick_login_animation();
-        terminal.draw(|frame| ui::draw(frame, app))?;
+        if needs_draw {
+            terminal.draw(|frame| ui::draw(frame, app))?;
+            needs_draw = false;
+        }
 
         if app.should_quit {
             break;
@@ -147,9 +155,11 @@ async fn run_app(
                     };
                     let _ = tx.send(AsyncMsg::LoginFinished(result));
                 });
+                needs_draw = true;
             }
         }
 
+        let mut saw_ws_update = false;
         while let Ok(msg) = ws_rx.try_recv() {
             match msg {
                 WsAppMsg::Connected => app.on_ws_connected(),
@@ -159,8 +169,13 @@ async fn run_app(
                 WsAppMsg::LogDisconnected(reason) => app.on_log_ws_disconnected(reason),
                 WsAppMsg::LogLine(line) => app.on_log_line(line),
             }
+            saw_ws_update = true;
+        }
+        if saw_ws_update {
+            needs_draw = true;
         }
 
+        let mut saw_async_update = false;
         while let Ok(msg) = async_rx.try_recv() {
             match msg {
                 AsyncMsg::LoginFinished(Ok(result)) => {
@@ -190,6 +205,10 @@ async fn run_app(
                 AsyncMsg::LoginFinished(Err(error)) => app.apply_login_failure(error),
                 AsyncMsg::LoginPhaseSynthesizing => app.set_login_phase_synthesizing(),
             }
+            saw_async_update = true;
+        }
+        if saw_async_update {
+            needs_draw = true;
         }
 
         if event::poll(Duration::from_millis(100))? {
@@ -219,7 +238,14 @@ async fn run_app(
                 } else {
                     app.on_key_authenticated(key).await;
                 }
+                needs_draw = true;
             }
+        } else if app.login_in_progress
+            && last_login_animation_tick.elapsed() >= Duration::from_millis(125)
+        {
+            app.tick_login_animation();
+            last_login_animation_tick = Instant::now();
+            needs_draw = true;
         }
     }
 
