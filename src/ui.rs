@@ -193,6 +193,16 @@ fn status_hints(app: &App) -> Vec<&'static str> {
                     hints.push("Enter edit");
                     hints.push("d delete");
                 }
+                DeviceSubPanel::MediaPlayers => {
+                    hints.push("Spc/t play-stop");
+                    hints.push("p play/pause");
+                    hints.push("x stop");
+                    hints.push("n next");
+                    hints.push("b previous");
+                    hints.push("+/- volume");
+                    hints.push("m mute");
+                    hints.push("Enter edit");
+                }
                 DeviceSubPanel::Switches => {
                     hints.push("n new switch");
                     hints.push("Enter edit");
@@ -1702,11 +1712,13 @@ fn draw_dashboard(frame: &mut Frame<'_>, app: &App, area: Rect) {
 
     let active_idx = match app.device_sub {
         DeviceSubPanel::All => 0,
-        DeviceSubPanel::Switches => 1,
-        DeviceSubPanel::Timers => 2,
+        DeviceSubPanel::MediaPlayers => 1,
+        DeviceSubPanel::Switches => 2,
+        DeviceSubPanel::Timers => 3,
     };
     let sub_tabs = Tabs::new(vec![
         Line::from("All"),
+        Line::from("Media Players"),
         Line::from("Switches"),
         Line::from("Timers"),
     ])
@@ -1729,6 +1741,9 @@ fn draw_dashboard(frame: &mut Frame<'_>, app: &App, area: Rect) {
             draw_device_list(frame, app, panes[0]);
             draw_device_detail(frame, app, panes[1]);
         }
+        DeviceSubPanel::MediaPlayers => {
+            draw_media_players_panel(frame, app, layout[1]);
+        }
         DeviceSubPanel::Switches => {
             draw_switches_list(frame, app, layout[1]);
         }
@@ -1736,6 +1751,227 @@ fn draw_dashboard(frame: &mut Frame<'_>, app: &App, area: Rect) {
             draw_timers_list(frame, app, layout[1]);
         }
     }
+}
+
+fn draw_media_players_panel(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let panes = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(42), Constraint::Percentage(58)])
+        .split(area);
+
+    let players = app.visible_media_players();
+    let items = players
+        .iter()
+        .enumerate()
+        .map(|(i, device)| {
+            let model = App::media_player_model(device);
+            let state = model
+                .as_ref()
+                .map(|value| normalize_label(&value.playback_state))
+                .unwrap_or_else(|| app.device_status(device));
+            let summary = model
+                .as_ref()
+                .and_then(|value| value.title.as_ref())
+                .map(|value| value.chars().take(18).collect::<String>())
+                .unwrap_or_default();
+            let style = if i == app.selected {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else if device.available {
+                Style::default()
+            } else {
+                Style::default().fg(Color::DarkGray)
+            };
+            ListItem::new(Line::from(vec![
+                Span::styled(format!("{:<22}", clean_name(&device.name)), style),
+                Span::styled(format!(" {:<10}", state), style),
+                Span::styled(
+                    if summary.is_empty() {
+                        "".to_string()
+                    } else {
+                        format!(" {summary}")
+                    },
+                    style,
+                ),
+            ]))
+        })
+        .collect::<Vec<_>>();
+
+    let list = List::new(items).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(format!("Media Players [{}]", players.len())),
+    );
+    let mut state = ratatui::widgets::ListState::default();
+    state.select(if players.is_empty() {
+        None
+    } else {
+        Some(app.selected)
+    });
+    frame.render_stateful_widget(list, panes[0], &mut state);
+
+    draw_media_player_detail(frame, app, panes[1]);
+}
+
+fn draw_media_player_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title("Media Player Detail");
+
+    let Some(model) = app.selected_media_player_model() else {
+        let msg = Paragraph::new("No media player selected")
+            .block(block)
+            .alignment(Alignment::Center);
+        frame.render_widget(msg, area);
+        return;
+    };
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push(Line::from(vec![Span::styled(
+        clean_name(&model.display_name),
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD),
+    )]));
+    lines.push(Line::from(""));
+    lines.push(detail_row(
+        "Device ID",
+        vec![Span::raw(model.device_id.clone())],
+    ));
+    if let Some(canonical_name) = &model.canonical_name {
+        lines.push(detail_row(
+            "Canonical",
+            vec![Span::styled(
+                canonical_name.clone(),
+                Style::default().fg(Color::Cyan),
+            )],
+        ));
+    }
+    lines.push(detail_row(
+        "Plugin",
+        vec![Span::raw(clean_plugin_id(&model.plugin_id))],
+    ));
+
+    let playback_color = match model.playback_state.as_str() {
+        "playing" => Color::Green,
+        "paused" => Color::Yellow,
+        "stopped" => Color::DarkGray,
+        "buffering" => Color::Cyan,
+        _ => Color::Gray,
+    };
+    lines.push(detail_row(
+        "State",
+        vec![Span::styled(
+            normalize_label(&model.playback_state),
+            Style::default()
+                .fg(playback_color)
+                .add_modifier(Modifier::BOLD),
+        )],
+    ));
+
+    if let Some(title) = &model.title {
+        lines.push(detail_row("Title", vec![Span::raw(title.clone())]));
+    }
+    if let Some(artist) = &model.artist {
+        lines.push(detail_row("Artist", vec![Span::raw(artist.clone())]));
+    }
+    if let Some(album) = &model.album {
+        lines.push(detail_row("Album", vec![Span::raw(album.clone())]));
+    }
+    if let Some(source) = &model.source {
+        lines.push(detail_row("Source", vec![Span::raw(source.clone())]));
+    }
+    if let Some(volume) = model.volume {
+        let bar = make_bar(volume as f64 / 100.0, 10);
+        lines.push(detail_row(
+            "Volume",
+            vec![
+                Span::styled(format!("{volume:3}% "), Style::default().fg(Color::Yellow)),
+                Span::styled(bar, Style::default().fg(Color::Yellow)),
+            ],
+        ));
+    }
+    if let Some(muted) = model.muted {
+        lines.push(detail_row(
+            "Mute",
+            vec![Span::styled(
+                if muted { "Muted" } else { "Unmuted" },
+                Style::default().fg(if muted { Color::Yellow } else { Color::Green }),
+            )],
+        ));
+    }
+    if let (Some(position), Some(duration)) = (model.position_secs, model.duration_secs) {
+        let progress = if duration == 0 {
+            0.0
+        } else {
+            position as f64 / duration as f64
+        }
+        .clamp(0.0, 1.0);
+        lines.push(detail_row(
+            "Progress",
+            vec![
+                Span::raw(format!(
+                    "{} / {} ",
+                    format_duration_ms(position * 1000),
+                    format_duration_ms(duration * 1000)
+                )),
+                Span::styled(make_bar(progress, 10), Style::default().fg(Color::Cyan)),
+            ],
+        ));
+    }
+
+    lines.push(Line::from(""));
+    let mut commands = Vec::new();
+    if model.capabilities.can_play {
+        commands.push("play");
+    }
+    if model.capabilities.can_pause {
+        commands.push("pause");
+    }
+    if model.capabilities.can_stop {
+        commands.push("stop");
+    }
+    if model.capabilities.can_previous {
+        commands.push("previous");
+    }
+    if model.capabilities.can_next {
+        commands.push("next");
+    }
+    if model.capabilities.can_set_volume {
+        commands.push("volume");
+    }
+    if model.capabilities.can_mute {
+        commands.push("mute");
+    }
+    lines.push(detail_row(
+        "Controls",
+        vec![Span::styled(
+            if commands.is_empty() {
+                "none".to_string()
+            } else {
+                commands.join(", ")
+            },
+            Style::default().fg(Color::DarkGray),
+        )],
+    ));
+
+    for detail in &model.extra_details {
+        lines.push(detail_row(
+            &detail.label,
+            vec![Span::styled(
+                detail.value.clone(),
+                Style::default().fg(Color::Magenta),
+            )],
+        ));
+    }
+
+    let widget = Paragraph::new(lines).wrap(Wrap { trim: false });
+    frame.render_widget(widget, inner);
 }
 
 fn draw_device_list(frame: &mut Frame<'_>, app: &App, area: Rect) {

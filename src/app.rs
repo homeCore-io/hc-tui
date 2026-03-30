@@ -6,7 +6,7 @@ use crate::cache::{CacheSnapshot, CacheStore};
 use anyhow::Result;
 use chrono::{DateTime, Local, Utc};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::cmp::min;
 use std::collections::{HashSet, VecDeque};
 
@@ -121,11 +121,53 @@ impl PluginDetailPanel {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeviceSubPanel {
     All,
+    MediaPlayers,
     Switches,
     Timers,
 }
 
 impl DeviceSubPanel {}
+
+#[derive(Debug, Clone, Default)]
+pub struct MediaPlayerCapabilities {
+    pub can_play: bool,
+    pub can_pause: bool,
+    pub can_stop: bool,
+    pub can_next: bool,
+    pub can_previous: bool,
+    pub can_set_volume: bool,
+    pub can_mute: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct MediaPlayerDetail {
+    pub label: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct MediaPlayerModel {
+    pub device_id: String,
+    pub display_name: String,
+    pub canonical_name: Option<String>,
+    pub plugin_id: String,
+    pub playback_state: String,
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub source: Option<String>,
+    pub volume: Option<u8>,
+    pub muted: Option<bool>,
+    pub position_secs: Option<u64>,
+    pub duration_secs: Option<u64>,
+    pub capabilities: MediaPlayerCapabilities,
+    pub extra_details: Vec<MediaPlayerDetail>,
+}
+
+struct MediaPlayerHook {
+    matches: fn(&DeviceState) -> bool,
+    enrich: fn(&DeviceState, &mut MediaPlayerModel),
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeviceFilterMode {
@@ -450,9 +492,139 @@ pub enum LoginPhase {
 }
 
 impl App {
+    fn media_player_hooks() -> &'static [MediaPlayerHook] {
+        &[MediaPlayerHook {
+            matches: |device| device.plugin_id.contains("sonos"),
+            enrich: |device, model| {
+                model.capabilities.can_stop = true;
+                model.capabilities.can_next = true;
+                model.capabilities.can_previous = true;
+                model.capabilities.can_set_volume = true;
+                model.capabilities.can_mute = true;
+
+                if let Some(favorites) = device
+                    .attributes
+                    .get("available_favorites")
+                    .and_then(Value::as_array)
+                    .map(|items| items.len())
+                {
+                    model.extra_details.push(MediaPlayerDetail {
+                        label: "Favorites".to_string(),
+                        value: favorites.to_string(),
+                    });
+                }
+
+                if let Some(playlists) = device
+                    .attributes
+                    .get("available_playlists")
+                    .and_then(Value::as_array)
+                    .map(|items| items.len())
+                {
+                    model.extra_details.push(MediaPlayerDetail {
+                        label: "Playlists".to_string(),
+                        value: playlists.to_string(),
+                    });
+                }
+            },
+        }]
+    }
+
+    fn supported_media_actions(device: &DeviceState) -> Vec<String> {
+        device
+            .attributes
+            .get("supported_actions")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(|value| value.to_ascii_lowercase())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+    }
+
+    fn media_string_attr(device: &DeviceState, keys: &[&str]) -> Option<String> {
+        keys.iter()
+            .find_map(|key| device.attributes.get(*key).and_then(Value::as_str))
+            .map(ToString::to_string)
+    }
+
+    fn media_u64_attr(device: &DeviceState, keys: &[&str]) -> Option<u64> {
+        keys.iter().find_map(|key| {
+            let value = device.attributes.get(*key)?;
+            if let Some(raw) = value.as_u64() {
+                return Some(raw);
+            }
+            value
+                .as_f64()
+                .and_then(|raw| if raw >= 0.0 { Some(raw as u64) } else { None })
+        })
+    }
+
+    fn media_volume_attr(device: &DeviceState) -> Option<u8> {
+        device
+            .attributes
+            .get("volume")
+            .and_then(Value::as_f64)
+            .map(|raw| raw.clamp(0.0, 100.0) as u8)
+    }
+
     fn is_media_player(device: &DeviceState) -> bool {
         device.device_type.as_deref() == Some("media_player")
             || device.attributes.get("kind").and_then(Value::as_str) == Some("media_player")
+    }
+
+    pub fn media_player_model(device: &DeviceState) -> Option<MediaPlayerModel> {
+        if !Self::is_media_player(device) {
+            return None;
+        }
+
+        let supported_actions = Self::supported_media_actions(device);
+        let supports = |name: &str| supported_actions.iter().any(|value| value == name);
+        let playback_state = device
+            .attributes
+            .get("state")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+            .to_ascii_lowercase();
+        let mut model = MediaPlayerModel {
+            device_id: device.device_id.clone(),
+            display_name: device.name.clone(),
+            canonical_name: device.canonical_name.clone(),
+            plugin_id: device.plugin_id.clone(),
+            playback_state: playback_state.clone(),
+            title: Self::media_string_attr(device, &["title", "track_title", "media_title"]),
+            artist: Self::media_string_attr(device, &["artist", "track_artist", "media_artist"]),
+            album: Self::media_string_attr(device, &["album", "track_album", "media_album"]),
+            source: Self::media_string_attr(device, &["source", "input_source", "media_source"]),
+            volume: Self::media_volume_attr(device),
+            muted: device.attributes.get("muted").and_then(Value::as_bool),
+            position_secs: Self::media_u64_attr(device, &["position_secs", "position"]),
+            duration_secs: Self::media_u64_attr(device, &["duration_secs", "duration"]),
+            capabilities: MediaPlayerCapabilities {
+                can_play: supported_actions.is_empty() || supports("play"),
+                can_pause: supported_actions.is_empty() || supports("pause"),
+                can_stop: supports("stop"),
+                can_next: supports("next"),
+                can_previous: supports("previous"),
+                can_set_volume: supports("set_volume")
+                    || supports("volume")
+                    || device.attributes.contains_key("volume"),
+                can_mute: supports("set_mute")
+                    || supports("mute")
+                    || device.attributes.contains_key("muted"),
+            },
+            extra_details: Vec::new(),
+        };
+
+        for hook in Self::media_player_hooks() {
+            if (hook.matches)(device) {
+                (hook.enrich)(device, &mut model);
+            }
+        }
+
+        Some(model)
     }
 
     fn media_player_toggle_action(device: &DeviceState) -> Option<&'static str> {
@@ -472,6 +644,22 @@ impl App {
         } else {
             Some("play")
         }
+    }
+
+    pub fn visible_media_players(&self) -> Vec<&DeviceState> {
+        self.visible_devices()
+            .into_iter()
+            .filter(|device| Self::is_media_player(device))
+            .collect()
+    }
+
+    pub fn selected_media_player(&self) -> Option<&DeviceState> {
+        self.visible_media_players().get(self.selected).copied()
+    }
+
+    pub fn selected_media_player_model(&self) -> Option<MediaPlayerModel> {
+        self.selected_media_player()
+            .and_then(Self::media_player_model)
     }
 
     pub fn new(base_url: String, cache: CacheStore) -> Self {
@@ -1127,7 +1315,8 @@ impl App {
             KeyCode::Left if matches!(self.active_tab(), Tab::Devices) => {
                 self.device_sub = match self.device_sub {
                     DeviceSubPanel::All => DeviceSubPanel::Timers,
-                    DeviceSubPanel::Switches => DeviceSubPanel::All,
+                    DeviceSubPanel::MediaPlayers => DeviceSubPanel::All,
+                    DeviceSubPanel::Switches => DeviceSubPanel::MediaPlayers,
                     DeviceSubPanel::Timers => DeviceSubPanel::Switches,
                 };
                 self.selected = 0;
@@ -1135,7 +1324,8 @@ impl App {
             }
             KeyCode::Right if matches!(self.active_tab(), Tab::Devices) => {
                 self.device_sub = match self.device_sub {
-                    DeviceSubPanel::All => DeviceSubPanel::Switches,
+                    DeviceSubPanel::All => DeviceSubPanel::MediaPlayers,
+                    DeviceSubPanel::MediaPlayers => DeviceSubPanel::Switches,
                     DeviceSubPanel::Switches => DeviceSubPanel::Timers,
                     DeviceSubPanel::Timers => DeviceSubPanel::All,
                 };
@@ -1264,6 +1454,7 @@ impl App {
             }
             KeyCode::Enter => match self.active_tab() {
                 Tab::Devices => match self.device_sub {
+                    DeviceSubPanel::MediaPlayers => self.open_selected_device_editor(),
                     DeviceSubPanel::Switches => {
                         if let Some(sw) = self.switches.get(self.selected) {
                             self.switch_editor = Some(SwitchEditor {
@@ -1303,6 +1494,7 @@ impl App {
             },
             KeyCode::Char('n') => match self.active_tab() {
                 Tab::Devices => match self.device_sub {
+                    DeviceSubPanel::MediaPlayers => self.media_player_next().await,
                     DeviceSubPanel::Switches => {
                         self.switch_editor = Some(SwitchEditor {
                             id: String::new(),
@@ -1335,6 +1527,7 @@ impl App {
             },
             KeyCode::Char('d') => match self.active_tab() {
                 Tab::Devices => match self.device_sub {
+                    DeviceSubPanel::MediaPlayers => {}
                     DeviceSubPanel::Switches => self.delete_selected_device_switch().await,
                     DeviceSubPanel::Timers => self.delete_selected_device_timer().await,
                     DeviceSubPanel::All => self.delete_selected_device().await,
@@ -1370,6 +1563,9 @@ impl App {
                 _ => {}
             },
             KeyCode::Char('p') => match self.active_tab() {
+                Tab::Devices if matches!(self.device_sub, DeviceSubPanel::MediaPlayers) => {
+                    self.media_player_play_pause().await
+                }
                 Tab::Manage if matches!(self.admin_sub, AdminSubPanel::Users) => {
                     self.open_user_editor_password()
                 }
@@ -1401,6 +1597,24 @@ impl App {
                 Tab::Devices => self.toggle_selected_device().await,
                 _ => {}
             },
+            KeyCode::Char('m')
+                if matches!(self.active_tab(), Tab::Devices)
+                    && matches!(self.device_sub, DeviceSubPanel::MediaPlayers) =>
+            {
+                self.media_player_toggle_mute().await;
+            }
+            KeyCode::Char('x')
+                if matches!(self.active_tab(), Tab::Devices)
+                    && matches!(self.device_sub, DeviceSubPanel::MediaPlayers) =>
+            {
+                self.media_player_stop().await;
+            }
+            KeyCode::Char('b')
+                if matches!(self.active_tab(), Tab::Devices)
+                    && matches!(self.device_sub, DeviceSubPanel::MediaPlayers) =>
+            {
+                self.media_player_previous().await;
+            }
             KeyCode::Char('v') => {
                 if matches!(self.active_tab(), Tab::Devices) {
                     self.view_mode = match self.view_mode {
@@ -1412,12 +1626,20 @@ impl App {
             }
             KeyCode::Char('+') | KeyCode::Char('=') => {
                 if matches!(self.active_tab(), Tab::Devices) {
-                    self.adjust_brightness(1).await;
+                    if matches!(self.device_sub, DeviceSubPanel::MediaPlayers) {
+                        self.media_player_adjust_volume(5).await;
+                    } else {
+                        self.adjust_brightness(1).await;
+                    }
                 }
             }
             KeyCode::Char('-') => {
                 if matches!(self.active_tab(), Tab::Devices) {
-                    self.adjust_brightness(-1).await;
+                    if matches!(self.device_sub, DeviceSubPanel::MediaPlayers) {
+                        self.media_player_adjust_volume(-5).await;
+                    } else {
+                        self.adjust_brightness(-1).await;
+                    }
                 }
             }
             KeyCode::Char('l') => {
@@ -2339,6 +2561,12 @@ impl App {
 
     /// Resolves `self.selected` to a device, accounting for view mode.
     pub fn selected_device(&self) -> Option<&DeviceState> {
+        if matches!(self.device_sub, DeviceSubPanel::MediaPlayers) {
+            return self.selected_media_player();
+        }
+        if !matches!(self.device_sub, DeviceSubPanel::All) {
+            return None;
+        }
         let visible = self.visible_devices();
         if self.view_mode == DeviceViewMode::Grouped {
             let groups = self.grouped_devices();
@@ -2814,6 +3042,7 @@ impl App {
         match self.active_tab() {
             Tab::Devices => match self.device_sub {
                 DeviceSubPanel::All => self.visible_devices().len(),
+                DeviceSubPanel::MediaPlayers => self.visible_media_players().len(),
                 DeviceSubPanel::Switches => self.switches.len(),
                 DeviceSubPanel::Timers => self.timers.len(),
             },
@@ -2893,6 +3122,163 @@ impl App {
                     device_name,
                     if !current_on { "On" } else { "Off" }
                 )
+            }
+            Err(err) => self.error = Some(err.to_string()),
+        }
+    }
+
+    async fn send_media_player_action(
+        &mut self,
+        action: &str,
+        success_message: impl FnOnce(&str) -> String,
+    ) -> bool {
+        let Some(device) = self.selected_media_player() else {
+            return false;
+        };
+        let device_id = device.device_id.clone();
+        let device_name = device.name.clone();
+
+        match self.client.send_device_action(&device_id, action).await {
+            Ok(_) => {
+                self.status = success_message(&device_name);
+                true
+            }
+            Err(err) => {
+                self.error = Some(err.to_string());
+                false
+            }
+        }
+    }
+
+    async fn media_player_play_pause(&mut self) {
+        let Some(model) = self.selected_media_player_model() else {
+            return;
+        };
+
+        if matches!(model.playback_state.as_str(), "playing" | "buffering")
+            && model.capabilities.can_pause
+        {
+            self.send_media_player_action("pause", |name| format!("{name} → Pause"))
+                .await;
+        } else if model.capabilities.can_play {
+            self.send_media_player_action("play", |name| format!("{name} → Play"))
+                .await;
+        }
+    }
+
+    async fn media_player_stop(&mut self) {
+        let Some(model) = self.selected_media_player_model() else {
+            return;
+        };
+        let Some(device) = self.selected_media_player() else {
+            return;
+        };
+        let device_id = device.device_id.clone();
+        let device_name = device.name.clone();
+
+        if model.capabilities.can_stop {
+            match self.client.send_device_action(&device_id, "stop").await {
+                Ok(_) => {
+                    self.status = format!("{device_name} → Stop");
+                }
+                Err(stop_err) => {
+                    if model.capabilities.can_pause {
+                        match self.client.send_device_action(&device_id, "pause").await {
+                            Ok(_) => {
+                                self.status = format!("{device_name} → Pause");
+                            }
+                            Err(pause_err) => {
+                                self.error = Some(format!(
+                                    "stop failed: {}; pause fallback failed: {}",
+                                    stop_err, pause_err
+                                ));
+                            }
+                        }
+                    } else {
+                        self.error = Some(stop_err.to_string());
+                    }
+                }
+            }
+        } else if model.capabilities.can_pause {
+            self.send_media_player_action("pause", |name| format!("{name} → Pause"))
+                .await;
+        }
+    }
+
+    async fn media_player_next(&mut self) {
+        let Some(model) = self.selected_media_player_model() else {
+            return;
+        };
+        if model.capabilities.can_next {
+            self.send_media_player_action("next", |name| format!("{name} → Next"))
+                .await;
+        }
+    }
+
+    async fn media_player_previous(&mut self) {
+        let Some(model) = self.selected_media_player_model() else {
+            return;
+        };
+        if model.capabilities.can_previous {
+            self.send_media_player_action("previous", |name| format!("{name} → Previous"))
+                .await;
+        }
+    }
+
+    async fn media_player_toggle_mute(&mut self) {
+        let Some(model) = self.selected_media_player_model() else {
+            return;
+        };
+        if !model.capabilities.can_mute {
+            return;
+        }
+        let Some(device) = self.selected_media_player() else {
+            return;
+        };
+        let device_id = device.device_id.clone();
+        let device_name = device.name.clone();
+        let muted = !model.muted.unwrap_or(false);
+
+        match self
+            .client
+            .patch_device_state(&device_id, json!({ "action": "set_mute", "muted": muted }))
+            .await
+        {
+            Ok(_) => {
+                self.status = format!(
+                    "{} → {}",
+                    device_name,
+                    if muted { "Muted" } else { "Unmuted" }
+                );
+            }
+            Err(err) => self.error = Some(err.to_string()),
+        }
+    }
+
+    async fn media_player_adjust_volume(&mut self, delta: i64) {
+        let Some(model) = self.selected_media_player_model() else {
+            return;
+        };
+        if !model.capabilities.can_set_volume {
+            return;
+        }
+        let Some(device) = self.selected_media_player() else {
+            return;
+        };
+        let device_id = device.device_id.clone();
+        let device_name = device.name.clone();
+        let next = (i64::from(model.volume.unwrap_or(0)) + delta).clamp(0, 100);
+
+        match self
+            .client
+            .patch_device_state(
+                &device_id,
+                json!({ "action": "set_volume", "volume": next }),
+            )
+            .await
+        {
+            Ok(_) => {
+                self.status = format!("{device_name} volume → {next}%");
             }
             Err(err) => self.error = Some(err.to_string()),
         }
@@ -4617,5 +5003,80 @@ mod tests {
         };
 
         assert_eq!(App::media_player_toggle_action(&device), Some("play"));
+    }
+
+    #[test]
+    fn test_media_player_model_uses_supported_actions() {
+        let mut attributes = serde_json::Map::new();
+        attributes.insert("state".to_string(), Value::String("playing".to_string()));
+        attributes.insert(
+            "supported_actions".to_string(),
+            Value::Array(vec![
+                Value::String("play".to_string()),
+                Value::String("pause".to_string()),
+                Value::String("next".to_string()),
+                Value::String("set_volume".to_string()),
+            ]),
+        );
+        attributes.insert("volume".to_string(), Value::from(42));
+
+        let device = DeviceState {
+            device_id: "media_1".to_string(),
+            canonical_name: Some("living.media_1".to_string()),
+            name: "Player".to_string(),
+            plugin_id: "plugin.generic".to_string(),
+            device_type: Some("media_player".to_string()),
+            area: None,
+            available: true,
+            attributes,
+            last_seen: String::new(),
+        };
+
+        let model = App::media_player_model(&device).expect("media player model");
+        assert!(model.capabilities.can_play);
+        assert!(model.capabilities.can_pause);
+        assert!(model.capabilities.can_next);
+        assert!(model.capabilities.can_set_volume);
+        assert!(!model.capabilities.can_previous);
+        assert!(!model.capabilities.can_stop);
+        assert_eq!(model.volume, Some(42));
+        assert_eq!(model.canonical_name.as_deref(), Some("living.media_1"));
+    }
+
+    #[test]
+    fn test_media_player_model_applies_plugin_hook_enrichment() {
+        let mut attributes = serde_json::Map::new();
+        attributes.insert("state".to_string(), Value::String("playing".to_string()));
+        attributes.insert(
+            "available_favorites".to_string(),
+            Value::Array(vec![Value::String("one".to_string())]),
+        );
+        attributes.insert(
+            "available_playlists".to_string(),
+            Value::Array(vec![
+                Value::String("alpha".to_string()),
+                Value::String("beta".to_string()),
+            ]),
+        );
+
+        let device = DeviceState {
+            device_id: "sonos_living".to_string(),
+            canonical_name: None,
+            name: "Living Room".to_string(),
+            plugin_id: "plugin.sonos".to_string(),
+            device_type: Some("media_player".to_string()),
+            area: None,
+            available: true,
+            attributes,
+            last_seen: String::new(),
+        };
+
+        let model = App::media_player_model(&device).expect("media player model");
+        assert!(model.capabilities.can_stop);
+        assert!(model.capabilities.can_next);
+        assert!(model.capabilities.can_previous);
+        assert!(model.capabilities.can_set_volume);
+        assert!(model.capabilities.can_mute);
+        assert_eq!(model.extra_details.len(), 2);
     }
 }

@@ -17,6 +17,7 @@ It is built with:
 - Device control:
   - Toggle selected device `on` state
   - Toggle selected media players between play and stop, with pause fallback
+  - Dedicated `Media Players` sub-tab with generic transport, volume, mute, progress, and metadata
   - View and edit device `canonical_name` alongside name and area
 - Scene control:
   - Activate selected scene
@@ -69,6 +70,7 @@ cargo run -- --base-url http://127.0.0.1:8080 --cache-dir ./cache
   - `t` toggle selected device (Devices tab)
     - switches/lights: on/off
     - media players: play/stop, or pause when stop is unsupported
+  - `p` play/pause, `x` stop, `n` next, `b` previous, `+`/`-` volume, `m` mute (Devices > Media Players)
   - `e` edit selected device metadata including canonical name (Devices tab, admin)
   - `a` activate selected scene (Scenes tab)
 

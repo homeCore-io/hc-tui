@@ -621,11 +621,15 @@ impl HomeCoreClient {
         Self::parse_empty(resp).await
     }
 
-    pub async fn send_device_action(&self, device_id: &str, action: &str) -> Result<()> {
+    pub async fn patch_device_state(&self, device_id: &str, body: Value) -> Result<()> {
         let path = format!("/devices/{device_id}/state");
-        let body = json!({ "action": action });
         let resp = self.request_with_json(Method::PATCH, &path, body).await?;
         Self::parse_empty(resp).await
+    }
+
+    pub async fn send_device_action(&self, device_id: &str, action: &str) -> Result<()> {
+        self.patch_device_state(device_id, json!({ "action": action }))
+            .await
     }
 
     pub async fn update_device_metadata(
