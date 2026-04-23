@@ -3,7 +3,7 @@ use reqwest::{Client, Method, Response};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Role {
     #[serde(alias = "admin", alias = "Admin", alias = "ADMIN")]
@@ -18,11 +18,51 @@ pub enum Role {
         alias = "READ_ONLY"
     )]
     ReadOnly,
+    #[serde(alias = "observer", alias = "Observer", alias = "OBSERVER")]
+    Observer,
+    #[serde(
+        alias = "device_operator",
+        alias = "deviceoperator",
+        alias = "DeviceOperator",
+        alias = "DEVICE_OPERATOR"
+    )]
+    DeviceOperator,
+    #[serde(
+        alias = "rule_editor",
+        alias = "ruleeditor",
+        alias = "RuleEditor",
+        alias = "RULE_EDITOR"
+    )]
+    RuleEditor,
+    #[serde(
+        alias = "service_operator",
+        alias = "serviceoperator",
+        alias = "ServiceOperator",
+        alias = "SERVICE_OPERATOR"
+    )]
+    ServiceOperator,
 }
 
 impl Role {
     pub fn is_admin(&self) -> bool {
         matches!(self, Self::Admin)
+    }
+
+    /// All roles in a stable cycle order — drives the Space-to-cycle user
+    /// editor and any future dropdowns.
+    pub const ALL: [Role; 7] = [
+        Role::Admin,
+        Role::User,
+        Role::ReadOnly,
+        Role::Observer,
+        Role::DeviceOperator,
+        Role::RuleEditor,
+        Role::ServiceOperator,
+    ];
+
+    pub fn next(&self) -> Role {
+        let i = Self::ALL.iter().position(|r| r == self).unwrap_or(0);
+        Self::ALL[(i + 1) % Self::ALL.len()]
     }
 }
 

@@ -4137,12 +4137,7 @@ impl App {
                 UserEditField::Role => {}
             },
             KeyCode::Char(' ') if editor.field == UserEditField::Role => {
-                // Cycle role
-                editor.role = match editor.role {
-                    Role::Admin => Role::User,
-                    Role::User => Role::ReadOnly,
-                    Role::ReadOnly => Role::Admin,
-                };
+                editor.role = editor.role.next();
             }
             KeyCode::Enter => {
                 self.save_user_editor().await;
