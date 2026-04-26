@@ -3178,6 +3178,7 @@ impl App {
                     format!("{}: camera/video source", widget.title)
                 }
                 DashboardWidgetType::WebEmbed => format!("{}: embedded web content", widget.title),
+                DashboardWidgetType::HouseStatusHero => format!("{}: house status hero", widget.title),
             })
             .collect()
     }

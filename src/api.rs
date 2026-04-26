@@ -232,6 +232,9 @@ pub enum DashboardWidgetType {
     WebEmbed,
     Markdown,
     DashboardLink,
+    /// Full-width "House Status" hero — rendered by Leptos client only;
+    /// TUI treats it as a no-op placeholder.
+    HouseStatusHero,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
