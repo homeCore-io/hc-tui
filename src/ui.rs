@@ -1,6 +1,6 @@
 use crate::api::DeviceState;
 use crate::app::{
-    AdminSubPanel, App, AreaEditor, AutomationFilterBar, AutomationFilterField, DeleteConfirm,
+    AdminSubPanel, App, AreaEditor, RuleFilterBar, RuleFilterField, DeleteConfirm,
     DeviceEditField, DeviceSubPanel, DeviceViewMode, FocusField, GlueCreator, GlueEditField,
     LogLevelFilter, LoginPhase, MatterCommissionEditor, MatterCommissionField, ModeEditField,
     ModeEditor, ModeKind, PluginDetailPanel, StreamingAction, StreamingStage, SwitchEditField,
@@ -73,8 +73,8 @@ pub fn draw(frame: &mut Frame<'_>, app: &App) {
     if let Some(editor) = app.matter_commission_editor.as_ref() {
         draw_matter_commission_editor(frame, editor);
     }
-    // Automation overlays (drawn on top of everything)
-    if let Some(confirm) = app.automation_delete_confirm.as_ref() {
+    // Rule overlays (drawn on top of everything)
+    if let Some(confirm) = app.rule_delete_confirm.as_ref() {
         draw_delete_confirm(frame, confirm);
     }
     if app.streaming_action.is_some() {
@@ -83,7 +83,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &App) {
     if app.groups_open {
         draw_groups_overlay(frame, app);
     }
-    if let Some(filter_bar) = app.automation_filter_bar.as_ref() {
+    if let Some(filter_bar) = app.rule_filter_bar.as_ref() {
         draw_filter_bar(frame, filter_bar);
     }
     if app.log_module_input_open {
@@ -271,7 +271,7 @@ fn status_hints(app: &App) -> Vec<&'static str> {
                 hints.push("d delete");
             }
         }
-        Tab::Automations => {
+        Tab::Rules => {
             hints.push("e enable");
             hints.push("d disable");
             hints.push("c clone");
@@ -302,7 +302,7 @@ fn status_hints(app: &App) -> Vec<&'static str> {
         }
         return vec!["c cancel", "Esc close"];
     }
-    if app.automation_detail_open {
+    if app.rule_detail_open {
         return vec!["j/k scroll", "PgUp/PgDn", "r refresh", "Esc back", "q quit"];
     }
     if app.plugin_detail_open {
@@ -494,8 +494,8 @@ fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
         draw_scenes_table(frame, app, area);
         return;
     }
-    if matches!(app.active_tab(), Tab::Automations) {
-        draw_automations_tab(frame, app, area);
+    if matches!(app.active_tab(), Tab::Rules) {
+        draw_rules_tab(frame, app, area);
         return;
     }
     if matches!(app.active_tab(), Tab::Manage) {
@@ -516,7 +516,7 @@ fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
     }
 
     let items = match app.active_tab() {
-        Tab::Devices | Tab::Scenes | Tab::Automations | Tab::Manage => Vec::new(),
+        Tab::Devices | Tab::Scenes | Tab::Rules | Tab::Manage => Vec::new(),
         Tab::Areas => app
             .areas
             .iter()
@@ -842,13 +842,13 @@ fn draw_area_devices(frame: &mut Frame<'_>, app: &App, area: Rect) {
     frame.render_stateful_widget(list, area, &mut state);
 }
 
-// ── Automations tab ───────────────────────────────────────────────────────────
+// ── Rules tab ───────────────────────────────────────────────────────────
 
-fn draw_automations_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
+fn draw_rules_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
     // Read-only detail view takes over the whole tab pane when open —
     // mirrors the plugin_detail full-screen replacement pattern.
-    if app.automation_detail_open {
-        draw_automation_detail(frame, app, area);
+    if app.rule_detail_open {
+        draw_rule_detail(frame, app, area);
         return;
     }
 
@@ -863,10 +863,10 @@ fn draw_automations_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
         (area, None)
     };
 
-    draw_automations_list(frame, app, list_area);
+    draw_rules_list(frame, app, list_area);
 
     if let Some(ha) = history_area {
-        draw_automation_history(frame, app, ha);
+        draw_rule_history(frame, app, ha);
     }
 }
 
@@ -876,11 +876,11 @@ fn draw_automations_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
 ///    .ron file content
 /// 3. Fire history pane (fixed Length) — last firings, oldest at the
 ///    bottom
-fn draw_automation_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
+fn draw_rule_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let rule = app
-        .automation_detail_id
+        .rule_detail_id
         .as_deref()
-        .and_then(|id| app.automations.iter().find(|r| r.id == id));
+        .and_then(|id| app.rules.iter().find(|r| r.id == id));
 
     let layout = Layout::default()
         .direction(Direction::Vertical)
@@ -915,7 +915,7 @@ fn draw_automation_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
                     format!("error: {err}"),
                     Style::default().fg(Color::Red),
                 )));
-            } else if let Some(err) = app.automation_detail_error.as_ref() {
+            } else if let Some(err) = app.rule_detail_error.as_ref() {
                 lines.push(Line::from(Span::styled(
                     format!("warning: {err}"),
                     Style::default().fg(Color::Yellow),
@@ -936,22 +936,22 @@ fn draw_automation_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let ron_block = Block::default()
         .borders(Borders::ALL)
         .title(" RON  (j/k scroll · r refresh · Esc back) ");
-    let ron_text = if app.automation_detail_loading && app.automation_detail_ron.is_none() {
+    let ron_text = if app.rule_detail_loading && app.rule_detail_ron.is_none() {
         "loading…".to_string()
     } else {
-        app.automation_detail_ron
+        app.rule_detail_ron
             .clone()
             .unwrap_or_else(|| "(no .ron file backing this rule)".to_string())
     };
     let ron = Paragraph::new(ron_text)
         .block(ron_block)
         .style(Style::default().fg(Color::Gray))
-        .scroll((app.automation_detail_scroll, 0))
+        .scroll((app.rule_detail_scroll, 0))
         .wrap(Wrap { trim: false });
     frame.render_widget(ron, layout[1]);
 
     // Fire history pane.
-    let history_items: Vec<ListItem> = match app.automation_detail_history.as_ref() {
+    let history_items: Vec<ListItem> = match app.rule_detail_history.as_ref() {
         Some(h) if h.is_empty() => vec![ListItem::new(Line::from(Span::styled(
             "no recent firings",
             Style::default().fg(Color::DarkGray),
@@ -984,7 +984,7 @@ fn draw_automation_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
                 .collect()
         }
         None => vec![ListItem::new(Line::from(Span::styled(
-            if app.automation_detail_loading {
+            if app.rule_detail_loading {
                 "loading…"
             } else {
                 "(history unavailable)"
@@ -992,7 +992,7 @@ fn draw_automation_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
             Style::default().fg(Color::DarkGray),
         )))],
     };
-    let history_title = match app.automation_detail_history.as_ref() {
+    let history_title = match app.rule_detail_history.as_ref() {
         Some(h) => format!(" Fire history ({}) ", h.len()),
         None => " Fire history ".to_string(),
     };
@@ -1001,21 +1001,21 @@ fn draw_automation_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
     frame.render_widget(history, layout[2]);
 }
 
-fn draw_automations_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
-    let visible = app.visible_automations();
-    let total = app.automations.len();
+fn draw_rules_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let visible = app.visible_rules();
+    let total = app.rules.len();
     let filtered = visible.len();
-    let filter_active = app.automation_filter_stale
-        || !app.automation_filter_tag.is_empty()
-        || !app.automation_filter_trigger.is_empty();
-    let bulk_count = app.automation_selected_ids.len();
+    let filter_active = app.rule_filter_stale
+        || !app.rule_filter_tag.is_empty()
+        || !app.rule_filter_trigger.is_empty();
+    let bulk_count = app.rule_selected_ids.len();
 
     let title = if filter_active {
-        format!("Automations [{}/{}]", filtered, total)
+        format!("Rules [{}/{}]", filtered, total)
     } else if bulk_count > 0 {
-        format!("Automations [{}] ({} selected)", total, bulk_count)
+        format!("Rules [{}] ({} selected)", total, bulk_count)
     } else {
-        format!("Automations [{}]", total)
+        format!("Rules [{}]", total)
     };
 
     let highlight_sel = Style::default()
@@ -1043,7 +1043,7 @@ fn draw_automations_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
         .enumerate()
         .map(|(i, r)| {
             let is_sel = i == app.selected;
-            let is_bulk = app.automation_selected_ids.contains(&r.id);
+            let is_bulk = app.rule_selected_ids.contains(&r.id);
             let is_stale = r.error.is_some();
 
             let sel_mark = if is_bulk { "[✓]" } else { "[ ]" };
@@ -1128,11 +1128,11 @@ fn draw_automations_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
     frame.render_stateful_widget(table, area, &mut state);
 }
 
-fn draw_automation_history(frame: &mut Frame<'_>, app: &App, area: Rect) {
+fn draw_rule_history(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let rule_name = app
         .fire_history_rule_id
         .as_deref()
-        .and_then(|id| app.automations.iter().find(|r| r.id == id))
+        .and_then(|id| app.rules.iter().find(|r| r.id == id))
         .map(|r| r.name.as_str())
         .unwrap_or("?");
 
@@ -1489,7 +1489,7 @@ fn draw_groups_overlay(frame: &mut Frame<'_>, app: &App) {
 
     let outer = Block::default()
         .borders(Borders::ALL)
-        .title("Automation Groups")
+        .title("Rule Groups")
         .border_style(Style::default().fg(Color::Cyan));
     let inner = outer.inner(popup);
     frame.render_widget(outer, popup);
@@ -1547,7 +1547,7 @@ fn draw_groups_overlay(frame: &mut Frame<'_>, app: &App) {
     frame.render_widget(help, layout[1]);
 }
 
-fn draw_filter_bar(frame: &mut Frame<'_>, filter_bar: &AutomationFilterBar) {
+fn draw_filter_bar(frame: &mut Frame<'_>, filter_bar: &RuleFilterBar) {
     let area = frame.area();
     // Draw a small bar at the bottom of the screen (above the status bar)
     let bar_area = Rect {
@@ -1567,12 +1567,12 @@ fn draw_filter_bar(frame: &mut Frame<'_>, filter_bar: &AutomationFilterBar) {
         ])
         .split(bar_area);
 
-    let tag_style = if filter_bar.active_field == AutomationFilterField::Tag {
+    let tag_style = if filter_bar.active_field == RuleFilterField::Tag {
         Style::default().fg(Color::Yellow)
     } else {
         Style::default().fg(Color::Gray)
     };
-    let trigger_style = if filter_bar.active_field == AutomationFilterField::Trigger {
+    let trigger_style = if filter_bar.active_field == RuleFilterField::Trigger {
         Style::default().fg(Color::Yellow)
     } else {
         Style::default().fg(Color::Gray)
@@ -2089,7 +2089,7 @@ fn draw_status_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
         status_detail_row("Last refresh", &format!("{} {}", left_refresh, time_label)),
         Line::from(""),
         Line::from(Span::styled(
-            "Automations",
+            "Rules",
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
@@ -4121,7 +4121,7 @@ fn list_is_empty(app: &App) -> bool {
         Tab::Devices => app.devices.is_empty(),
         Tab::Scenes => app.scenes.is_empty(),
         Tab::Areas => app.areas.is_empty(),
-        Tab::Automations => app.visible_automations().is_empty(),
+        Tab::Rules => app.visible_rules().is_empty(),
         Tab::Plugins => app.plugins.is_empty(),
         Tab::Manage => false,
     }

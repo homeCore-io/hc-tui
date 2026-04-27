@@ -476,13 +476,13 @@ impl HomeCoreClient {
         Self::parse_areas_response(resp).await
     }
 
-    pub async fn list_automations(&self) -> Result<Vec<Rule>> {
+    pub async fn list_rules(&self) -> Result<Vec<Rule>> {
         let resp = self.request(Method::GET, "/automations").await?;
         Self::parse_json(resp).await
     }
 
     #[allow(dead_code)]
-    pub async fn list_automations_filtered(
+    pub async fn list_rules_filtered(
         &self,
         tag: Option<&str>,
         trigger: Option<&str>,
@@ -511,17 +511,17 @@ impl HomeCoreClient {
         Self::parse_json(resp).await
     }
 
-    pub async fn get_automation_history(&self, id: &str) -> Result<Vec<RuleFiring>> {
+    pub async fn get_rule_history(&self, id: &str) -> Result<Vec<RuleFiring>> {
         let path = format!("/automations/{id}/history");
         let resp = self.request(Method::GET, &path).await?;
         Self::parse_json(resp).await
     }
 
-    /// `GET /automations/:id/ron` — returns the on-disk RON file
+    /// `GET /rules/:id/ron` — returns the on-disk RON file
     /// content as plain text. Used by the read-only rule detail view
     /// to show the literal authoring artifact (preserving field order
     /// and any inline comments).
-    pub async fn get_automation_ron(&self, id: &str) -> Result<String> {
+    pub async fn get_rule_ron(&self, id: &str) -> Result<String> {
         let path = format!("/automations/{id}/ron");
         let resp = self.request(Method::GET, &path).await?;
         let status = resp.status();
@@ -532,26 +532,26 @@ impl HomeCoreClient {
         Ok(text)
     }
 
-    pub async fn clone_automation(&self, id: &str) -> Result<Rule> {
+    pub async fn clone_rule(&self, id: &str) -> Result<Rule> {
         let path = format!("/automations/{id}/clone");
         let resp = self.request(Method::POST, &path).await?;
         Self::parse_json(resp).await
     }
 
-    pub async fn delete_automation(&self, id: &str) -> Result<()> {
+    pub async fn delete_rule(&self, id: &str) -> Result<()> {
         let path = format!("/automations/{id}");
         let resp = self.request(Method::DELETE, &path).await?;
         Self::parse_empty(resp).await
     }
 
-    pub async fn toggle_automation(&self, id: &str, enabled: bool) -> Result<()> {
+    pub async fn toggle_rule(&self, id: &str, enabled: bool) -> Result<()> {
         let path = format!("/automations/{id}");
         let body = json!({ "enabled": enabled });
         let resp = self.request_with_json(Method::PATCH, &path, body).await?;
         Self::parse_empty(resp).await
     }
 
-    pub async fn bulk_toggle_automations(&self, ids: &[String], enabled: bool) -> Result<()> {
+    pub async fn bulk_toggle_rules(&self, ids: &[String], enabled: bool) -> Result<()> {
         let body = json!({ "ids": ids, "enabled": enabled });
         let resp = self
             .request_with_json(Method::PATCH, "/automations", body)
@@ -559,13 +559,13 @@ impl HomeCoreClient {
         Self::parse_empty(resp).await
     }
 
-    pub async fn list_automation_groups(&self) -> Result<Vec<RuleGroup>> {
+    pub async fn list_rule_groups(&self) -> Result<Vec<RuleGroup>> {
         let resp = self.request(Method::GET, "/automations/groups").await?;
         Self::parse_json(resp).await
     }
 
     #[allow(dead_code)]
-    pub async fn create_automation_group(&self, name: &str) -> Result<RuleGroup> {
+    pub async fn create_rule_group(&self, name: &str) -> Result<RuleGroup> {
         let body = json!({ "name": name, "rule_ids": [] });
         let resp = self
             .request_with_json(Method::POST, "/automations/groups", body)
@@ -573,19 +573,19 @@ impl HomeCoreClient {
         Self::parse_json(resp).await
     }
 
-    pub async fn delete_automation_group(&self, id: &str) -> Result<()> {
+    pub async fn delete_rule_group(&self, id: &str) -> Result<()> {
         let path = format!("/automations/groups/{id}");
         let resp = self.request(Method::DELETE, &path).await?;
         Self::parse_empty(resp).await
     }
 
-    pub async fn enable_automation_group(&self, id: &str) -> Result<()> {
+    pub async fn enable_rule_group(&self, id: &str) -> Result<()> {
         let path = format!("/automations/groups/{id}/enable");
         let resp = self.request(Method::POST, &path).await?;
         Self::parse_empty(resp).await
     }
 
-    pub async fn disable_automation_group(&self, id: &str) -> Result<()> {
+    pub async fn disable_rule_group(&self, id: &str) -> Result<()> {
         let path = format!("/automations/groups/{id}/disable");
         let resp = self.request(Method::POST, &path).await?;
         Self::parse_empty(resp).await
@@ -1017,14 +1017,14 @@ impl HomeCoreClient {
     }
 
     /// Returns all rules as a JSON Value (array of Rule).
-    pub async fn export_automations(&self) -> Result<Value> {
+    pub async fn export_rules(&self) -> Result<Value> {
         let resp = self.request(Method::GET, "/automations/export").await?;
         Self::parse_json(resp).await
     }
 
-    /// POST a JSON array of rules to `/automations/import`. Returns the
+    /// POST a JSON array of rules to `/rules/import`. Returns the
     /// `imported` count from the server response.
-    pub async fn import_automations(&self, rules: Value) -> Result<usize> {
+    pub async fn import_rules(&self, rules: Value) -> Result<usize> {
         let resp = self
             .request_with_json(Method::POST, "/automations/import", rules)
             .await?;

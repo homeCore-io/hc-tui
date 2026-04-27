@@ -19,7 +19,7 @@ pub struct CacheSnapshot {
     pub devices: Vec<DeviceState>,
     pub scenes: Vec<crate::api::Scene>,
     pub areas: Vec<Area>,
-    pub automations: Vec<Rule>,
+    pub rules: Vec<Rule>,
     pub events: Vec<EventEntry>,
     pub users: Vec<UserInfo>,
     pub plugins: Vec<PluginRecord>,
@@ -53,7 +53,7 @@ impl CacheStore {
             .await?;
         self.write_json(dir.join("areas.json"), &snapshot.areas)
             .await?;
-        self.write_json(dir.join("automations.json"), &snapshot.automations)
+        self.write_json(dir.join("rules.json"), &snapshot.rules)
             .await?;
         self.write_json(dir.join("events.json"), &snapshot.events)
             .await?;
@@ -80,8 +80,8 @@ impl CacheStore {
             devices: self.read_json_or_default(dir.join("devices.json")).await?,
             scenes: self.read_json_or_default(dir.join("scenes.json")).await?,
             areas: self.read_json_or_default(dir.join("areas.json")).await?,
-            automations: self
-                .read_json_or_default(dir.join("automations.json"))
+            rules: self
+                .read_json_or_default(dir.join("rules.json"))
                 .await?,
             events: self.read_json_or_default(dir.join("events.json")).await?,
             users: self.read_json_or_default(dir.join("users.json")).await?,

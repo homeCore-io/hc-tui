@@ -640,17 +640,17 @@ pub struct DeleteConfirm {
     pub rule_name: String,
 }
 
-/// Automation filter bar state.
+/// Rule filter bar state.
 #[derive(Debug, Clone)]
-pub struct AutomationFilterBar {
+pub struct RuleFilterBar {
     pub tag: String,
     pub trigger: String,
     pub stale: bool,
-    pub active_field: AutomationFilterField,
+    pub active_field: RuleFilterField,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AutomationFilterField {
+pub enum RuleFilterField {
     Tag,
     Trigger,
 }
@@ -660,7 +660,7 @@ pub enum Tab {
     Devices,
     Scenes,
     Areas,
-    Automations,
+    Rules,
     Plugins,
     Manage,
 }
@@ -671,7 +671,7 @@ impl Tab {
             Self::Devices => "Devices",
             Self::Scenes => "Scenes",
             Self::Areas => "Areas",
-            Self::Automations => "Automations",
+            Self::Rules => "Rules",
             Self::Plugins => "Plugins",
             Self::Manage => "Manage",
         }
@@ -716,7 +716,7 @@ pub struct App {
     pub devices: Vec<DeviceState>,
     pub scenes: Vec<Scene>,
     pub areas: Vec<Area>,
-    pub automations: Vec<Rule>,
+    pub rules: Vec<Rule>,
     pub events: Vec<EventEntry>,
     pub users: Vec<UserInfo>,
     pub plugins: Vec<PluginRecord>,
@@ -774,29 +774,29 @@ pub struct App {
     pub glue_creator: Option<GlueCreator>,
     pub matter_commission_editor: Option<MatterCommissionEditor>,
 
-    // Automations tab features
-    pub automation_filter_tag: String,
-    pub automation_filter_trigger: String,
-    pub automation_filter_stale: bool,
-    pub automation_filter_bar: Option<AutomationFilterBar>,
-    pub automation_selected_ids: HashSet<String>,
-    pub automation_bulk_select_mode: bool,
+    // Rules tab features
+    pub rule_filter_tag: String,
+    pub rule_filter_trigger: String,
+    pub rule_filter_stale: bool,
+    pub rule_filter_bar: Option<RuleFilterBar>,
+    pub rule_selected_ids: HashSet<String>,
+    pub rule_bulk_select_mode: bool,
     pub fire_history_open: bool,
     pub fire_history_rule_id: Option<String>,
     pub fire_history: Vec<RuleFiring>,
-    pub automation_delete_confirm: Option<DeleteConfirm>,
+    pub rule_delete_confirm: Option<DeleteConfirm>,
     /// Read-only rule detail screen — opens on `Enter` from the rule
     /// list, full-screen replacement of the list view. RON pane shows
     /// the on-disk file verbatim; fire history pane shows the last N
     /// firings inline.
-    pub automation_detail_open: bool,
-    pub automation_detail_id: Option<String>,
-    pub automation_detail_ron: Option<String>,
-    pub automation_detail_history: Option<Vec<RuleFiring>>,
+    pub rule_detail_open: bool,
+    pub rule_detail_id: Option<String>,
+    pub rule_detail_ron: Option<String>,
+    pub rule_detail_history: Option<Vec<RuleFiring>>,
     /// Vertical scroll offset (in lines) for the RON pane.
-    pub automation_detail_scroll: u16,
-    pub automation_detail_loading: bool,
-    pub automation_detail_error: Option<String>,
+    pub rule_detail_scroll: u16,
+    pub rule_detail_loading: bool,
+    pub rule_detail_error: Option<String>,
     pub groups_open: bool,
     pub groups: Vec<RuleGroup>,
     pub groups_selected: usize,
@@ -1031,7 +1031,7 @@ impl App {
             devices: Vec::new(),
             scenes: Vec::new(),
             areas: Vec::new(),
-            automations: Vec::new(),
+            rules: Vec::new(),
             events: Vec::new(),
             users: Vec::new(),
             plugins: Vec::new(),
@@ -1078,23 +1078,23 @@ impl App {
             glue_creator: None,
             matter_commission_editor: None,
 
-            automation_filter_tag: String::new(),
-            automation_filter_trigger: String::new(),
-            automation_filter_stale: false,
-            automation_filter_bar: None,
-            automation_selected_ids: HashSet::new(),
-            automation_bulk_select_mode: false,
+            rule_filter_tag: String::new(),
+            rule_filter_trigger: String::new(),
+            rule_filter_stale: false,
+            rule_filter_bar: None,
+            rule_selected_ids: HashSet::new(),
+            rule_bulk_select_mode: false,
             fire_history_open: false,
             fire_history_rule_id: None,
             fire_history: Vec::new(),
-            automation_delete_confirm: None,
-            automation_detail_open: false,
-            automation_detail_id: None,
-            automation_detail_ron: None,
-            automation_detail_history: None,
-            automation_detail_scroll: 0,
-            automation_detail_loading: false,
-            automation_detail_error: None,
+            rule_delete_confirm: None,
+            rule_detail_open: false,
+            rule_detail_id: None,
+            rule_detail_ron: None,
+            rule_detail_history: None,
+            rule_detail_scroll: 0,
+            rule_detail_loading: false,
+            rule_detail_error: None,
             groups_open: false,
             groups: Vec::new(),
             groups_selected: 0,
@@ -1120,7 +1120,7 @@ impl App {
             Tab::Devices,
             Tab::Scenes,
             Tab::Areas,
-            Tab::Automations,
+            Tab::Rules,
         ];
         if self.is_admin() {
             tabs.push(Tab::Plugins);
@@ -1238,7 +1238,7 @@ impl App {
         scenes.extend(hue_scenes_from_devices(&self.devices));
         self.scenes = scenes;
         self.areas = self.client.list_areas().await?;
-        self.automations = self.client.list_automations().await?;
+        self.rules = self.client.list_rules().await?;
         self.events = self.client.list_events(50).await?;
         self.switches = self.client.list_switches().await.unwrap_or_default();
         self.timers = self.client.list_timers().await.unwrap_or_default();
@@ -1272,7 +1272,7 @@ impl App {
             devices: self.devices.clone(),
             scenes: self.scenes.clone(),
             areas: self.areas.clone(),
-            automations: self.automations.clone(),
+            rules: self.rules.clone(),
             events: self.events.clone(),
             users: self.users.clone(),
             plugins: self.plugins.clone(),
@@ -1286,7 +1286,7 @@ impl App {
         self.devices = snapshot.devices;
         self.scenes = snapshot.scenes;
         self.areas = snapshot.areas;
-        self.automations = snapshot.automations;
+        self.rules = snapshot.rules;
         self.events = snapshot.events;
         self.users = snapshot.users;
         self.plugins = snapshot.plugins;
@@ -1492,39 +1492,39 @@ impl App {
         self.events.truncate(200);
     }
 
-    /// Returns the currently visible automations (after applying filters).
-    pub fn visible_automations(&self) -> Vec<&Rule> {
-        self.automations
+    /// Returns the currently visible rules (after applying filters).
+    pub fn visible_rules(&self) -> Vec<&Rule> {
+        self.rules
             .iter()
-            .filter(|r| self.automation_matches_filter(r))
+            .filter(|r| self.rule_matches_filter(r))
             .collect()
     }
 
-    fn automation_matches_filter(&self, rule: &Rule) -> bool {
-        if self.automation_filter_stale && rule.error.is_none() {
+    fn rule_matches_filter(&self, rule: &Rule) -> bool {
+        if self.rule_filter_stale && rule.error.is_none() {
             return false;
         }
-        if !self.automation_filter_tag.is_empty() {
-            let tag = &self.automation_filter_tag;
+        if !self.rule_filter_tag.is_empty() {
+            let tag = &self.rule_filter_tag;
             if !rule.tags.iter().any(|t| t.contains(tag.as_str())) {
                 return false;
             }
         }
-        if !self.automation_filter_trigger.is_empty() && self.automation_filter_trigger != "all" {
+        if !self.rule_filter_trigger.is_empty() && self.rule_filter_trigger != "all" {
             let trigger_type = rule
                 .trigger
                 .as_ref()
                 .and_then(|t| t.get("type").and_then(Value::as_str))
                 .unwrap_or("");
-            if !trigger_type.contains(self.automation_filter_trigger.as_str()) {
+            if !trigger_type.contains(self.rule_filter_trigger.as_str()) {
                 return false;
             }
         }
         true
     }
 
-    pub fn selected_automation(&self) -> Option<&Rule> {
-        let visible = self.visible_automations();
+    pub fn selected_rule(&self) -> Option<&Rule> {
+        let visible = self.visible_rules();
         visible.get(self.selected).copied()
     }
 
@@ -1539,18 +1539,18 @@ impl App {
             return;
         }
 
-        // Read-only rule detail view takes over the Automations tab
+        // Read-only rule detail view takes over the Rules tab
         // when open. Esc returns to the list; j/k or arrows scroll the
         // RON pane; r refreshes both fetches.
-        if self.automation_detail_open {
+        if self.rule_detail_open {
             match key.code {
-                KeyCode::Esc => self.close_automation_detail(),
-                KeyCode::Char('j') | KeyCode::Down => self.scroll_automation_detail(1),
-                KeyCode::Char('k') | KeyCode::Up => self.scroll_automation_detail(-1),
-                KeyCode::PageDown => self.scroll_automation_detail(10),
-                KeyCode::PageUp => self.scroll_automation_detail(-10),
-                KeyCode::Home => self.automation_detail_scroll = 0,
-                KeyCode::Char('r') => self.refresh_automation_detail().await,
+                KeyCode::Esc => self.close_rule_detail(),
+                KeyCode::Char('j') | KeyCode::Down => self.scroll_rule_detail(1),
+                KeyCode::Char('k') | KeyCode::Up => self.scroll_rule_detail(-1),
+                KeyCode::PageDown => self.scroll_rule_detail(10),
+                KeyCode::PageUp => self.scroll_rule_detail(-10),
+                KeyCode::Home => self.rule_detail_scroll = 0,
+                KeyCode::Char('r') => self.refresh_rule_detail().await,
                 KeyCode::Char('q') => self.should_quit = true,
                 _ => {}
             }
@@ -1558,13 +1558,13 @@ impl App {
         }
 
         // Handle delete confirmation dialog first
-        if self.automation_delete_confirm.is_some() {
+        if self.rule_delete_confirm.is_some() {
             match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') => {
-                    self.confirm_delete_automation().await;
+                    self.confirm_delete_rule().await;
                 }
                 KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
-                    self.automation_delete_confirm = None;
+                    self.rule_delete_confirm = None;
                     self.status = "Delete cancelled".to_string();
                 }
                 _ => {}
@@ -1679,9 +1679,9 @@ impl App {
             return;
         }
 
-        // Automation filter bar
-        if self.automation_filter_bar.is_some() {
-            self.on_key_automation_filter_bar(key).await;
+        // Rule filter bar
+        if self.rule_filter_bar.is_some() {
+            self.on_key_rule_filter_bar(key).await;
             return;
         }
 
@@ -1924,7 +1924,7 @@ impl App {
                     DeviceSubPanel::All => self.open_selected_device_editor(),
                 },
                 Tab::Areas => self.open_area_editor_edit(),
-                Tab::Automations => self.open_selected_automation_detail().await,
+                Tab::Rules => self.open_selected_rule_detail().await,
                 Tab::Plugins => self.open_plugin_detail(),
                 Tab::Manage => {
                     if matches!(self.admin_sub, AdminSubPanel::Matter) {
@@ -2003,16 +2003,16 @@ impl App {
                         self.delete_selected_manage_item().await;
                     }
                 }
-                Tab::Automations => self.disable_selected_automation().await,
+                Tab::Rules => self.disable_selected_rule().await,
                 _ => {}
             },
             KeyCode::Char('D') => match self.active_tab() {
-                Tab::Automations => {
-                    if self.automation_bulk_select_mode && !self.automation_selected_ids.is_empty()
+                Tab::Rules => {
+                    if self.rule_bulk_select_mode && !self.rule_selected_ids.is_empty()
                     {
-                        self.bulk_disable_automations().await;
+                        self.bulk_disable_rules().await;
                     } else {
-                        self.disable_selected_automation().await;
+                        self.disable_selected_rule().await;
                     }
                 }
                 _ => {}
@@ -2042,7 +2042,7 @@ impl App {
             },
             KeyCode::Char(' ') => match self.active_tab() {
                 Tab::Devices => self.toggle_lock_or_switch().await,
-                Tab::Automations => self.toggle_automation_selection(),
+                Tab::Rules => self.toggle_rule_selection(),
                 Tab::Manage if matches!(self.admin_sub, AdminSubPanel::Logs) => {
                     self.log_paused = !self.log_paused;
                     if !self.log_paused {
@@ -2134,30 +2134,30 @@ impl App {
                         self.clamp_selection();
                         self.status = format!("Events filter: {}", self.events_filter_mode.title());
                     }
-                    Tab::Automations => {
+                    Tab::Rules => {
                         // Toggle filter bar
-                        if self.automation_filter_bar.is_none() {
-                            self.automation_filter_bar = Some(AutomationFilterBar {
-                                tag: self.automation_filter_tag.clone(),
-                                trigger: self.automation_filter_trigger.clone(),
-                                stale: self.automation_filter_stale,
-                                active_field: AutomationFilterField::Tag,
+                        if self.rule_filter_bar.is_none() {
+                            self.rule_filter_bar = Some(RuleFilterBar {
+                                tag: self.rule_filter_tag.clone(),
+                                trigger: self.rule_filter_trigger.clone(),
+                                stale: self.rule_filter_stale,
+                                active_field: RuleFilterField::Tag,
                             });
                         } else {
-                            self.automation_filter_bar = None;
+                            self.rule_filter_bar = None;
                         }
                     }
                     _ => {}
                 }
             }
             KeyCode::Char('h') | KeyCode::Char('H') => {
-                if matches!(self.active_tab(), Tab::Automations) {
+                if matches!(self.active_tab(), Tab::Rules) {
                     self.open_fire_history().await;
                 }
             }
             KeyCode::Char('c') | KeyCode::Char('C') => {
-                if matches!(self.active_tab(), Tab::Automations) {
-                    self.clone_selected_automation().await;
+                if matches!(self.active_tab(), Tab::Rules) {
+                    self.clone_selected_rule().await;
                 } else if matches!(self.active_tab(), Tab::Manage)
                     && matches!(self.admin_sub, AdminSubPanel::Matter)
                 {
@@ -2171,12 +2171,12 @@ impl App {
                 }
             }
             KeyCode::Char('e') => match self.active_tab() {
-                Tab::Automations => {
-                    if self.automation_bulk_select_mode && !self.automation_selected_ids.is_empty()
+                Tab::Rules => {
+                    if self.rule_bulk_select_mode && !self.rule_selected_ids.is_empty()
                     {
-                        self.bulk_enable_automations().await;
+                        self.bulk_enable_rules().await;
                     } else {
-                        self.enable_selected_automation().await;
+                        self.enable_selected_rule().await;
                     }
                 }
                 Tab::Manage if matches!(self.admin_sub, AdminSubPanel::Logs) => {
@@ -2186,12 +2186,12 @@ impl App {
                 _ => {}
             },
             KeyCode::Char('E') => match self.active_tab() {
-                Tab::Automations => {
-                    if self.automation_bulk_select_mode && !self.automation_selected_ids.is_empty()
+                Tab::Rules => {
+                    if self.rule_bulk_select_mode && !self.rule_selected_ids.is_empty()
                     {
-                        self.bulk_enable_automations().await;
+                        self.bulk_enable_rules().await;
                     } else {
-                        self.enable_selected_automation().await;
+                        self.enable_selected_rule().await;
                     }
                 }
                 _ => {}
@@ -2230,7 +2230,7 @@ impl App {
                 }
             }
             KeyCode::Char('g') | KeyCode::Char('G') => {
-                if matches!(self.active_tab(), Tab::Automations) {
+                if matches!(self.active_tab(), Tab::Rules) {
                     self.open_groups_panel().await;
                 } else if matches!(self.active_tab(), Tab::Manage) {
                     self.glue_creator = Some(GlueCreator::new());
@@ -2238,11 +2238,11 @@ impl App {
                 }
             }
             KeyCode::Char('s') => {
-                if matches!(self.active_tab(), Tab::Automations) {
-                    self.automation_filter_stale = !self.automation_filter_stale;
+                if matches!(self.active_tab(), Tab::Rules) {
+                    self.rule_filter_stale = !self.rule_filter_stale;
                     self.selected = 0;
                     self.clamp_selection();
-                    self.status = if self.automation_filter_stale {
+                    self.status = if self.rule_filter_stale {
                         "Filter: showing stale rules only".to_string()
                     } else {
                         "Filter: showing all rules".to_string()
@@ -2257,19 +2257,19 @@ impl App {
                 }
             }
             KeyCode::Delete | KeyCode::Char('x') => {
-                if matches!(self.active_tab(), Tab::Automations) {
-                    self.initiate_delete_automation();
+                if matches!(self.active_tab(), Tab::Rules) {
+                    self.initiate_delete_rule();
                 }
             }
             KeyCode::Esc => match self.active_tab() {
-                Tab::Automations => {
+                Tab::Rules => {
                     if self.fire_history_open {
                         self.fire_history_open = false;
                         self.fire_history_rule_id = None;
                         self.fire_history.clear();
-                    } else if self.automation_bulk_select_mode {
-                        self.automation_bulk_select_mode = false;
-                        self.automation_selected_ids.clear();
+                    } else if self.rule_bulk_select_mode {
+                        self.rule_bulk_select_mode = false;
+                        self.rule_selected_ids.clear();
                         self.status = "Selection cleared".to_string();
                     }
                 }
@@ -2305,33 +2305,33 @@ impl App {
         }
     }
 
-    // ── Automation filter bar ─────────────────────────────────────────────────
+    // ── Rule filter bar ─────────────────────────────────────────────────
 
-    async fn on_key_automation_filter_bar(&mut self, key: KeyEvent) {
-        let Some(bar) = self.automation_filter_bar.as_mut() else {
+    async fn on_key_rule_filter_bar(&mut self, key: KeyEvent) {
+        let Some(bar) = self.rule_filter_bar.as_mut() else {
             return;
         };
         match key.code {
             KeyCode::Esc => {
-                self.automation_filter_bar = None;
+                self.rule_filter_bar = None;
             }
             KeyCode::Tab | KeyCode::Right => {
                 bar.active_field = match bar.active_field {
-                    AutomationFilterField::Tag => AutomationFilterField::Trigger,
-                    AutomationFilterField::Trigger => AutomationFilterField::Tag,
+                    RuleFilterField::Tag => RuleFilterField::Trigger,
+                    RuleFilterField::Trigger => RuleFilterField::Tag,
                 };
             }
             KeyCode::BackTab | KeyCode::Left => {
                 bar.active_field = match bar.active_field {
-                    AutomationFilterField::Tag => AutomationFilterField::Trigger,
-                    AutomationFilterField::Trigger => AutomationFilterField::Tag,
+                    RuleFilterField::Tag => RuleFilterField::Trigger,
+                    RuleFilterField::Trigger => RuleFilterField::Tag,
                 };
             }
             KeyCode::Backspace => match bar.active_field {
-                AutomationFilterField::Tag => {
+                RuleFilterField::Tag => {
                     bar.tag.pop();
                 }
-                AutomationFilterField::Trigger => {
+                RuleFilterField::Trigger => {
                     bar.trigger.pop();
                 }
             },
@@ -2339,19 +2339,19 @@ impl App {
                 let tag = bar.tag.clone();
                 let trigger = bar.trigger.clone();
                 let stale = bar.stale;
-                self.automation_filter_tag = tag;
-                self.automation_filter_trigger = trigger;
-                self.automation_filter_stale = stale;
-                self.automation_filter_bar = None;
+                self.rule_filter_tag = tag;
+                self.rule_filter_trigger = trigger;
+                self.rule_filter_stale = stale;
+                self.rule_filter_bar = None;
                 self.selected = 0;
                 self.clamp_selection();
-                self.status = "Automation filter applied".to_string();
+                self.status = "Rule filter applied".to_string();
             }
             KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                let bar = self.automation_filter_bar.as_mut().unwrap();
+                let bar = self.rule_filter_bar.as_mut().unwrap();
                 match bar.active_field {
-                    AutomationFilterField::Tag => bar.tag.push(ch),
-                    AutomationFilterField::Trigger => bar.trigger.push(ch),
+                    RuleFilterField::Tag => bar.tag.push(ch),
+                    RuleFilterField::Trigger => bar.trigger.push(ch),
                 }
             }
             _ => {}
@@ -2387,7 +2387,7 @@ impl App {
     // ── Groups panel ──────────────────────────────────────────────────────────
 
     async fn open_groups_panel(&mut self) {
-        match self.client.list_automation_groups().await {
+        match self.client.list_rule_groups().await {
             Ok(groups) => {
                 self.groups = groups;
                 self.groups_open = true;
@@ -2414,7 +2414,7 @@ impl App {
             }
             KeyCode::Char('e') | KeyCode::Char('E') => {
                 if let Some(g) = self.groups.get(self.groups_selected).cloned() {
-                    match self.client.enable_automation_group(&g.id).await {
+                    match self.client.enable_rule_group(&g.id).await {
                         Ok(_) => self.status = format!("Group '{}' enabled", g.name),
                         Err(e) => self.error = Some(e.to_string()),
                     }
@@ -2422,7 +2422,7 @@ impl App {
             }
             KeyCode::Char('d') | KeyCode::Char('D') => {
                 if let Some(g) = self.groups.get(self.groups_selected).cloned() {
-                    match self.client.disable_automation_group(&g.id).await {
+                    match self.client.disable_rule_group(&g.id).await {
                         Ok(_) => self.status = format!("Group '{}' disabled", g.name),
                         Err(e) => self.error = Some(e.to_string()),
                     }
@@ -2430,7 +2430,7 @@ impl App {
             }
             KeyCode::Delete | KeyCode::Char('x') => {
                 if let Some(g) = self.groups.get(self.groups_selected).cloned() {
-                    match self.client.delete_automation_group(&g.id).await {
+                    match self.client.delete_rule_group(&g.id).await {
                         Ok(_) => {
                             self.groups.retain(|gr| gr.id != g.id);
                             self.groups_selected = self
@@ -2449,10 +2449,10 @@ impl App {
     // ── Fire history ──────────────────────────────────────────────────────────
 
     async fn open_fire_history(&mut self) {
-        let Some(rule) = self.selected_automation().cloned() else {
+        let Some(rule) = self.selected_rule().cloned() else {
             return;
         };
-        match self.client.get_automation_history(&rule.id).await {
+        match self.client.get_rule_history(&rule.id).await {
             Ok(history) => {
                 self.fire_history = history;
                 self.fire_history_rule_id = Some(rule.id);
@@ -2464,106 +2464,106 @@ impl App {
         }
     }
 
-    // ── Automation read-only detail view ──────────────────────────────────────
+    // ── Rule read-only detail view ──────────────────────────────────────
 
     /// Open the read-only rule detail view for the currently-selected
     /// rule. Fetches the on-disk RON and recent fire history in
     /// parallel; renders a "loading…" placeholder until both land.
-    pub async fn open_selected_automation_detail(&mut self) {
-        let Some(rule) = self.selected_automation().cloned() else {
+    pub async fn open_selected_rule_detail(&mut self) {
+        let Some(rule) = self.selected_rule().cloned() else {
             return;
         };
-        self.automation_detail_open = true;
-        self.automation_detail_id = Some(rule.id.clone());
-        self.automation_detail_ron = None;
-        self.automation_detail_history = None;
-        self.automation_detail_scroll = 0;
-        self.automation_detail_error = None;
-        self.automation_detail_loading = true;
+        self.rule_detail_open = true;
+        self.rule_detail_id = Some(rule.id.clone());
+        self.rule_detail_ron = None;
+        self.rule_detail_history = None;
+        self.rule_detail_scroll = 0;
+        self.rule_detail_error = None;
+        self.rule_detail_loading = true;
 
         let (ron, history) = tokio::join!(
-            self.client.get_automation_ron(&rule.id),
-            self.client.get_automation_history(&rule.id),
+            self.client.get_rule_ron(&rule.id),
+            self.client.get_rule_history(&rule.id),
         );
 
         // Only apply if the user hasn't already navigated away.
-        if self.automation_detail_id.as_deref() != Some(rule.id.as_str()) {
+        if self.rule_detail_id.as_deref() != Some(rule.id.as_str()) {
             return;
         }
 
         match ron {
-            Ok(text) => self.automation_detail_ron = Some(text),
+            Ok(text) => self.rule_detail_ron = Some(text),
             Err(e) => {
-                self.automation_detail_error = Some(format!("RON: {e}"));
+                self.rule_detail_error = Some(format!("RON: {e}"));
             }
         }
         match history {
-            Ok(h) => self.automation_detail_history = Some(h),
+            Ok(h) => self.rule_detail_history = Some(h),
             Err(e) => {
                 // History failure is non-fatal — show RON anyway.
-                if self.automation_detail_error.is_none() {
-                    self.automation_detail_error = Some(format!("history: {e}"));
+                if self.rule_detail_error.is_none() {
+                    self.rule_detail_error = Some(format!("history: {e}"));
                 }
-                self.automation_detail_history = Some(Vec::new());
+                self.rule_detail_history = Some(Vec::new());
             }
         }
-        self.automation_detail_loading = false;
+        self.rule_detail_loading = false;
     }
 
     /// Re-fetch RON + history for the open detail view. Bound to `r`.
-    pub async fn refresh_automation_detail(&mut self) {
-        let Some(id) = self.automation_detail_id.clone() else {
+    pub async fn refresh_rule_detail(&mut self) {
+        let Some(id) = self.rule_detail_id.clone() else {
             return;
         };
-        self.automation_detail_loading = true;
-        self.automation_detail_error = None;
+        self.rule_detail_loading = true;
+        self.rule_detail_error = None;
         let (ron, history) = tokio::join!(
-            self.client.get_automation_ron(&id),
-            self.client.get_automation_history(&id),
+            self.client.get_rule_ron(&id),
+            self.client.get_rule_history(&id),
         );
-        if self.automation_detail_id.as_deref() != Some(id.as_str()) {
+        if self.rule_detail_id.as_deref() != Some(id.as_str()) {
             return;
         }
         match ron {
-            Ok(text) => self.automation_detail_ron = Some(text),
-            Err(e) => self.automation_detail_error = Some(format!("RON: {e}")),
+            Ok(text) => self.rule_detail_ron = Some(text),
+            Err(e) => self.rule_detail_error = Some(format!("RON: {e}")),
         }
         match history {
-            Ok(h) => self.automation_detail_history = Some(h),
+            Ok(h) => self.rule_detail_history = Some(h),
             Err(e) => {
-                if self.automation_detail_error.is_none() {
-                    self.automation_detail_error = Some(format!("history: {e}"));
+                if self.rule_detail_error.is_none() {
+                    self.rule_detail_error = Some(format!("history: {e}"));
                 }
             }
         }
-        self.automation_detail_loading = false;
+        self.rule_detail_loading = false;
     }
 
-    pub fn close_automation_detail(&mut self) {
-        self.automation_detail_open = false;
-        self.automation_detail_id = None;
-        self.automation_detail_ron = None;
-        self.automation_detail_history = None;
-        self.automation_detail_scroll = 0;
-        self.automation_detail_error = None;
-        self.automation_detail_loading = false;
+    pub fn close_rule_detail(&mut self) {
+        self.rule_detail_open = false;
+        self.rule_detail_id = None;
+        self.rule_detail_ron = None;
+        self.rule_detail_history = None;
+        self.rule_detail_scroll = 0;
+        self.rule_detail_error = None;
+        self.rule_detail_loading = false;
     }
 
-    pub fn scroll_automation_detail(&mut self, delta: i32) {
-        let cur = self.automation_detail_scroll as i32;
+    pub fn scroll_rule_detail(&mut self, delta: i32) {
+        let cur = self.rule_detail_scroll as i32;
         let next = (cur + delta).max(0);
-        self.automation_detail_scroll = u16::try_from(next).unwrap_or(u16::MAX);
+        self.rule_detail_scroll = u16::try_from(next).unwrap_or(u16::MAX);
     }
 
-    // ── Automation enable/disable/clone/delete ────────────────────────────────
+    // ── Rule enable/disable/clone/delete ────────────────────────────────
 
-    async fn enable_selected_automation(&mut self) {
-        let Some(rule) = self.selected_automation().cloned() else {
+    async fn enable_selected_rule(&mut self) {
+        let Some(rule) = self.selected_rule().cloned() else {
             return;
         };
-        match self.client.toggle_automation(&rule.id, true).await {
+        match self.client.toggle_rule(&rule.id, true).await {
             Ok(_) => {
-                if let Some(r) = self.automations.iter_mut().find(|r| r.id == rule.id) {
+                if let Some(r) = self.rules.iter_mut().find(|r| r.id == rule.id) {
                     r.enabled = true;
                 }
                 self.status = format!("Enabled rule '{}'", rule.name);
@@ -2572,13 +2572,13 @@ impl App {
         }
     }
 
-    async fn disable_selected_automation(&mut self) {
-        let Some(rule) = self.selected_automation().cloned() else {
+    async fn disable_selected_rule(&mut self) {
+        let Some(rule) = self.selected_rule().cloned() else {
             return;
         };
-        match self.client.toggle_automation(&rule.id, false).await {
+        match self.client.toggle_rule(&rule.id, false).await {
             Ok(_) => {
-                if let Some(r) = self.automations.iter_mut().find(|r| r.id == rule.id) {
+                if let Some(r) = self.rules.iter_mut().find(|r| r.id == rule.id) {
                     r.enabled = false;
                 }
                 self.status = format!("Disabled rule '{}'", rule.name);
@@ -2587,37 +2587,37 @@ impl App {
         }
     }
 
-    async fn clone_selected_automation(&mut self) {
-        let Some(rule) = self.selected_automation().cloned() else {
+    async fn clone_selected_rule(&mut self) {
+        let Some(rule) = self.selected_rule().cloned() else {
             return;
         };
-        match self.client.clone_automation(&rule.id).await {
+        match self.client.clone_rule(&rule.id).await {
             Ok(cloned) => {
                 let name = cloned.name.clone();
-                self.automations.push(cloned);
+                self.rules.push(cloned);
                 self.status = format!("Cloned -> \"{}\"", name);
             }
             Err(e) => self.error = Some(e.to_string()),
         }
     }
 
-    fn initiate_delete_automation(&mut self) {
-        let Some(rule) = self.selected_automation().cloned() else {
+    fn initiate_delete_rule(&mut self) {
+        let Some(rule) = self.selected_rule().cloned() else {
             return;
         };
-        self.automation_delete_confirm = Some(DeleteConfirm {
+        self.rule_delete_confirm = Some(DeleteConfirm {
             rule_id: rule.id,
             rule_name: rule.name,
         });
     }
 
-    async fn confirm_delete_automation(&mut self) {
-        let Some(confirm) = self.automation_delete_confirm.take() else {
+    async fn confirm_delete_rule(&mut self) {
+        let Some(confirm) = self.rule_delete_confirm.take() else {
             return;
         };
-        match self.client.delete_automation(&confirm.rule_id).await {
+        match self.client.delete_rule(&confirm.rule_id).await {
             Ok(_) => {
-                self.automations.retain(|r| r.id != confirm.rule_id);
+                self.rules.retain(|r| r.id != confirm.rule_id);
                 self.clamp_selection();
                 self.status = format!("Deleted rule '{}'", confirm.rule_name);
             }
@@ -2625,51 +2625,51 @@ impl App {
         }
     }
 
-    fn toggle_automation_selection(&mut self) {
-        let Some(rule) = self.selected_automation().cloned() else {
+    fn toggle_rule_selection(&mut self) {
+        let Some(rule) = self.selected_rule().cloned() else {
             return;
         };
-        if self.automation_selected_ids.contains(&rule.id) {
-            self.automation_selected_ids.remove(&rule.id);
+        if self.rule_selected_ids.contains(&rule.id) {
+            self.rule_selected_ids.remove(&rule.id);
         } else {
-            self.automation_selected_ids.insert(rule.id);
-            self.automation_bulk_select_mode = true;
+            self.rule_selected_ids.insert(rule.id);
+            self.rule_bulk_select_mode = true;
         }
-        if self.automation_selected_ids.is_empty() {
-            self.automation_bulk_select_mode = false;
+        if self.rule_selected_ids.is_empty() {
+            self.rule_bulk_select_mode = false;
         }
-        let count = self.automation_selected_ids.len();
+        let count = self.rule_selected_ids.len();
         self.status = format!("{count} rule(s) selected");
     }
 
-    async fn bulk_enable_automations(&mut self) {
-        let ids: Vec<String> = self.automation_selected_ids.iter().cloned().collect();
-        match self.client.bulk_toggle_automations(&ids, true).await {
+    async fn bulk_enable_rules(&mut self) {
+        let ids: Vec<String> = self.rule_selected_ids.iter().cloned().collect();
+        match self.client.bulk_toggle_rules(&ids, true).await {
             Ok(_) => {
-                for r in self.automations.iter_mut() {
+                for r in self.rules.iter_mut() {
                     if ids.contains(&r.id) {
                         r.enabled = true;
                     }
                 }
-                self.automation_selected_ids.clear();
-                self.automation_bulk_select_mode = false;
+                self.rule_selected_ids.clear();
+                self.rule_bulk_select_mode = false;
                 self.status = format!("Enabled {} rule(s)", ids.len());
             }
             Err(e) => self.error = Some(e.to_string()),
         }
     }
 
-    async fn bulk_disable_automations(&mut self) {
-        let ids: Vec<String> = self.automation_selected_ids.iter().cloned().collect();
-        match self.client.bulk_toggle_automations(&ids, false).await {
+    async fn bulk_disable_rules(&mut self) {
+        let ids: Vec<String> = self.rule_selected_ids.iter().cloned().collect();
+        match self.client.bulk_toggle_rules(&ids, false).await {
             Ok(_) => {
-                for r in self.automations.iter_mut() {
+                for r in self.rules.iter_mut() {
                     if ids.contains(&r.id) {
                         r.enabled = false;
                     }
                 }
-                self.automation_selected_ids.clear();
-                self.automation_bulk_select_mode = false;
+                self.rule_selected_ids.clear();
+                self.rule_bulk_select_mode = false;
                 self.status = format!("Disabled {} rule(s)", ids.len());
             }
             Err(e) => self.error = Some(e.to_string()),
@@ -2722,7 +2722,7 @@ impl App {
     }
 
     async fn action_export_rules(&mut self) -> Result<String> {
-        let value = self.client.export_automations().await?;
+        let value = self.client.export_rules().await?;
         let dir = backup_exports_dir();
         std::fs::create_dir_all(&dir).context("creating exports dir")?;
         let ts = chrono::Local::now().format("%Y%m%d-%H%M%S");
@@ -2753,7 +2753,7 @@ impl App {
         if !value.is_array() {
             return Err(anyhow!("rules import expects a JSON array"));
         }
-        let count = self.client.import_automations(value).await?;
+        let count = self.client.import_rules(value).await?;
         Ok(format!("Imported {count} rule(s) from {}", path.display()))
     }
 
@@ -4138,7 +4138,7 @@ impl App {
             },
             Tab::Scenes => self.scenes.len(),
             Tab::Areas => self.areas.len(),
-            Tab::Automations => self.visible_automations().len(),
+            Tab::Rules => self.visible_rules().len(),
             Tab::Plugins => self.plugins.len(),
             Tab::Manage => match self.admin_sub {
                 AdminSubPanel::Modes => self.modes.len(),
@@ -6065,7 +6065,7 @@ async fn fetch_remote_snapshot(
     let mut scenes = client.list_scenes().await.unwrap_or_default();
     scenes.extend(hue_scenes_from_devices(&devices));
     let areas = client.list_areas().await.unwrap_or_default();
-    let automations = client.list_automations().await.unwrap_or_default();
+    let rules = client.list_rules().await.unwrap_or_default();
     let events = client.list_events(50).await.unwrap_or_default();
     let switches = client.list_switches().await.unwrap_or_default();
     let timers = client.list_timers().await.unwrap_or_default();
@@ -6084,7 +6084,7 @@ async fn fetch_remote_snapshot(
             devices,
             scenes,
             areas,
-            automations,
+            rules,
             events,
             users,
             plugins,
@@ -6100,7 +6100,7 @@ fn snapshot_is_empty(snapshot: &CacheSnapshot) -> bool {
     snapshot.devices.is_empty()
         && snapshot.scenes.is_empty()
         && snapshot.areas.is_empty()
-        && snapshot.automations.is_empty()
+        && snapshot.rules.is_empty()
         && snapshot.events.is_empty()
         && snapshot.users.is_empty()
         && snapshot.plugins.is_empty()
@@ -6206,9 +6206,9 @@ mod tests {
     }
 
     #[test]
-    fn test_automation_stale_filter() {
+    fn test_rule_stale_filter() {
         let mut app = test_app();
-        app.automation_filter_stale = true;
+        app.rule_filter_stale = true;
         let rule_ok = Rule {
             id: "r1".to_string(),
             name: "ok".to_string(),
@@ -6227,8 +6227,8 @@ mod tests {
             error: Some("parse error".to_string()),
             trigger: None,
         };
-        assert!(!app.automation_matches_filter(&rule_ok));
-        assert!(app.automation_matches_filter(&rule_stale));
+        assert!(!app.rule_matches_filter(&rule_ok));
+        assert!(app.rule_matches_filter(&rule_stale));
     }
 
     #[test]
