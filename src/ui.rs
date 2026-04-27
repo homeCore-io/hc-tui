@@ -302,6 +302,9 @@ fn status_hints(app: &App) -> Vec<&'static str> {
         }
         return vec!["c cancel", "Esc close"];
     }
+    if app.automation_detail_open {
+        return vec!["j/k scroll", "PgUp/PgDn", "r refresh", "Esc back", "q quit"];
+    }
     if app.plugin_detail_open {
         return vec![
             "1/2/3 panel",
@@ -842,6 +845,13 @@ fn draw_area_devices(frame: &mut Frame<'_>, app: &App, area: Rect) {
 // ── Automations tab ───────────────────────────────────────────────────────────
 
 fn draw_automations_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    // Read-only detail view takes over the whole tab pane when open —
+    // mirrors the plugin_detail full-screen replacement pattern.
+    if app.automation_detail_open {
+        draw_automation_detail(frame, app, area);
+        return;
+    }
+
     // Split: if history pane is open, divide horizontally 60/40
     let (list_area, history_area) = if app.fire_history_open {
         let panes = Layout::default()
@@ -858,6 +868,137 @@ fn draw_automations_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
     if let Some(ha) = history_area {
         draw_automation_history(frame, app, ha);
     }
+}
+
+/// Read-only rule detail view. Layout (top-down):
+/// 1. Header — name, enabled badge, priority, tags, error banner
+/// 2. RON pane (Min) — scrollable mono-style display of the on-disk
+///    .ron file content
+/// 3. Fire history pane (fixed Length) — last firings, oldest at the
+///    bottom
+fn draw_automation_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let rule = app
+        .automation_detail_id
+        .as_deref()
+        .and_then(|id| app.automations.iter().find(|r| r.id == id));
+
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),    // header
+            Constraint::Min(5),       // RON pane (takes the rest)
+            Constraint::Length(8),    // fire history (fixed)
+        ])
+        .split(area);
+
+    // Header.
+    let header_lines: Vec<Line> = match rule {
+        Some(r) => {
+            let mut spans: Vec<Span> = Vec::new();
+            spans.push(Span::styled(
+                r.name.clone(),
+                Style::default().add_modifier(Modifier::BOLD).fg(Color::White),
+            ));
+            spans.push(Span::raw("  "));
+            spans.push(if r.enabled {
+                Span::styled("● enabled", Style::default().fg(Color::Green))
+            } else {
+                Span::styled("○ disabled", Style::default().fg(Color::DarkGray))
+            });
+            spans.push(Span::raw(format!("  · priority {}", r.priority)));
+            if !r.tags.is_empty() {
+                spans.push(Span::raw(format!("  · tags [{}]", r.tags.join(","))));
+            }
+            let mut lines = vec![Line::from(spans)];
+            if let Some(err) = r.error.as_ref() {
+                lines.push(Line::from(Span::styled(
+                    format!("error: {err}"),
+                    Style::default().fg(Color::Red),
+                )));
+            } else if let Some(err) = app.automation_detail_error.as_ref() {
+                lines.push(Line::from(Span::styled(
+                    format!("warning: {err}"),
+                    Style::default().fg(Color::Yellow),
+                )));
+            }
+            lines
+        }
+        None => vec![Line::from(Span::styled(
+            "rule no longer in list",
+            Style::default().fg(Color::Yellow),
+        ))],
+    };
+    let header = Paragraph::new(header_lines)
+        .block(Block::default().borders(Borders::ALL).title(" Rule "));
+    frame.render_widget(header, layout[0]);
+
+    // RON pane.
+    let ron_block = Block::default()
+        .borders(Borders::ALL)
+        .title(" RON  (j/k scroll · r refresh · Esc back) ");
+    let ron_text = if app.automation_detail_loading && app.automation_detail_ron.is_none() {
+        "loading…".to_string()
+    } else {
+        app.automation_detail_ron
+            .clone()
+            .unwrap_or_else(|| "(no .ron file backing this rule)".to_string())
+    };
+    let ron = Paragraph::new(ron_text)
+        .block(ron_block)
+        .style(Style::default().fg(Color::Gray))
+        .scroll((app.automation_detail_scroll, 0))
+        .wrap(Wrap { trim: false });
+    frame.render_widget(ron, layout[1]);
+
+    // Fire history pane.
+    let history_items: Vec<ListItem> = match app.automation_detail_history.as_ref() {
+        Some(h) if h.is_empty() => vec![ListItem::new(Line::from(Span::styled(
+            "no recent firings",
+            Style::default().fg(Color::DarkGray),
+        )))],
+        Some(h) => {
+            let take = (layout[2].height.saturating_sub(2) as usize).max(1);
+            // Newest first in the history vec; show newest at the top
+            // and let older entries fall off if the pane is short.
+            h.iter()
+                .take(take)
+                .map(|f| {
+                    let ok_glyph = if f.conditions_passed {
+                        Span::styled("✓", Style::default().fg(Color::Green))
+                    } else {
+                        Span::styled("✗", Style::default().fg(Color::Yellow))
+                    };
+                    Line::from(vec![
+                        Span::raw(format_timestamp_utc(&f.timestamp, false)),
+                        Span::raw("  "),
+                        ok_glyph,
+                        Span::raw(format!(
+                            "  {} action{}  {}ms",
+                            f.actions_ran,
+                            if f.actions_ran == 1 { "" } else { "s" },
+                            f.eval_ms
+                        )),
+                    ])
+                })
+                .map(ListItem::new)
+                .collect()
+        }
+        None => vec![ListItem::new(Line::from(Span::styled(
+            if app.automation_detail_loading {
+                "loading…"
+            } else {
+                "(history unavailable)"
+            },
+            Style::default().fg(Color::DarkGray),
+        )))],
+    };
+    let history_title = match app.automation_detail_history.as_ref() {
+        Some(h) => format!(" Fire history ({}) ", h.len()),
+        None => " Fire history ".to_string(),
+    };
+    let history = List::new(history_items)
+        .block(Block::default().borders(Borders::ALL).title(history_title));
+    frame.render_widget(history, layout[2]);
 }
 
 fn draw_automations_list(frame: &mut Frame<'_>, app: &App, area: Rect) {

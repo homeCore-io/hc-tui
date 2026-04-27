@@ -785,6 +785,18 @@ pub struct App {
     pub fire_history_rule_id: Option<String>,
     pub fire_history: Vec<RuleFiring>,
     pub automation_delete_confirm: Option<DeleteConfirm>,
+    /// Read-only rule detail screen — opens on `Enter` from the rule
+    /// list, full-screen replacement of the list view. RON pane shows
+    /// the on-disk file verbatim; fire history pane shows the last N
+    /// firings inline.
+    pub automation_detail_open: bool,
+    pub automation_detail_id: Option<String>,
+    pub automation_detail_ron: Option<String>,
+    pub automation_detail_history: Option<Vec<RuleFiring>>,
+    /// Vertical scroll offset (in lines) for the RON pane.
+    pub automation_detail_scroll: u16,
+    pub automation_detail_loading: bool,
+    pub automation_detail_error: Option<String>,
     pub groups_open: bool,
     pub groups: Vec<RuleGroup>,
     pub groups_selected: usize,
@@ -1076,6 +1088,13 @@ impl App {
             fire_history_rule_id: None,
             fire_history: Vec::new(),
             automation_delete_confirm: None,
+            automation_detail_open: false,
+            automation_detail_id: None,
+            automation_detail_ron: None,
+            automation_detail_history: None,
+            automation_detail_scroll: 0,
+            automation_detail_loading: false,
+            automation_detail_error: None,
             groups_open: false,
             groups: Vec::new(),
             groups_selected: 0,
@@ -1520,6 +1539,24 @@ impl App {
             return;
         }
 
+        // Read-only rule detail view takes over the Automations tab
+        // when open. Esc returns to the list; j/k or arrows scroll the
+        // RON pane; r refreshes both fetches.
+        if self.automation_detail_open {
+            match key.code {
+                KeyCode::Esc => self.close_automation_detail(),
+                KeyCode::Char('j') | KeyCode::Down => self.scroll_automation_detail(1),
+                KeyCode::Char('k') | KeyCode::Up => self.scroll_automation_detail(-1),
+                KeyCode::PageDown => self.scroll_automation_detail(10),
+                KeyCode::PageUp => self.scroll_automation_detail(-10),
+                KeyCode::Home => self.automation_detail_scroll = 0,
+                KeyCode::Char('r') => self.refresh_automation_detail().await,
+                KeyCode::Char('q') => self.should_quit = true,
+                _ => {}
+            }
+            return;
+        }
+
         // Handle delete confirmation dialog first
         if self.automation_delete_confirm.is_some() {
             match key.code {
@@ -1887,6 +1924,7 @@ impl App {
                     DeviceSubPanel::All => self.open_selected_device_editor(),
                 },
                 Tab::Areas => self.open_area_editor_edit(),
+                Tab::Automations => self.open_selected_automation_detail().await,
                 Tab::Plugins => self.open_plugin_detail(),
                 Tab::Manage => {
                     if matches!(self.admin_sub, AdminSubPanel::Matter) {
@@ -2424,6 +2462,97 @@ impl App {
                 self.error = Some(format!("Failed to load history: {e}"));
             }
         }
+    }
+
+    // ── Automation read-only detail view ──────────────────────────────────────
+
+    /// Open the read-only rule detail view for the currently-selected
+    /// rule. Fetches the on-disk RON and recent fire history in
+    /// parallel; renders a "loading…" placeholder until both land.
+    pub async fn open_selected_automation_detail(&mut self) {
+        let Some(rule) = self.selected_automation().cloned() else {
+            return;
+        };
+        self.automation_detail_open = true;
+        self.automation_detail_id = Some(rule.id.clone());
+        self.automation_detail_ron = None;
+        self.automation_detail_history = None;
+        self.automation_detail_scroll = 0;
+        self.automation_detail_error = None;
+        self.automation_detail_loading = true;
+
+        let (ron, history) = tokio::join!(
+            self.client.get_automation_ron(&rule.id),
+            self.client.get_automation_history(&rule.id),
+        );
+
+        // Only apply if the user hasn't already navigated away.
+        if self.automation_detail_id.as_deref() != Some(rule.id.as_str()) {
+            return;
+        }
+
+        match ron {
+            Ok(text) => self.automation_detail_ron = Some(text),
+            Err(e) => {
+                self.automation_detail_error = Some(format!("RON: {e}"));
+            }
+        }
+        match history {
+            Ok(h) => self.automation_detail_history = Some(h),
+            Err(e) => {
+                // History failure is non-fatal — show RON anyway.
+                if self.automation_detail_error.is_none() {
+                    self.automation_detail_error = Some(format!("history: {e}"));
+                }
+                self.automation_detail_history = Some(Vec::new());
+            }
+        }
+        self.automation_detail_loading = false;
+    }
+
+    /// Re-fetch RON + history for the open detail view. Bound to `r`.
+    pub async fn refresh_automation_detail(&mut self) {
+        let Some(id) = self.automation_detail_id.clone() else {
+            return;
+        };
+        self.automation_detail_loading = true;
+        self.automation_detail_error = None;
+        let (ron, history) = tokio::join!(
+            self.client.get_automation_ron(&id),
+            self.client.get_automation_history(&id),
+        );
+        if self.automation_detail_id.as_deref() != Some(id.as_str()) {
+            return;
+        }
+        match ron {
+            Ok(text) => self.automation_detail_ron = Some(text),
+            Err(e) => self.automation_detail_error = Some(format!("RON: {e}")),
+        }
+        match history {
+            Ok(h) => self.automation_detail_history = Some(h),
+            Err(e) => {
+                if self.automation_detail_error.is_none() {
+                    self.automation_detail_error = Some(format!("history: {e}"));
+                }
+            }
+        }
+        self.automation_detail_loading = false;
+    }
+
+    pub fn close_automation_detail(&mut self) {
+        self.automation_detail_open = false;
+        self.automation_detail_id = None;
+        self.automation_detail_ron = None;
+        self.automation_detail_history = None;
+        self.automation_detail_scroll = 0;
+        self.automation_detail_error = None;
+        self.automation_detail_loading = false;
+    }
+
+    pub fn scroll_automation_detail(&mut self, delta: i32) {
+        let cur = self.automation_detail_scroll as i32;
+        let next = (cur + delta).max(0);
+        self.automation_detail_scroll = u16::try_from(next).unwrap_or(u16::MAX);
     }
 
     // ── Automation enable/disable/clone/delete ────────────────────────────────

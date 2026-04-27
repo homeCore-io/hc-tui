@@ -517,6 +517,21 @@ impl HomeCoreClient {
         Self::parse_json(resp).await
     }
 
+    /// `GET /automations/:id/ron` — returns the on-disk RON file
+    /// content as plain text. Used by the read-only rule detail view
+    /// to show the literal authoring artifact (preserving field order
+    /// and any inline comments).
+    pub async fn get_automation_ron(&self, id: &str) -> Result<String> {
+        let path = format!("/automations/{id}/ron");
+        let resp = self.request(Method::GET, &path).await?;
+        let status = resp.status();
+        let text = resp.text().await.context("reading rule RON body")?;
+        if !status.is_success() {
+            return Err(anyhow!("/automations/{id}/ron returned {status}: {text}"));
+        }
+        Ok(text)
+    }
+
     pub async fn clone_automation(&self, id: &str) -> Result<Rule> {
         let path = format!("/automations/{id}/clone");
         let resp = self.request(Method::POST, &path).await?;
