@@ -1,10 +1,10 @@
 use crate::api::{
-    Area, Dashboard, DashboardWidgetType, DeviceState, EventEntry, HomeCoreClient, LogLine,
+    Area, AuditEntry, Capabilities, DeviceState, EventEntry, HomeCoreClient, LogLine,
     LoginResponse, MatterNode, ModeRecord, PluginRecord, Role, Rule, RuleFiring, RuleGroup, Scene,
     SystemStatus, UserInfo,
 };
 use crate::cache::{CacheSnapshot, CacheStore};
-use anyhow::Result;
+use anyhow::{Context, Result, anyhow};
 use chrono::{DateTime, Local, Utc};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use serde_json::{Value, json};
@@ -105,6 +105,7 @@ impl EventsFilterMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PluginDetailPanel {
     Overview,
+    Actions,
     Diagnostics,
     Metrics,
 }
@@ -113,6 +114,7 @@ impl PluginDetailPanel {
     pub fn title(self) -> &'static str {
         match self {
             Self::Overview => "Overview",
+            Self::Actions => "Actions",
             Self::Diagnostics => "Diagnostics",
             Self::Metrics => "Metrics",
         }
@@ -231,6 +233,35 @@ pub enum AdminSubPanel {
     Users,
     Logs,
     Events,
+    Audit,
+    Backup,
+}
+
+/// Actions on the Backup admin sub-panel. Exposed to the UI as a fixed
+/// list; the user navigates with Up/Down and triggers with Enter.
+pub const BACKUP_ACTIONS: &[(&str, &str)] = &[
+    ("backup_zip",     "Download system backup (.zip)"),
+    ("export_rules",   "Export all rules to JSON"),
+    ("export_scenes",  "Export all scenes to JSON"),
+    ("import_rules",   "Import rules from ~/.homecore/imports/rules.json"),
+    ("import_scenes",  "Import scenes from ~/.homecore/imports/scenes.json"),
+];
+
+fn home_dir() -> std::path::PathBuf {
+    std::env::var("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+}
+
+/// Directory where the Backup panel writes exports.
+/// Created on first export if it doesn't exist.
+pub fn backup_exports_dir() -> std::path::PathBuf {
+    home_dir().join(".homecore").join("exports")
+}
+
+/// Directory the Backup panel reads imports from.
+pub fn backup_imports_dir() -> std::path::PathBuf {
+    home_dir().join(".homecore").join("imports")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -293,6 +324,123 @@ pub struct ModeEditor {
     pub name: String,
     pub kind: ModeKind,
     pub field: ModeEditField,
+}
+
+/// Glue device type — the 11 unified primitives served by `POST /glue`.
+/// Switch + timer overlap with the existing dedicated editors but are
+/// included here so the unified creator can produce them too.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GlueType {
+    Switch,
+    Timer,
+    Counter,
+    Number,
+    Select,
+    Text,
+    Button,
+    Datetime,
+    Group,
+    Threshold,
+    Schedule,
+}
+
+impl GlueType {
+    pub const ALL: [GlueType; 11] = [
+        GlueType::Switch,
+        GlueType::Timer,
+        GlueType::Counter,
+        GlueType::Number,
+        GlueType::Select,
+        GlueType::Text,
+        GlueType::Button,
+        GlueType::Datetime,
+        GlueType::Group,
+        GlueType::Threshold,
+        GlueType::Schedule,
+    ];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            GlueType::Switch => "switch",
+            GlueType::Timer => "timer",
+            GlueType::Counter => "counter",
+            GlueType::Number => "number",
+            GlueType::Select => "select",
+            GlueType::Text => "text",
+            GlueType::Button => "button",
+            GlueType::Datetime => "datetime",
+            GlueType::Group => "group",
+            GlueType::Threshold => "threshold",
+            GlueType::Schedule => "schedule",
+        }
+    }
+
+    pub fn next(&self) -> Self {
+        let i = Self::ALL.iter().position(|t| t == self).unwrap_or(0);
+        Self::ALL[(i + 1) % Self::ALL.len()]
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GlueEditField {
+    Type,
+    Id,
+    Name,
+    // Type-specific fields (only some apply per type — `next_field` skips
+    // irrelevant ones based on the chosen GlueType)
+    Options,         // select
+    Members,         // group
+    SourceDeviceId,  // threshold
+    SourceAttribute, // threshold
+    Threshold,       // threshold
+}
+
+#[derive(Debug, Clone)]
+pub struct GlueCreator {
+    pub glue_type: GlueType,
+    pub id: String,
+    pub name: String,
+    pub options: String,          // comma-separated
+    pub members: String,          // comma-separated device IDs
+    pub source_device_id: String, // threshold
+    pub source_attribute: String, // threshold (default "value")
+    pub threshold: String,        // numeric, parsed at save
+    pub field: GlueEditField,
+    pub error: Option<String>,
+}
+
+impl GlueCreator {
+    pub fn new() -> Self {
+        Self {
+            glue_type: GlueType::Counter,
+            id: String::new(),
+            name: String::new(),
+            options: String::new(),
+            members: String::new(),
+            source_device_id: String::new(),
+            source_attribute: "value".to_string(),
+            threshold: String::new(),
+            field: GlueEditField::Type,
+            error: None,
+        }
+    }
+
+    /// Visit fields in canonical order, skipping ones not relevant to
+    /// the chosen glue type. Used for Tab/BackTab navigation.
+    pub fn fields_for_type(t: GlueType) -> Vec<GlueEditField> {
+        let mut fields = vec![GlueEditField::Type, GlueEditField::Id, GlueEditField::Name];
+        match t {
+            GlueType::Select => fields.push(GlueEditField::Options),
+            GlueType::Group => fields.push(GlueEditField::Members),
+            GlueType::Threshold => {
+                fields.push(GlueEditField::SourceDeviceId);
+                fields.push(GlueEditField::SourceAttribute);
+                fields.push(GlueEditField::Threshold);
+            }
+            _ => {}
+        }
+        fields
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -368,7 +516,6 @@ pub enum AutomationFilterField {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Devices,
-    Dashboards,
     Scenes,
     Areas,
     Automations,
@@ -380,7 +527,6 @@ impl Tab {
     pub fn title(self) -> &'static str {
         match self {
             Self::Devices => "Devices",
-            Self::Dashboards => "Dashboards",
             Self::Scenes => "Scenes",
             Self::Areas => "Areas",
             Self::Automations => "Automations",
@@ -408,8 +554,17 @@ pub struct App {
     pub plugin_detail_open: bool,
     pub plugin_detail_plugin_id: Option<String>,
     pub plugin_detail_panel: PluginDetailPanel,
+    /// Cached capabilities for the currently-open plugin's Actions panel.
+    /// Cleared when the plugin detail screen closes or the plugin changes.
+    pub plugin_capabilities: Option<Capabilities>,
+    pub plugin_capabilities_loading: bool,
+    pub plugin_capabilities_error: Option<String>,
+    /// True while a non-streaming plugin action POST is in flight.
+    pub action_busy: bool,
+    /// Last status message from the Actions panel ("Action X completed",
+    /// "Error: …"). Surfaced in the panel footer.
+    pub action_status: String,
     pub devices: Vec<DeviceState>,
-    pub dashboards: Vec<Dashboard>,
     pub scenes: Vec<Scene>,
     pub areas: Vec<Area>,
     pub automations: Vec<Rule>,
@@ -442,12 +597,32 @@ pub struct App {
     pub device_search_query: String,
     pub device_search_input_open: bool,
     pub admin_sub: AdminSubPanel,
+    /// Last status message for the Backup panel ("backup saved to …", error, etc.).
+    pub backup_status: String,
+    /// True while a backup/export/import action is in flight; gates re-fire.
+    pub backup_busy: bool,
+    /// Audit entries for the current page. Newest-first per the server.
+    pub audit_entries: Vec<AuditEntry>,
+    /// True while a /audit query is in flight.
+    pub audit_loading: bool,
+    /// Last error from the audit query, surfaced in the panel footer.
+    pub audit_error: Option<String>,
+    /// Pagination offset (rows skipped). 0 = first page.
+    pub audit_offset: u32,
+    /// Page size; fixed at 100 for now.
+    pub audit_limit: u32,
+    /// Selected row's index within audit_entries that has its detail
+    /// JSON expanded. None = no row expanded.
+    pub audit_expanded_idx: Option<usize>,
     pub switches: Vec<DeviceState>,
     pub timers: Vec<DeviceState>,
     pub modes: Vec<ModeRecord>,
     pub switch_editor: Option<SwitchEditor>,
     pub timer_editor: Option<TimerEditor>,
     pub mode_editor: Option<ModeEditor>,
+    /// Unified creator for the 11 glue device types. Open via `g` on
+    /// the Manage tab; submit creates via `POST /glue`.
+    pub glue_creator: Option<GlueCreator>,
     pub matter_commission_editor: Option<MatterCommissionEditor>,
 
     // Automations tab features
@@ -685,8 +860,12 @@ impl App {
             plugin_detail_open: false,
             plugin_detail_plugin_id: None,
             plugin_detail_panel: PluginDetailPanel::Overview,
+            plugin_capabilities: None,
+            plugin_capabilities_loading: false,
+            plugin_capabilities_error: None,
+            action_busy: false,
+            action_status: String::new(),
             devices: Vec::new(),
-            dashboards: Vec::new(),
             scenes: Vec::new(),
             areas: Vec::new(),
             automations: Vec::new(),
@@ -719,12 +898,21 @@ impl App {
             device_search_query: String::new(),
             device_search_input_open: false,
             admin_sub: AdminSubPanel::Modes,
+            backup_status: String::new(),
+            backup_busy: false,
+            audit_entries: Vec::new(),
+            audit_loading: false,
+            audit_error: None,
+            audit_offset: 0,
+            audit_limit: 100,
+            audit_expanded_idx: None,
             switches: Vec::new(),
             timers: Vec::new(),
             modes: Vec::new(),
             switch_editor: None,
             timer_editor: None,
             mode_editor: None,
+            glue_creator: None,
             matter_commission_editor: None,
 
             automation_filter_tag: String::new(),
@@ -760,7 +948,6 @@ impl App {
     pub fn tabs(&self) -> Vec<Tab> {
         let mut tabs = vec![
             Tab::Devices,
-            Tab::Dashboards,
             Tab::Scenes,
             Tab::Areas,
             Tab::Automations,
@@ -876,12 +1063,7 @@ impl App {
 
     pub async fn refresh_all(&mut self) -> Result<()> {
         self.status = "Refreshing...".to_string();
-        let mut warnings = Vec::new();
         self.devices = self.client.list_devices().await?;
-        match self.client.list_dashboards().await {
-            Ok(dashboards) => self.dashboards = dashboards,
-            Err(err) => warnings.push(format!("dashboards: {err}")),
-        }
         let mut scenes = self.client.list_scenes().await?;
         scenes.extend(hue_scenes_from_devices(&self.devices));
         self.scenes = scenes;
@@ -901,11 +1083,7 @@ impl App {
         }
         self.save_to_cache().await?;
         self.clamp_selection();
-        self.status = if warnings.is_empty() {
-            "Data refreshed and cached".to_string()
-        } else {
-            format!("Data refreshed with warnings: {}", warnings.join(" | "))
-        };
+        self.status = "Data refreshed and cached".to_string();
         Ok(())
     }
 
@@ -922,7 +1100,6 @@ impl App {
     fn snapshot(&self) -> CacheSnapshot {
         CacheSnapshot {
             devices: self.devices.clone(),
-            dashboards: self.dashboards.clone(),
             scenes: self.scenes.clone(),
             areas: self.areas.clone(),
             automations: self.automations.clone(),
@@ -937,7 +1114,6 @@ impl App {
 
     fn apply_snapshot(&mut self, snapshot: CacheSnapshot) {
         self.devices = snapshot.devices;
-        self.dashboards = snapshot.dashboards;
         self.scenes = snapshot.scenes;
         self.areas = snapshot.areas;
         self.automations = snapshot.automations;
@@ -1205,22 +1381,35 @@ impl App {
                 KeyCode::Esc => {
                     self.plugin_detail_open = false;
                     self.plugin_detail_plugin_id = None;
+                    self.plugin_capabilities = None;
+                    self.plugin_capabilities_error = None;
+                    self.action_status.clear();
                     self.status = "Closed plugin detail".to_string();
                 }
                 KeyCode::Char('1') => {
                     self.plugin_detail_panel = PluginDetailPanel::Overview;
                 }
                 KeyCode::Char('2') => {
-                    self.plugin_detail_panel = PluginDetailPanel::Diagnostics;
+                    self.plugin_detail_panel = PluginDetailPanel::Actions;
+                    self.refresh_plugin_capabilities().await;
                 }
                 KeyCode::Char('3') => {
+                    self.plugin_detail_panel = PluginDetailPanel::Diagnostics;
+                }
+                KeyCode::Char('4') => {
                     self.plugin_detail_panel = PluginDetailPanel::Metrics;
                 }
                 KeyCode::Left | KeyCode::BackTab => {
                     self.cycle_plugin_detail_panel(false);
+                    if matches!(self.plugin_detail_panel, PluginDetailPanel::Actions) {
+                        self.refresh_plugin_capabilities().await;
+                    }
                 }
                 KeyCode::Right | KeyCode::Tab => {
                     self.cycle_plugin_detail_panel(true);
+                    if matches!(self.plugin_detail_panel, PluginDetailPanel::Actions) {
+                        self.refresh_plugin_capabilities().await;
+                    }
                 }
                 KeyCode::Char('r') => {
                     if let Err(err) = self.refresh_all().await {
@@ -1232,6 +1421,24 @@ impl App {
                 }
                 KeyCode::Char('p') => {
                     self.pair_bridges_for_selected_plugin().await;
+                }
+                KeyCode::Up if matches!(self.plugin_detail_panel, PluginDetailPanel::Actions) => {
+                    if self.selected > 0 {
+                        self.selected -= 1;
+                    }
+                }
+                KeyCode::Down if matches!(self.plugin_detail_panel, PluginDetailPanel::Actions) => {
+                    let len = self
+                        .plugin_capabilities
+                        .as_ref()
+                        .map(|c| c.actions.len())
+                        .unwrap_or(0);
+                    if self.selected + 1 < len {
+                        self.selected += 1;
+                    }
+                }
+                KeyCode::Enter if matches!(self.plugin_detail_panel, PluginDetailPanel::Actions) => {
+                    self.run_selected_plugin_action().await;
                 }
                 _ => {}
             }
@@ -1260,6 +1467,10 @@ impl App {
         }
         if self.mode_editor.is_some() {
             self.on_key_mode_editor(key).await;
+            return;
+        }
+        if self.glue_creator.is_some() {
+            self.on_key_glue_creator(key).await;
             return;
         }
         if self.matter_commission_editor.is_some() {
@@ -1334,6 +1545,9 @@ impl App {
                 Tab::Manage if matches!(self.admin_sub, AdminSubPanel::Status) => {
                     self.refresh_system_status().await;
                 }
+                Tab::Manage if matches!(self.admin_sub, AdminSubPanel::Audit) => {
+                    self.refresh_audit().await;
+                }
                 _ => {
                     if let Err(err) = self.refresh_all().await {
                         self.error = Some(err.to_string());
@@ -1362,12 +1576,14 @@ impl App {
             }
             KeyCode::Left if matches!(self.active_tab(), Tab::Manage) => {
                 self.admin_sub = match self.admin_sub {
-                    AdminSubPanel::Modes => AdminSubPanel::Events,
+                    AdminSubPanel::Modes => AdminSubPanel::Backup,
                     AdminSubPanel::Matter => AdminSubPanel::Modes,
                     AdminSubPanel::Status => AdminSubPanel::Matter,
                     AdminSubPanel::Users => AdminSubPanel::Status,
                     AdminSubPanel::Logs => AdminSubPanel::Users,
                     AdminSubPanel::Events => AdminSubPanel::Logs,
+                    AdminSubPanel::Audit => AdminSubPanel::Events,
+                    AdminSubPanel::Backup => AdminSubPanel::Audit,
                 };
                 self.selected = 0;
                 self.error = None;
@@ -1376,6 +1592,9 @@ impl App {
                 }
                 if matches!(self.admin_sub, AdminSubPanel::Status) {
                     self.refresh_system_status().await;
+                }
+                if matches!(self.admin_sub, AdminSubPanel::Audit) {
+                    self.refresh_audit().await;
                 }
             }
             KeyCode::Right if matches!(self.active_tab(), Tab::Manage) => {
@@ -1385,7 +1604,9 @@ impl App {
                     AdminSubPanel::Status => AdminSubPanel::Users,
                     AdminSubPanel::Users => AdminSubPanel::Logs,
                     AdminSubPanel::Logs => AdminSubPanel::Events,
-                    AdminSubPanel::Events => AdminSubPanel::Modes,
+                    AdminSubPanel::Events => AdminSubPanel::Audit,
+                    AdminSubPanel::Audit => AdminSubPanel::Backup,
+                    AdminSubPanel::Backup => AdminSubPanel::Modes,
                 };
                 self.selected = 0;
                 self.error = None;
@@ -1394,6 +1615,9 @@ impl App {
                 }
                 if matches!(self.admin_sub, AdminSubPanel::Status) {
                     self.refresh_system_status().await;
+                }
+                if matches!(self.admin_sub, AdminSubPanel::Audit) {
+                    self.refresh_audit().await;
                 }
             }
             KeyCode::BackTab => {
@@ -1514,6 +1738,10 @@ impl App {
                         } else {
                             self.open_user_editor_role();
                         }
+                    } else if matches!(self.admin_sub, AdminSubPanel::Audit) {
+                        self.audit_toggle_expanded();
+                    } else if matches!(self.admin_sub, AdminSubPanel::Backup) {
+                        self.run_selected_backup_action().await;
                     } else {
                         self.open_manage_editor();
                     }
@@ -1547,6 +1775,8 @@ impl App {
                         if self.is_admin() {
                             self.open_user_editor_create();
                         }
+                    } else if matches!(self.admin_sub, AdminSubPanel::Audit) {
+                        self.audit_next_page().await;
                     } else {
                         self.open_manage_editor();
                     }
@@ -1596,6 +1826,9 @@ impl App {
                 }
                 Tab::Manage if matches!(self.admin_sub, AdminSubPanel::Users) => {
                     self.open_user_editor_password()
+                }
+                Tab::Manage if matches!(self.admin_sub, AdminSubPanel::Audit) => {
+                    self.audit_prev_page().await;
                 }
                 Tab::Manage if matches!(self.admin_sub, AdminSubPanel::Logs) => {
                     self.log_paused = !self.log_paused;
@@ -1802,6 +2035,9 @@ impl App {
             KeyCode::Char('g') | KeyCode::Char('G') => {
                 if matches!(self.active_tab(), Tab::Automations) {
                     self.open_groups_panel().await;
+                } else if matches!(self.active_tab(), Tab::Manage) {
+                    self.glue_creator = Some(GlueCreator::new());
+                    self.status = "Open glue creator".to_string();
                 }
             }
             KeyCode::Char('s') => {
@@ -2150,6 +2386,162 @@ impl App {
             }
             Err(e) => self.error = Some(e.to_string()),
         }
+    }
+
+    // ── Backup / export / import ──────────────────────────────────────────────
+    //
+    // Five fixed actions on the Backup admin sub-panel. Selection is the
+    // shared `self.selected` (clamped to BACKUP_ACTIONS.len()); Enter
+    // dispatches via this method.
+
+    async fn run_selected_backup_action(&mut self) {
+        if self.backup_busy {
+            return;
+        }
+        let Some((key, _)) = BACKUP_ACTIONS.get(self.selected) else {
+            return;
+        };
+        self.backup_busy = true;
+        self.backup_status = format!("Running: {key}…");
+
+        let result: Result<String> = match *key {
+            "backup_zip" => self.action_backup_zip().await,
+            "export_rules" => self.action_export_rules().await,
+            "export_scenes" => self.action_export_scenes().await,
+            "import_rules" => self.action_import_rules().await,
+            "import_scenes" => self.action_import_scenes().await,
+            _ => Err(anyhow!("unknown backup action")),
+        };
+        self.backup_status = match result {
+            Ok(msg) => msg,
+            Err(e) => format!("Error: {e}"),
+        };
+        self.backup_busy = false;
+    }
+
+    async fn action_backup_zip(&mut self) -> Result<String> {
+        let bytes = self.client.backup_zip().await?;
+        let dir = backup_exports_dir();
+        std::fs::create_dir_all(&dir).context("creating exports dir")?;
+        let ts = chrono::Local::now().format("%Y%m%d-%H%M%S");
+        let path = dir.join(format!("homecore-backup-{ts}.zip"));
+        std::fs::write(&path, &bytes).context("writing backup zip")?;
+        Ok(format!(
+            "Saved {} ({:.1} KB)",
+            path.display(),
+            bytes.len() as f64 / 1024.0
+        ))
+    }
+
+    async fn action_export_rules(&mut self) -> Result<String> {
+        let value = self.client.export_automations().await?;
+        let dir = backup_exports_dir();
+        std::fs::create_dir_all(&dir).context("creating exports dir")?;
+        let ts = chrono::Local::now().format("%Y%m%d-%H%M%S");
+        let path = dir.join(format!("rules-{ts}.json"));
+        let pretty = serde_json::to_string_pretty(&value).context("serializing rules")?;
+        std::fs::write(&path, &pretty).context("writing rules export")?;
+        let count = value.as_array().map(|a| a.len()).unwrap_or(0);
+        Ok(format!("Exported {} rule(s) to {}", count, path.display()))
+    }
+
+    async fn action_export_scenes(&mut self) -> Result<String> {
+        let value = self.client.export_scenes().await?;
+        let dir = backup_exports_dir();
+        std::fs::create_dir_all(&dir).context("creating exports dir")?;
+        let ts = chrono::Local::now().format("%Y%m%d-%H%M%S");
+        let path = dir.join(format!("scenes-{ts}.json"));
+        let pretty = serde_json::to_string_pretty(&value).context("serializing scenes")?;
+        std::fs::write(&path, &pretty).context("writing scenes export")?;
+        let count = value.as_array().map(|a| a.len()).unwrap_or(0);
+        Ok(format!("Exported {} scene(s) to {}", count, path.display()))
+    }
+
+    async fn action_import_rules(&mut self) -> Result<String> {
+        let path = backup_imports_dir().join("rules.json");
+        let raw = std::fs::read_to_string(&path)
+            .with_context(|| format!("reading {}", path.display()))?;
+        let value: Value = serde_json::from_str(&raw).context("parsing rules JSON")?;
+        if !value.is_array() {
+            return Err(anyhow!("rules import expects a JSON array"));
+        }
+        let count = self.client.import_automations(value).await?;
+        Ok(format!("Imported {count} rule(s) from {}", path.display()))
+    }
+
+    async fn action_import_scenes(&mut self) -> Result<String> {
+        let path = backup_imports_dir().join("scenes.json");
+        let raw = std::fs::read_to_string(&path)
+            .with_context(|| format!("reading {}", path.display()))?;
+        let value: Value = serde_json::from_str(&raw).context("parsing scenes JSON")?;
+        if !value.is_array() {
+            return Err(anyhow!("scenes import expects a JSON array"));
+        }
+        let count = self.client.import_scenes(value).await?;
+        Ok(format!("Imported {count} scene(s) from {}", path.display()))
+    }
+
+    // ── Audit log ─────────────────────────────────────────────────────────────
+
+    /// Pull the current audit page from the server. Resets selection and
+    /// closes any expanded detail panel so the user lands on a coherent view.
+    async fn refresh_audit(&mut self) {
+        self.audit_loading = true;
+        self.audit_error = None;
+        self.audit_expanded_idx = None;
+        match self
+            .client
+            .list_audit(self.audit_limit, self.audit_offset)
+            .await
+        {
+            Ok(rows) => {
+                self.audit_entries = rows;
+                self.selected = 0;
+                self.clamp_selection();
+                self.status = format!(
+                    "Audit page {} ({} entries)",
+                    self.audit_offset / self.audit_limit + 1,
+                    self.audit_entries.len()
+                );
+            }
+            Err(e) => {
+                self.audit_error = Some(e.to_string());
+                self.audit_entries.clear();
+            }
+        }
+        self.audit_loading = false;
+    }
+
+    /// Advance to the next audit page (offset += limit) and refetch.
+    async fn audit_next_page(&mut self) {
+        // Only advance if the current page is full — otherwise there's
+        // nothing on the next page.
+        if self.audit_entries.len() < self.audit_limit as usize {
+            return;
+        }
+        self.audit_offset = self.audit_offset.saturating_add(self.audit_limit);
+        self.refresh_audit().await;
+    }
+
+    /// Step back one audit page; saturates at 0.
+    async fn audit_prev_page(&mut self) {
+        if self.audit_offset == 0 {
+            return;
+        }
+        self.audit_offset = self.audit_offset.saturating_sub(self.audit_limit);
+        self.refresh_audit().await;
+    }
+
+    /// Toggle the expanded detail panel for the currently selected row.
+    fn audit_toggle_expanded(&mut self) {
+        let idx = self.selected;
+        if idx >= self.audit_entries.len() {
+            return;
+        }
+        self.audit_expanded_idx = match self.audit_expanded_idx {
+            Some(prev) if prev == idx => None,
+            _ => Some(idx),
+        };
     }
 
     // ── System Status ─────────────────────────────────────────────────────────
@@ -2931,13 +3323,128 @@ impl App {
 
     fn cycle_plugin_detail_panel(&mut self, forward: bool) {
         self.plugin_detail_panel = match (self.plugin_detail_panel, forward) {
-            (PluginDetailPanel::Overview, true) => PluginDetailPanel::Diagnostics,
+            (PluginDetailPanel::Overview, true) => PluginDetailPanel::Actions,
+            (PluginDetailPanel::Actions, true) => PluginDetailPanel::Diagnostics,
             (PluginDetailPanel::Diagnostics, true) => PluginDetailPanel::Metrics,
             (PluginDetailPanel::Metrics, true) => PluginDetailPanel::Overview,
             (PluginDetailPanel::Overview, false) => PluginDetailPanel::Metrics,
-            (PluginDetailPanel::Diagnostics, false) => PluginDetailPanel::Overview,
+            (PluginDetailPanel::Actions, false) => PluginDetailPanel::Overview,
+            (PluginDetailPanel::Diagnostics, false) => PluginDetailPanel::Actions,
             (PluginDetailPanel::Metrics, false) => PluginDetailPanel::Diagnostics,
         };
+        self.selected = 0;
+    }
+
+    // ── Plugin capabilities + actions ────────────────────────────────────────
+
+    /// Fetch and cache the manifest for the currently-open plugin's
+    /// Actions panel. Populates `plugin_capabilities` or
+    /// `plugin_capabilities_error` and resets the row cursor.
+    async fn refresh_plugin_capabilities(&mut self) {
+        let Some(plugin_id) = self.plugin_detail_plugin_id.clone() else {
+            return;
+        };
+        self.plugin_capabilities_loading = true;
+        self.plugin_capabilities_error = None;
+        match self.client.get_plugin_capabilities(&plugin_id).await {
+            Ok(caps) => {
+                let n = caps.actions.len();
+                self.plugin_capabilities = Some(caps);
+                self.selected = 0;
+                self.status = format!("Capabilities loaded ({n} actions)");
+            }
+            Err(e) => {
+                self.plugin_capabilities = None;
+                self.plugin_capabilities_error = Some(e.to_string());
+            }
+        }
+        self.plugin_capabilities_loading = false;
+    }
+
+    /// Run the currently-selected action. Non-streaming actions POST and
+    /// surface the response in `action_status`. Streaming actions show
+    /// a "use web client" hint — full streaming UI is Phase 2.
+    async fn run_selected_plugin_action(&mut self) {
+        if self.action_busy {
+            return;
+        }
+        let Some(plugin_id) = self.plugin_detail_plugin_id.clone() else {
+            return;
+        };
+        let Some(caps) = self.plugin_capabilities.clone() else {
+            return;
+        };
+        let Some(action) = caps.actions.get(self.selected).cloned() else {
+            return;
+        };
+
+        if action.stream {
+            self.action_status = format!(
+                "Streaming action `{}` — open the web client to drive this flow (TUI Phase 2 will support it).",
+                action.id
+            );
+            return;
+        }
+
+        // Role gate: server enforces, but surface a friendly error early
+        // if the user clearly lacks the required role.
+        let role_required = action.requires_role.as_str();
+        let user_role = self
+            .current_user
+            .as_ref()
+            .map(|u| match u.role {
+                Role::Admin => "admin",
+                Role::User => "user",
+                Role::ReadOnly => "read_only",
+                Role::Observer => "observer",
+                Role::DeviceOperator => "device_operator",
+                Role::RuleEditor => "rule_editor",
+                Role::ServiceOperator => "service_operator",
+            })
+            .unwrap_or("user");
+        if role_required == "admin" && user_role != "admin" {
+            self.action_status = format!(
+                "Action `{}` requires admin role; you are `{}`.",
+                action.id, user_role
+            );
+            return;
+        }
+
+        self.action_busy = true;
+        self.action_status = format!("Running `{}`…", action.id);
+
+        // Phase 1 sends empty params. Param input UI is a follow-up.
+        let result = self
+            .client
+            .post_plugin_command(&plugin_id, &action.id, serde_json::json!({}))
+            .await;
+
+        self.action_busy = false;
+        match result {
+            Ok(resp) => {
+                // Compact summary: show top-level keys and any "status" or
+                // "request_id" so the operator gets feedback without a
+                // full JSON dump on the panel footer.
+                let summary = match &resp {
+                    Value::Object(map) => {
+                        if let Some(s) = map.get("status").and_then(Value::as_str) {
+                            format!("status={s}")
+                        } else if let Some(rid) = map.get("request_id").and_then(Value::as_str) {
+                            format!("request_id={rid}")
+                        } else {
+                            // Generic — list top-level keys
+                            let keys: Vec<&str> = map.keys().map(String::as_str).collect();
+                            format!("keys=[{}]", keys.join(","))
+                        }
+                    }
+                    _ => resp.to_string(),
+                };
+                self.action_status = format!("`{}` ok — {summary}", action.id);
+            }
+            Err(e) => {
+                self.action_status = format!("`{}` failed: {e}", action.id);
+            }
+        }
     }
 
     async fn discover_bridges_for_selected_plugin(&mut self) {
@@ -3074,7 +3581,6 @@ impl App {
                 DeviceSubPanel::Switches => self.switches.len(),
                 DeviceSubPanel::Timers => self.timers.len(),
             },
-            Tab::Dashboards => self.dashboards.len(),
             Tab::Scenes => self.scenes.len(),
             Tab::Areas => self.areas.len(),
             Tab::Automations => self.visible_automations().len(),
@@ -3086,6 +3592,8 @@ impl App {
                 AdminSubPanel::Users => self.users.len(),
                 AdminSubPanel::Logs => 0,
                 AdminSubPanel::Events => self.filtered_events().len(),
+                AdminSubPanel::Audit => self.audit_entries.len(),
+                AdminSubPanel::Backup => BACKUP_ACTIONS.len(),
             },
         }
     }
@@ -3099,169 +3607,6 @@ impl App {
         }
     }
 
-    pub fn selected_dashboard(&self) -> Option<&Dashboard> {
-        self.dashboards.get(self.selected)
-    }
-
-    pub fn dashboard_widget_preview(&self, dashboard: &Dashboard, limit: usize) -> Vec<String> {
-        dashboard
-            .widgets
-            .iter()
-            .take(limit)
-            .map(|widget| match widget.widget_type {
-                DashboardWidgetType::StatSummary => format!(
-                    "{}: devices={} on={} offline={}",
-                    widget.title,
-                    self.devices.len(),
-                    self.devices
-                        .iter()
-                        .filter(|device| {
-                            device
-                                .attributes
-                                .get("on")
-                                .and_then(Value::as_bool)
-                                .unwrap_or(false)
-                        })
-                        .count(),
-                    self.devices
-                        .iter()
-                        .filter(|device| !device.available)
-                        .count()
-                ),
-                DashboardWidgetType::DeviceGrid
-                | DashboardWidgetType::DeviceList
-                | DashboardWidgetType::DeviceTile => format!(
-                    "{}: {} device entries",
-                    widget.title,
-                    self.dashboard_widget_device_count(widget)
-                ),
-                DashboardWidgetType::SceneRow => {
-                    format!("{}: {} scenes available", widget.title, self.scenes.len())
-                }
-                DashboardWidgetType::ModeChips => {
-                    format!("{}: {} modes available", widget.title, self.modes.len())
-                }
-                DashboardWidgetType::EventFeed => {
-                    format!(
-                        "{}: {} recent events cached",
-                        widget.title,
-                        self.events.len()
-                    )
-                }
-                DashboardWidgetType::MediaPlayer => format!(
-                    "{}: {} media players",
-                    widget.title,
-                    self.visible_media_players().len()
-                ),
-                DashboardWidgetType::Markdown => widget
-                    .config
-                    .get("markdown")
-                    .and_then(Value::as_str)
-                    .map(|text| {
-                        let compact = text.replace('\n', " ");
-                        let preview = compact.chars().take(72).collect::<String>();
-                        format!("{}: {}", widget.title, preview)
-                    })
-                    .unwrap_or_else(|| format!("{}: notes", widget.title)),
-                DashboardWidgetType::DashboardLink => format!(
-                    "{}: {} linked dashboards",
-                    widget.title,
-                    widget
-                        .config
-                        .get("dashboard_ids")
-                        .and_then(Value::as_array)
-                        .map(|items| items.len())
-                        .unwrap_or(self.dashboards.len())
-                ),
-                DashboardWidgetType::HistoryChart => format!("{}: history chart", widget.title),
-                DashboardWidgetType::CameraVideo => {
-                    format!("{}: camera/video source", widget.title)
-                }
-                DashboardWidgetType::WebEmbed => format!("{}: embedded web content", widget.title),
-                DashboardWidgetType::HouseStatusHero => format!("{}: house status hero", widget.title),
-            })
-            .collect()
-    }
-
-    fn dashboard_widget_device_count(&self, widget: &crate::api::DashboardWidget) -> usize {
-        let selection_mode = widget
-            .config
-            .get("selection_mode")
-            .and_then(Value::as_str)
-            .unwrap_or("query");
-        let devices = match selection_mode {
-            "manual" => {
-                let ids: HashSet<String> = widget
-                    .config
-                    .get("device_ids")
-                    .and_then(Value::as_array)
-                    .map(|items| {
-                        items
-                            .iter()
-                            .filter_map(Value::as_str)
-                            .map(|item| item.to_string())
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                self.devices
-                    .iter()
-                    .filter(|device| ids.contains(&device.device_id))
-                    .collect::<Vec<_>>()
-            }
-            "area" => {
-                let area = widget
-                    .config
-                    .get("area_name")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
-                self.devices
-                    .iter()
-                    .filter(|device| {
-                        device
-                            .area
-                            .as_deref()
-                            .map(|value| value.eq_ignore_ascii_case(area))
-                            .unwrap_or(false)
-                    })
-                    .collect::<Vec<_>>()
-            }
-            _ => {
-                let query = widget
-                    .config
-                    .get("query")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_lowercase();
-                self.devices
-                    .iter()
-                    .filter(|device| {
-                        query.is_empty()
-                            || device.name.to_lowercase().contains(&query)
-                            || device.device_id.to_lowercase().contains(&query)
-                            || device
-                                .canonical_name
-                                .as_deref()
-                                .map(|value| value.to_lowercase().contains(&query))
-                                .unwrap_or(false)
-                            || device
-                                .device_type
-                                .as_deref()
-                                .map(|value| value.to_lowercase().contains(&query))
-                                .unwrap_or(false)
-                    })
-                    .collect::<Vec<_>>()
-            }
-        };
-
-        let limit = widget
-            .config
-            .get("limit")
-            .and_then(Value::as_u64)
-            .map(|value| value as usize);
-        limit
-            .map(|limit| devices.len().min(limit))
-            .unwrap_or(devices.len())
-    }
 
     async fn toggle_selected_device(&mut self) {
         let (device_id, device_name, current_on, media_action) = {
@@ -4323,6 +4668,12 @@ impl App {
             AdminSubPanel::Events => {
                 // No create action for events panel.
             }
+            AdminSubPanel::Audit => {
+                // No create action — read-only viewer.
+            }
+            AdminSubPanel::Backup => {
+                // No create action — Enter dispatches to action list directly.
+            }
         }
     }
 
@@ -4367,6 +4718,191 @@ impl App {
             }
             AdminSubPanel::Events => {
                 // No delete action for events panel.
+            }
+            AdminSubPanel::Audit => {
+                // No delete action — audit log is append-only.
+            }
+            AdminSubPanel::Backup => {
+                // No delete action for backup panel.
+            }
+        }
+    }
+
+    // ── Glue creator ─────────────────────────────────────────────────────────
+
+    /// Modal for creating any of the 11 glue device types via the
+    /// unified `POST /glue` endpoint. Type is cycled with Space when
+    /// the cursor is on the Type field; Tab/BackTab navigates between
+    /// fields, skipping ones not relevant to the chosen type.
+    async fn on_key_glue_creator(&mut self, key: KeyEvent) {
+        let Some(creator) = self.glue_creator.as_mut() else {
+            return;
+        };
+        match key.code {
+            KeyCode::Esc => {
+                self.glue_creator = None;
+                self.status = "Cancelled".to_string();
+            }
+            KeyCode::Tab => {
+                let fields = GlueCreator::fields_for_type(creator.glue_type);
+                let idx = fields.iter().position(|f| *f == creator.field).unwrap_or(0);
+                creator.field = fields[(idx + 1) % fields.len()];
+            }
+            KeyCode::BackTab => {
+                let fields = GlueCreator::fields_for_type(creator.glue_type);
+                let idx = fields.iter().position(|f| *f == creator.field).unwrap_or(0);
+                creator.field = fields[(idx + fields.len() - 1) % fields.len()];
+            }
+            KeyCode::Char(' ') if creator.field == GlueEditField::Type => {
+                creator.glue_type = creator.glue_type.next();
+                // If the new type makes the current field irrelevant, snap
+                // back to the type cursor so the user can keep cycling.
+                let fields = GlueCreator::fields_for_type(creator.glue_type);
+                if !fields.contains(&creator.field) {
+                    creator.field = GlueEditField::Type;
+                }
+            }
+            KeyCode::Backspace => match creator.field {
+                GlueEditField::Type => {}
+                GlueEditField::Id => {
+                    creator.id.pop();
+                }
+                GlueEditField::Name => {
+                    creator.name.pop();
+                }
+                GlueEditField::Options => {
+                    creator.options.pop();
+                }
+                GlueEditField::Members => {
+                    creator.members.pop();
+                }
+                GlueEditField::SourceDeviceId => {
+                    creator.source_device_id.pop();
+                }
+                GlueEditField::SourceAttribute => {
+                    creator.source_attribute.pop();
+                }
+                GlueEditField::Threshold => {
+                    creator.threshold.pop();
+                }
+            },
+            KeyCode::Enter => {
+                self.save_glue_creator().await;
+            }
+            KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                match creator.field {
+                    GlueEditField::Type => {} // Space cycles; other chars ignored
+                    GlueEditField::Id => creator.id.push(ch),
+                    GlueEditField::Name => creator.name.push(ch),
+                    GlueEditField::Options => creator.options.push(ch),
+                    GlueEditField::Members => creator.members.push(ch),
+                    GlueEditField::SourceDeviceId => creator.source_device_id.push(ch),
+                    GlueEditField::SourceAttribute => creator.source_attribute.push(ch),
+                    GlueEditField::Threshold => creator.threshold.push(ch),
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Build the type-specific config map and POST `/glue`. On success
+    /// the new device is pushed onto `self.devices` (and into the right
+    /// per-type list when applicable) and the modal closes.
+    async fn save_glue_creator(&mut self) {
+        let Some(creator) = self.glue_creator.clone() else {
+            return;
+        };
+        let id = creator.id.trim().to_string();
+        if id.is_empty() {
+            self.error = Some("id cannot be empty".to_string());
+            return;
+        }
+        let name = if creator.name.trim().is_empty() {
+            id.clone()
+        } else {
+            creator.name.trim().to_string()
+        };
+
+        // Build type-specific config.
+        let mut config = serde_json::Map::new();
+        match creator.glue_type {
+            GlueType::Select => {
+                let opts: Vec<Value> = creator
+                    .options
+                    .split(',')
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| Value::String(s.to_string()))
+                    .collect();
+                if opts.is_empty() {
+                    self.error = Some(
+                        "select needs at least one option (comma-separated)".to_string(),
+                    );
+                    return;
+                }
+                config.insert("options".into(), Value::Array(opts));
+            }
+            GlueType::Group => {
+                let members: Vec<Value> = creator
+                    .members
+                    .split(',')
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| Value::String(s.to_string()))
+                    .collect();
+                config.insert("members".into(), Value::Array(members));
+            }
+            GlueType::Threshold => {
+                if creator.source_device_id.trim().is_empty() {
+                    self.error = Some("threshold requires source_device_id".to_string());
+                    return;
+                }
+                config.insert(
+                    "source_device_id".into(),
+                    Value::String(creator.source_device_id.trim().to_string()),
+                );
+                let attr = if creator.source_attribute.trim().is_empty() {
+                    "value".to_string()
+                } else {
+                    creator.source_attribute.trim().to_string()
+                };
+                config.insert("source_attribute".into(), Value::String(attr));
+                let threshold_val: f64 = match creator.threshold.trim().parse() {
+                    Ok(n) => n,
+                    Err(_) => {
+                        self.error = Some("threshold must be a number".to_string());
+                        return;
+                    }
+                };
+                config.insert("threshold".into(), json!(threshold_val));
+            }
+            _ => {}
+        }
+
+        match self
+            .client
+            .create_glue(&id, &name, creator.glue_type.as_str(), Value::Object(config))
+            .await
+        {
+            Ok(dev) => {
+                let device_id = dev.device_id.clone();
+                let glue_type_str = creator.glue_type.as_str();
+                // Push to the right per-type vec for any types that have one.
+                match creator.glue_type {
+                    GlueType::Switch => self.switches.push(dev.clone()),
+                    GlueType::Timer => self.timers.push(dev.clone()),
+                    _ => {}
+                }
+                self.devices.push(dev);
+                self.glue_creator = None;
+                self.error = None;
+                self.status = format!("Created {glue_type_str} {device_id}");
+            }
+            Err(e) => {
+                if let Some(c) = self.glue_creator.as_mut() {
+                    c.error = Some(e.to_string());
+                }
+                self.error = Some(e.to_string());
             }
         }
     }
@@ -4971,14 +5507,6 @@ async fn fetch_remote_snapshot(
     role: Role,
 ) -> Result<(CacheSnapshot, Option<String>)> {
     let devices = client.list_devices().await.unwrap_or_default();
-    let mut warnings = Vec::new();
-    let dashboards = match client.list_dashboards().await {
-        Ok(dashboards) => dashboards,
-        Err(err) => {
-            warnings.push(format!("dashboards: {err}"));
-            Vec::new()
-        }
-    };
     let mut scenes = client.list_scenes().await.unwrap_or_default();
     scenes.extend(hue_scenes_from_devices(&devices));
     let areas = client.list_areas().await.unwrap_or_default();
@@ -4999,7 +5527,6 @@ async fn fetch_remote_snapshot(
     Ok((
         CacheSnapshot {
             devices,
-            dashboards,
             scenes,
             areas,
             automations,
@@ -5010,17 +5537,12 @@ async fn fetch_remote_snapshot(
             timers,
             modes,
         },
-        if warnings.is_empty() {
-            None
-        } else {
-            Some(warnings.join(" | "))
-        },
+        None,
     ))
 }
 
 fn snapshot_is_empty(snapshot: &CacheSnapshot) -> bool {
     snapshot.devices.is_empty()
-        && snapshot.dashboards.is_empty()
         && snapshot.scenes.is_empty()
         && snapshot.areas.is_empty()
         && snapshot.automations.is_empty()

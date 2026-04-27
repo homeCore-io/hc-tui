@@ -178,6 +178,89 @@ pub struct PluginRecord {
     pub status: String,
 }
 
+// ── Plugin capabilities (manifest) ──────────────────────────────────────────
+//
+// Mirror of hc-types::plugin_capabilities. The TUI renders these as the
+// Actions sub-tab on the Plugin detail screen. v1 spec is frozen.
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Capabilities {
+    pub spec: String,
+    pub plugin_id: String,
+    #[serde(default)]
+    pub actions: Vec<Action>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Action {
+    pub id: String,
+    pub label: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub params: Option<Value>,
+    #[serde(default)]
+    pub result: Option<Value>,
+    #[serde(default)]
+    pub stream: bool,
+    #[serde(default)]
+    pub cancelable: bool,
+    #[serde(default)]
+    pub concurrency: Concurrency,
+    #[serde(default)]
+    pub item_key: Option<String>,
+    #[serde(default)]
+    pub item_operations: Option<Vec<ItemOp>>,
+    #[serde(default)]
+    pub requires_role: RequiresRole,
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Concurrency {
+    #[default]
+    Multi,
+    Single,
+}
+
+impl Concurrency {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Concurrency::Multi => "multi",
+            Concurrency::Single => "single",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ItemOp {
+    Add,
+    Update,
+    Remove,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RequiresRole {
+    Admin,
+    #[default]
+    User,
+    ReadOnly,
+}
+
+impl RequiresRole {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RequiresRole::Admin => "admin",
+            RequiresRole::User => "user",
+            RequiresRole::ReadOnly => "read_only",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventEntry {
     #[serde(rename = "type")]
@@ -193,6 +276,81 @@ pub struct EventEntry {
     pub event_type_custom: Option<String>,
     #[serde(default)]
     pub event_detail: Option<String>,
+}
+
+// ── Audit log types ─────────────────────────────────────────────────────────
+//
+// Mirrors the core's hc_state::audit_store types over JSON. The TUI only
+// reads — never writes — so the structs are deserialize-friendly with
+// `#[serde(default)]` on every optional field.
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuditActorType {
+    User,
+    ApiKey,
+    LocalAdmin,
+    IpWhitelist,
+    System,
+    Anonymous,
+}
+
+impl AuditActorType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AuditActorType::User => "user",
+            AuditActorType::ApiKey => "api_key",
+            AuditActorType::LocalAdmin => "local_admin",
+            AuditActorType::IpWhitelist => "ip_whitelist",
+            AuditActorType::System => "system",
+            AuditActorType::Anonymous => "anonymous",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuditResult {
+    Success,
+    Denied,
+    Error,
+}
+
+impl AuditResult {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AuditResult::Success => "success",
+            AuditResult::Denied => "denied",
+            AuditResult::Error => "error",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditEntry {
+    #[serde(default)]
+    pub id: Option<i64>,
+    pub ts: String,
+    pub actor_type: AuditActorType,
+    #[serde(default)]
+    pub actor_id: Option<String>,
+    pub actor_label: String,
+    pub event_type: String,
+    #[serde(default)]
+    pub scope_used: Option<String>,
+    #[serde(default)]
+    pub target_kind: Option<String>,
+    #[serde(default)]
+    pub target_id: Option<String>,
+    #[serde(default)]
+    pub correlation_id: Option<String>,
+    #[serde(default)]
+    pub ip: Option<String>,
+    #[serde(default)]
+    pub user_agent: Option<String>,
+    pub result: AuditResult,
+    #[serde(default)]
+    pub detail: Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -214,74 +372,6 @@ pub struct ModeConfig {
 pub struct ModeRecord {
     pub config: ModeConfig,
     pub state: Option<DeviceState>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DashboardWidgetType {
-    DeviceGrid,
-    DeviceList,
-    DeviceTile,
-    StatSummary,
-    ModeChips,
-    SceneRow,
-    EventFeed,
-    HistoryChart,
-    MediaPlayer,
-    CameraVideo,
-    WebEmbed,
-    Markdown,
-    DashboardLink,
-    /// Full-width "House Status" hero — rendered by Leptos client only;
-    /// TUI treats it as a no-op placeholder.
-    HouseStatusHero,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DashboardWidget {
-    pub id: String,
-    #[serde(rename = "type")]
-    pub widget_type: DashboardWidgetType,
-    pub title: String,
-    #[serde(default)]
-    pub subtitle: Option<String>,
-    #[serde(default)]
-    pub config: Map<String, Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Dashboard {
-    pub id: String,
-    pub name: String,
-    #[serde(default)]
-    pub description: Option<String>,
-    pub owner_user_id: String,
-    pub visibility: String,
-    #[serde(default)]
-    pub tags: Vec<String>,
-    pub icon: String,
-    #[serde(default)]
-    pub created_at: String,
-    #[serde(default)]
-    pub updated_at: String,
-    #[serde(default)]
-    pub widgets: Vec<DashboardWidget>,
-    #[serde(default)]
-    pub is_default: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct NestedDashboardResponse {
-    pub dashboard: Dashboard,
-    #[serde(default)]
-    pub is_default: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-enum DashboardListResponseItem {
-    Flat(Dashboard),
-    Nested(NestedDashboardResponse),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -597,11 +687,6 @@ impl HomeCoreClient {
         Self::parse_json(resp).await
     }
 
-    pub async fn list_dashboards(&self) -> Result<Vec<Dashboard>> {
-        let resp = self.request(Method::GET, "/dashboards").await?;
-        Self::parse_dashboards_response(resp).await
-    }
-
     pub async fn create_mode(&self, id: &str, name: &str, kind: &str) -> Result<ModeConfig> {
         let body = json!({ "id": id, "name": name, "kind": kind });
         let resp = self.request_with_json(Method::POST, "/modes", body).await?;
@@ -779,6 +864,123 @@ impl HomeCoreClient {
         Err(anyhow!("failed to update device: {message}"))
     }
 
+    // ── Plugin capabilities + actions ───────────────────────────────────────
+
+    /// `GET /plugins/:id/capabilities` — returns the plugin's manifest.
+    /// Empty `actions` is normal for plugins that don't expose any.
+    pub async fn get_plugin_capabilities(&self, plugin_id: &str) -> Result<Capabilities> {
+        let path = format!("/plugins/{plugin_id}/capabilities");
+        let resp = self.request(Method::GET, &path).await?;
+        Self::parse_json(resp).await
+    }
+
+    /// `POST /plugins/:id/command` — invoke a non-streaming action and
+    /// return the server's JSON response. Streaming actions go through
+    /// `start_streaming_action` (TUI Phase 2).
+    pub async fn post_plugin_command(
+        &self,
+        plugin_id: &str,
+        action: &str,
+        params: Value,
+    ) -> Result<Value> {
+        let path = format!("/plugins/{plugin_id}/command");
+        let body = json!({ "action": action, "params": params });
+        let resp = self.request_with_json(Method::POST, &path, body).await?;
+        Self::parse_json(resp).await
+    }
+
+    // ── Glue devices ────────────────────────────────────────────────────────
+
+    /// `POST /glue` — create a glue device of any of the 11 supported types
+    /// (switch, timer, counter, number, select, text, button, datetime,
+    /// group, threshold, schedule). The server applies type-specific
+    /// defaults to any config field not provided.
+    ///
+    /// Returns the created `DeviceState` on success.
+    pub async fn create_glue(
+        &self,
+        id: &str,
+        name: &str,
+        glue_type: &str,
+        config: Value,
+    ) -> Result<DeviceState> {
+        let body = json!({
+            "id": id,
+            "name": name,
+            "glue_type": glue_type,
+            "config": config,
+        });
+        let resp = self
+            .request_with_json(Method::POST, "/glue", body)
+            .await?;
+        Self::parse_json(resp).await
+    }
+
+    // ── Audit log ──────────────────────────────────────────────────────────
+
+    /// `GET /audit?limit=&offset=` — requires the `audit:read` scope.
+    /// Returns paginated audit entries newest-first.
+    pub async fn list_audit(&self, limit: u32, offset: u32) -> Result<Vec<AuditEntry>> {
+        let path = format!("/audit?limit={limit}&offset={offset}");
+        let resp = self.request(Method::GET, &path).await?;
+        Self::parse_json(resp).await
+    }
+
+    // ── Backup / export / import ────────────────────────────────────────────
+
+    /// Returns the raw zip bytes from `POST /system/backup` (admin-only).
+    pub async fn backup_zip(&self) -> Result<Vec<u8>> {
+        let resp = self.request(Method::POST, "/system/backup").await?;
+        let status = resp.status();
+        if !status.is_success() {
+            let message = Self::extract_error_message(resp).await;
+            return Err(anyhow!("{}: {}", status, message));
+        }
+        let bytes = resp
+            .bytes()
+            .await
+            .context("failed to read backup body")?;
+        Ok(bytes.to_vec())
+    }
+
+    /// Returns all rules as a JSON Value (array of Rule).
+    pub async fn export_automations(&self) -> Result<Value> {
+        let resp = self.request(Method::GET, "/automations/export").await?;
+        Self::parse_json(resp).await
+    }
+
+    /// POST a JSON array of rules to `/automations/import`. Returns the
+    /// `imported` count from the server response.
+    pub async fn import_automations(&self, rules: Value) -> Result<usize> {
+        let resp = self
+            .request_with_json(Method::POST, "/automations/import", rules)
+            .await?;
+        let body: Value = Self::parse_json(resp).await?;
+        Ok(body
+            .get("imported")
+            .and_then(Value::as_u64)
+            .unwrap_or(0) as usize)
+    }
+
+    /// Returns all scenes as a JSON Value (array of Scene).
+    pub async fn export_scenes(&self) -> Result<Value> {
+        let resp = self.request(Method::GET, "/scenes/export").await?;
+        Self::parse_json(resp).await
+    }
+
+    /// POST a JSON array of scenes to `/scenes/import`. Returns the `imported`
+    /// count.
+    pub async fn import_scenes(&self, scenes: Value) -> Result<usize> {
+        let resp = self
+            .request_with_json(Method::POST, "/scenes/import", scenes)
+            .await?;
+        let body: Value = Self::parse_json(resp).await?;
+        Ok(body
+            .get("imported")
+            .and_then(Value::as_u64)
+            .unwrap_or(0) as usize)
+    }
+
     fn endpoint(&self, path: &str) -> String {
         format!("{}/api/v1{}", self.base_url, path)
     }
@@ -825,50 +1027,6 @@ impl HomeCoreClient {
         }
         let message = Self::extract_error_message(resp).await;
         Err(anyhow!("{}: {}", status, message))
-    }
-
-    async fn parse_dashboards_response(resp: Response) -> Result<Vec<Dashboard>> {
-        let status = resp.status();
-        if !status.is_success() {
-            let message = Self::extract_error_message(resp).await;
-            return Err(anyhow!("{}: {}", status, message));
-        }
-
-        let text = resp
-            .text()
-            .await
-            .context("failed to read dashboards response body")?;
-        let parsed = serde_json::from_str::<Value>(&text).with_context(|| {
-            let snippet = text.chars().take(300).collect::<String>();
-            format!("failed to parse dashboards json: {snippet}")
-        })?;
-        let items = match parsed {
-            Value::Array(items) => items,
-            Value::Object(mut obj) => obj
-                .remove("dashboards")
-                .and_then(|value| value.as_array().cloned())
-                .ok_or_else(|| anyhow!("dashboards payload was not a JSON array"))?,
-            _ => {
-                return Err(anyhow!(
-                    "dashboards payload was not a JSON array or object wrapper"
-                ));
-            }
-        };
-
-        items.into_iter().map(Self::decode_dashboard_item).collect()
-    }
-
-    fn decode_dashboard_item(value: Value) -> Result<Dashboard> {
-        match serde_json::from_value::<DashboardListResponseItem>(value.clone()) {
-            Ok(DashboardListResponseItem::Flat(dashboard)) => Ok(dashboard),
-            Ok(DashboardListResponseItem::Nested(mut response)) => {
-                response.dashboard.is_default = response.is_default;
-                Ok(response.dashboard)
-            }
-            Err(err) => Err(anyhow!(
-                "failed to decode dashboard item: {err}; payload={value}"
-            )),
-        }
     }
 
     async fn parse_empty(resp: Response) -> Result<()> {
@@ -1314,51 +1472,3 @@ fn summarize_event_detail(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn dashboard_decoder_accepts_flat_and_nested_shapes() {
-        let flat = json!({
-            "id": "starter_getting_started",
-            "name": "Getting Started",
-            "description": "Starter dashboard",
-            "owner_user_id": "user_1",
-            "visibility": "private",
-            "tags": ["starter"],
-            "icon": "home",
-            "created_at": "2026-03-30T00:00:00Z",
-            "updated_at": "2026-03-30T00:00:00Z",
-            "widgets": [],
-            "layouts": [],
-            "is_default": true
-        });
-        let nested = json!({
-            "dashboard": {
-                "id": "starter_getting_started",
-                "name": "Getting Started",
-                "description": "Starter dashboard",
-                "owner_user_id": "user_1",
-                "visibility": "private",
-                "tags": ["starter"],
-                "icon": "home",
-                "created_at": "2026-03-30T00:00:00Z",
-                "updated_at": "2026-03-30T00:00:00Z",
-                "widgets": [],
-                "layouts": []
-            },
-            "is_default": true
-        });
-
-        let flat_dashboard = HomeCoreClient::decode_dashboard_item(flat).expect("flat dashboard");
-        let nested_dashboard =
-            HomeCoreClient::decode_dashboard_item(nested).expect("nested dashboard");
-
-        assert_eq!(flat_dashboard.id, "starter_getting_started");
-        assert!(flat_dashboard.is_default);
-        assert_eq!(nested_dashboard.id, "starter_getting_started");
-        assert!(nested_dashboard.is_default);
-    }
-}

@@ -1,10 +1,10 @@
 use crate::api::DeviceState;
 use crate::app::{
     AdminSubPanel, App, AreaEditor, AutomationFilterBar, AutomationFilterField, DeleteConfirm,
-    DeviceEditField, DeviceSubPanel, DeviceViewMode, FocusField, LogLevelFilter, LoginPhase,
-    MatterCommissionEditor, MatterCommissionField, ModeEditField, ModeEditor, ModeKind,
-    PluginDetailPanel, SwitchEditField, SwitchEditor, Tab, TimerEditField, TimerEditor,
-    UserEditField, UserEditMode, UserEditor, format_timestamp_utc,
+    DeviceEditField, DeviceSubPanel, DeviceViewMode, FocusField, GlueCreator, GlueEditField,
+    LogLevelFilter, LoginPhase, MatterCommissionEditor, MatterCommissionField, ModeEditField,
+    ModeEditor, ModeKind, PluginDetailPanel, SwitchEditField, SwitchEditor, Tab, TimerEditField,
+    TimerEditor, UserEditField, UserEditMode, UserEditor, format_timestamp_utc,
 };
 use chrono::Utc;
 use ratatui::{
@@ -65,6 +65,9 @@ pub fn draw(frame: &mut Frame<'_>, app: &App) {
     }
     if let Some(editor) = app.mode_editor.as_ref() {
         draw_mode_editor(frame, editor);
+    }
+    if let Some(creator) = app.glue_creator.as_ref() {
+        draw_glue_creator(frame, creator);
     }
     if let Some(editor) = app.matter_commission_editor.as_ref() {
         draw_matter_commission_editor(frame, editor);
@@ -215,9 +218,6 @@ fn status_hints(app: &App) -> Vec<&'static str> {
                 }
             }
         }
-        Tab::Dashboards => {
-            hints.push("Enter inspect");
-        }
         Tab::Scenes => {
             hints.push("a activate");
         }
@@ -255,6 +255,13 @@ fn status_hints(app: &App) -> Vec<&'static str> {
                 hints.push("c clear");
             } else if matches!(app.admin_sub, AdminSubPanel::Events) {
                 hints.push("f filter");
+            } else if matches!(app.admin_sub, AdminSubPanel::Audit) {
+                hints.push("r refresh");
+                hints.push("n next page");
+                hints.push("p prev page");
+                hints.push("Enter detail");
+            } else if matches!(app.admin_sub, AdminSubPanel::Backup) {
+                hints.push("Enter run");
             } else {
                 hints.push("n new");
                 hints.push("d delete");
@@ -297,6 +304,9 @@ fn status_hints(app: &App) -> Vec<&'static str> {
     }
     if app.timer_editor.is_some() {
         return vec!["Tab field", "Enter create", "Esc cancel"];
+    }
+    if app.glue_creator.is_some() {
+        return vec!["Tab field", "Space type", "Enter create", "Esc cancel"];
     }
     if app.mode_editor.is_some() {
         return vec!["Tab field", "Space kind", "Enter create", "Esc cancel"];
@@ -464,10 +474,6 @@ fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
         draw_dashboard(frame, app, area);
         return;
     }
-    if matches!(app.active_tab(), Tab::Dashboards) {
-        draw_dashboards_tab(frame, app, area);
-        return;
-    }
     if matches!(app.active_tab(), Tab::Scenes) {
         draw_scenes_table(frame, app, area);
         return;
@@ -494,7 +500,7 @@ fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
     }
 
     let items = match app.active_tab() {
-        Tab::Devices | Tab::Dashboards | Tab::Scenes | Tab::Automations | Tab::Manage => Vec::new(),
+        Tab::Devices | Tab::Scenes | Tab::Automations | Tab::Manage => Vec::new(),
         Tab::Areas => app
             .areas
             .iter()
@@ -1368,6 +1374,247 @@ fn draw_logs_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
     frame.render_widget(list, area);
 }
 
+// ── Backup / export / import tab ──────────────────────────────────────────────
+//
+// Renders the fixed list of BACKUP_ACTIONS with the current selection
+// highlighted, plus a status footer showing the last action's result
+// (path of saved export, count of imported items, error message).
+
+// ── Audit log tab ─────────────────────────────────────────────────────────────
+//
+// Read-only paginated view of `GET /audit`. Three rows:
+//   - Row 1: list of audit entries (mono ts | actor | event | target)
+//   - Row 2: expanded detail JSON (only when audit_expanded_idx is Some)
+//   - Row 3: pagination footer (page X · Y entries · last error if any)
+
+fn draw_audit_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let has_expanded = app.audit_expanded_idx.is_some();
+    let constraints: Vec<Constraint> = if has_expanded {
+        vec![
+            Constraint::Min(6),     // entry list
+            Constraint::Length(10), // detail panel
+            Constraint::Length(3),  // footer
+        ]
+    } else {
+        vec![Constraint::Min(6), Constraint::Length(3)]
+    };
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(constraints)
+        .split(area);
+
+    // Entry list
+    let items: Vec<ListItem> = app
+        .audit_entries
+        .iter()
+        .enumerate()
+        .map(|(i, e)| {
+            let style = if i == app.selected {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
+            let result_color = match e.result {
+                crate::api::AuditResult::Success => Color::Green,
+                crate::api::AuditResult::Denied => Color::Yellow,
+                crate::api::AuditResult::Error => Color::Red,
+            };
+            // Compact ts (skip TZ for readability), then 4 columns.
+            let ts = e.ts.split('.').next().unwrap_or(e.ts.as_str()).to_string();
+            let target = match (&e.target_kind, &e.target_id) {
+                (Some(k), Some(id)) => format!("{k}/{id}"),
+                (Some(k), None) => k.clone(),
+                _ => String::new(),
+            };
+            ListItem::new(Line::from(vec![
+                Span::styled(format!("  {:<19} ", ts), style),
+                Span::styled(
+                    format!("{:<14}", e.actor_type.as_str()),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(
+                    format!("{:<24}", e.actor_label.chars().take(24).collect::<String>()),
+                    Style::default().fg(Color::White),
+                ),
+                Span::styled(
+                    format!("{:<28}", e.event_type.chars().take(28).collect::<String>()),
+                    Style::default().fg(Color::Cyan),
+                ),
+                Span::styled(
+                    format!("{:<10}", e.result.as_str()),
+                    Style::default().fg(result_color),
+                ),
+                Span::styled(
+                    target.chars().take(40).collect::<String>(),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ]))
+        })
+        .collect();
+    let title = if app.audit_loading {
+        format!("Audit [loading…]")
+    } else {
+        format!("Audit ({} entries)", app.audit_entries.len())
+    };
+    let list = List::new(items)
+        .block(Block::default().borders(Borders::ALL).title(title))
+        .highlight_style(
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol(">> ");
+    let mut state = ratatui::widgets::ListState::default();
+    if !app.audit_entries.is_empty() {
+        state.select(Some(
+            app.selected.min(app.audit_entries.len().saturating_sub(1)),
+        ));
+    }
+    frame.render_stateful_widget(list, layout[0], &mut state);
+
+    // Optional expanded detail
+    if let Some(idx) = app.audit_expanded_idx {
+        if let Some(entry) = app.audit_entries.get(idx) {
+            let mut lines: Vec<Line> = Vec::new();
+            lines.push(Line::from(vec![
+                Span::styled("ts: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(entry.ts.clone(), Style::default().fg(Color::White)),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("actor: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!("{} ({})", entry.actor_label, entry.actor_type.as_str()),
+                    Style::default().fg(Color::White),
+                ),
+            ]));
+            if let Some(scope) = &entry.scope_used {
+                lines.push(Line::from(vec![
+                    Span::styled("scope: ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(scope.clone(), Style::default().fg(Color::Cyan)),
+                ]));
+            }
+            if let Some(ip) = &entry.ip {
+                lines.push(Line::from(vec![
+                    Span::styled("ip: ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(ip.clone(), Style::default().fg(Color::White)),
+                ]));
+            }
+            let detail_str = serde_json::to_string_pretty(&entry.detail)
+                .unwrap_or_else(|_| entry.detail.to_string());
+            for line in detail_str.lines().take(20) {
+                lines.push(Line::from(line.to_string()));
+            }
+            let detail_widget = Paragraph::new(lines)
+                .block(Block::default().borders(Borders::ALL).title("Detail"))
+                .wrap(Wrap { trim: false });
+            frame.render_widget(detail_widget, layout[1]);
+        }
+    }
+
+    // Footer: page + offset + error
+    let footer_idx = if has_expanded { 2 } else { 1 };
+    let page = app.audit_offset / app.audit_limit + 1;
+    let footer_text = if let Some(err) = &app.audit_error {
+        format!("Error: {err}")
+    } else {
+        format!(
+            "page {} · offset {} · limit {} · n=next p=prev r=refresh Enter=detail",
+            page, app.audit_offset, app.audit_limit
+        )
+    };
+    let footer_color = if app.audit_error.is_some() {
+        Color::Red
+    } else {
+        Color::DarkGray
+    };
+    let footer = Paragraph::new(footer_text)
+        .block(Block::default().borders(Borders::ALL).title("Status"))
+        .style(Style::default().fg(footer_color))
+        .wrap(Wrap { trim: true });
+    frame.render_widget(footer, layout[footer_idx]);
+}
+
+fn draw_backup_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    use crate::app::{backup_exports_dir, backup_imports_dir, BACKUP_ACTIONS};
+
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(8),     // action list
+            Constraint::Length(3),  // path hint
+            Constraint::Length(3),  // status line
+        ])
+        .split(area);
+
+    // Action list
+    let items: Vec<ListItem> = BACKUP_ACTIONS
+        .iter()
+        .enumerate()
+        .map(|(i, (_, label))| {
+            let style = if i == app.selected {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
+            ListItem::new(Line::from(Span::styled(format!("  {label}"), style)))
+        })
+        .collect();
+    let list_title = if app.backup_busy { "Backup [busy]" } else { "Backup" };
+    let list = List::new(items)
+        .block(Block::default().borders(Borders::ALL).title(list_title))
+        .highlight_style(
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol(">> ");
+    let mut state = ratatui::widgets::ListState::default();
+    state.select(Some(app.selected.min(BACKUP_ACTIONS.len().saturating_sub(1))));
+    frame.render_stateful_widget(list, layout[0], &mut state);
+
+    // Path hint
+    let hint = format!(
+        "Exports → {}    Imports ← {}",
+        backup_exports_dir().display(),
+        backup_imports_dir().display(),
+    );
+    let hint_widget = Paragraph::new(hint)
+        .block(Block::default().borders(Borders::ALL).title("Paths"))
+        .style(Style::default().fg(Color::DarkGray))
+        .wrap(Wrap { trim: true });
+    frame.render_widget(hint_widget, layout[1]);
+
+    // Status line — last result or empty.
+    let status_text = if app.backup_status.is_empty() {
+        "Press Enter to run the selected action.".to_string()
+    } else {
+        app.backup_status.clone()
+    };
+    let status_color = if app.backup_status.starts_with("Error:") {
+        Color::Red
+    } else if app.backup_status.starts_with("Saved")
+        || app.backup_status.starts_with("Exported")
+        || app.backup_status.starts_with("Imported")
+    {
+        Color::Green
+    } else {
+        Color::Yellow
+    };
+    let status_widget = Paragraph::new(status_text)
+        .block(Block::default().borders(Borders::ALL).title("Status"))
+        .style(Style::default().fg(status_color))
+        .wrap(Wrap { trim: true });
+    frame.render_widget(status_widget, layout[2]);
+}
+
 // ── System Status tab ─────────────────────────────────────────────────────────
 
 fn draw_status_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
@@ -1495,6 +1742,125 @@ fn format_uptime(secs: u64) -> String {
     }
 }
 
+// ── Plugin Actions panel ──────────────────────────────────────────────────────
+//
+// Renders the manifest's actions list with role + streaming + concurrency
+// badges, plus a status footer for the last action result. Up/Down moves
+// selection (handled by app); Enter triggers run_selected_plugin_action.
+
+fn draw_plugin_actions(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(5), Constraint::Length(3)])
+        .split(area);
+
+    // Action list
+    let title = if app.plugin_capabilities_loading {
+        "Actions [loading…]".to_string()
+    } else if let Some(caps) = app.plugin_capabilities.as_ref() {
+        format!("Actions ({} actions, spec v{})", caps.actions.len(), caps.spec)
+    } else if app.plugin_capabilities_error.is_some() {
+        "Actions [error]".to_string()
+    } else {
+        "Actions".to_string()
+    };
+
+    let items: Vec<ListItem> = if let Some(caps) = app.plugin_capabilities.as_ref() {
+        caps.actions
+            .iter()
+            .enumerate()
+            .map(|(i, a)| {
+                let row_style = if i == app.selected {
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::White)
+                };
+                let role_color = match a.requires_role {
+                    crate::api::RequiresRole::Admin => Color::Red,
+                    crate::api::RequiresRole::User => Color::Cyan,
+                    crate::api::RequiresRole::ReadOnly => Color::DarkGray,
+                };
+                let stream_badge = if a.stream { "stream" } else { "sync  " };
+                let stream_color = if a.stream { Color::Magenta } else { Color::DarkGray };
+                let concurrency = a.concurrency.as_str();
+                ListItem::new(Line::from(vec![
+                    Span::styled(format!("  {:<24}", a.id), row_style),
+                    Span::styled(
+                        format!(" {:<10}", a.requires_role.as_str()),
+                        Style::default().fg(role_color),
+                    ),
+                    Span::styled(format!(" {stream_badge}"), Style::default().fg(stream_color)),
+                    Span::styled(
+                        format!(" {:<7}", concurrency),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                    Span::styled(
+                        format!(" {}", a.label),
+                        Style::default().fg(Color::White),
+                    ),
+                ]))
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    let list = List::new(items)
+        .block(Block::default().borders(Borders::ALL).title(title))
+        .highlight_style(
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol(">> ");
+    let mut state = ratatui::widgets::ListState::default();
+    if let Some(caps) = app.plugin_capabilities.as_ref() {
+        if !caps.actions.is_empty() {
+            state.select(Some(app.selected.min(caps.actions.len().saturating_sub(1))));
+        }
+    }
+    frame.render_stateful_widget(list, layout[0], &mut state);
+
+    // Status footer
+    let footer_text = if app.action_busy {
+        format!("Running… {}", app.action_status)
+    } else if !app.action_status.is_empty() {
+        app.action_status.clone()
+    } else if let Some(err) = &app.plugin_capabilities_error {
+        format!("Error loading capabilities: {err}")
+    } else if app
+        .plugin_capabilities
+        .as_ref()
+        .map(|c| c.actions.is_empty())
+        .unwrap_or(false)
+    {
+        "This plugin declares no actions.".to_string()
+    } else {
+        "Up/Down to select · Enter to run · Esc to close detail".to_string()
+    };
+    let footer_color = if app.action_status.starts_with("`")
+        && (app.action_status.contains(" failed:") || app.action_status.contains(" requires admin"))
+        || app.plugin_capabilities_error.is_some()
+    {
+        Color::Red
+    } else if app.action_busy {
+        Color::Yellow
+    } else if app.action_status.contains(" ok ") {
+        Color::Green
+    } else {
+        Color::DarkGray
+    };
+    let footer = Paragraph::new(footer_text)
+        .block(Block::default().borders(Borders::ALL).title("Status"))
+        .style(Style::default().fg(footer_color))
+        .wrap(Wrap { trim: true });
+    frame.render_widget(footer, layout[1]);
+}
+
 fn draw_plugin_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let Some(plugin_id) = app.plugin_detail_plugin_id.as_deref() else {
         let msg = Paragraph::new("No plugin selected").block(
@@ -1513,6 +1879,7 @@ fn draw_plugin_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
 
     let panel_labels = [
         PluginDetailPanel::Overview.title(),
+        PluginDetailPanel::Actions.title(),
         PluginDetailPanel::Diagnostics.title(),
         PluginDetailPanel::Metrics.title(),
     ]
@@ -1522,8 +1889,9 @@ fn draw_plugin_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
 
     let panel_idx = match app.plugin_detail_panel {
         PluginDetailPanel::Overview => 0,
-        PluginDetailPanel::Diagnostics => 1,
-        PluginDetailPanel::Metrics => 2,
+        PluginDetailPanel::Actions => 1,
+        PluginDetailPanel::Diagnostics => 2,
+        PluginDetailPanel::Metrics => 3,
     };
 
     let tabs = Tabs::new(panel_labels)
@@ -1668,6 +2036,9 @@ fn draw_plugin_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
                 .block(Block::default().borders(Borders::ALL).title("Overview"))
                 .wrap(Wrap { trim: true });
             frame.render_widget(widget, layout[1]);
+        }
+        PluginDetailPanel::Actions => {
+            draw_plugin_actions(frame, app, layout[1]);
         }
         PluginDetailPanel::Diagnostics => {
             let rows = app
@@ -3330,110 +3701,12 @@ fn normalize_label(value: &str) -> String {
 fn list_is_empty(app: &App) -> bool {
     match app.active_tab() {
         Tab::Devices => app.devices.is_empty(),
-        Tab::Dashboards => app.dashboards.is_empty(),
         Tab::Scenes => app.scenes.is_empty(),
         Tab::Areas => app.areas.is_empty(),
         Tab::Automations => app.visible_automations().is_empty(),
         Tab::Plugins => app.plugins.is_empty(),
         Tab::Manage => false,
     }
-}
-
-fn draw_dashboards_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
-    let panes = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(38), Constraint::Percentage(62)])
-        .split(area);
-
-    let items: Vec<ListItem> = app
-        .dashboards
-        .iter()
-        .enumerate()
-        .map(|(i, dashboard)| {
-            let style = if i == app.selected {
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::White)
-            };
-            let mut meta = vec![];
-            if dashboard.is_default {
-                meta.push("default");
-            }
-            meta.push(dashboard.visibility.as_str());
-            let meta_str = meta.join(" · ");
-            ListItem::new(Line::from(vec![
-                Span::styled(format!("  {:<24}", dashboard.name), style),
-                Span::styled(meta_str, Style::default().fg(Color::DarkGray)),
-            ]))
-        })
-        .collect();
-
-    let list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(format!("Dashboards [{}]", app.dashboards.len())),
-        )
-        .highlight_style(
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )
-        .highlight_symbol(">> ");
-    let mut state = ratatui::widgets::ListState::default();
-    if !app.dashboards.is_empty() {
-        state.select(Some(app.selected));
-    }
-    frame.render_stateful_widget(list, panes[0], &mut state);
-
-    let body = if let Some(dashboard) = app.selected_dashboard() {
-        let mut lines = vec![Line::from(vec![
-            Span::styled(
-                &dashboard.name,
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("  "),
-            Span::styled(
-                if dashboard.is_default {
-                    "DEFAULT"
-                } else {
-                    &dashboard.visibility
-                },
-                Style::default().fg(Color::DarkGray),
-            ),
-        ])];
-        if let Some(description) = dashboard.description.as_deref() {
-            lines.push(Line::from(description.to_string()));
-        }
-        if !dashboard.tags.is_empty() {
-            lines.push(Line::from(format!("tags: {}", dashboard.tags.join(", "))));
-        }
-        lines.push(Line::from(format!("widgets: {}", dashboard.widgets.len())));
-        lines.push(Line::from(String::new()));
-        lines.push(Line::from(Span::styled(
-            "Widget Preview",
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        )));
-        for line in app.dashboard_widget_preview(dashboard, 8) {
-            lines.push(Line::from(format!("- {line}")));
-        }
-        Paragraph::new(lines)
-            .block(Block::default().borders(Borders::ALL).title("Dashboard"))
-            .wrap(Wrap { trim: true })
-    } else {
-        Paragraph::new("No dashboards available.")
-            .block(Block::default().borders(Borders::ALL).title("Dashboard"))
-            .wrap(Wrap { trim: true })
-    };
-    frame.render_widget(body, panes[1]);
 }
 
 fn draw_manage_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
@@ -3449,6 +3722,8 @@ fn draw_manage_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
         AdminSubPanel::Users => 3,
         AdminSubPanel::Logs => 4,
         AdminSubPanel::Events => 5,
+        AdminSubPanel::Audit => 6,
+        AdminSubPanel::Backup => 7,
     };
     let sub_tabs = Tabs::new(vec![
         Line::from("Modes"),
@@ -3457,6 +3732,8 @@ fn draw_manage_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
         Line::from("Users"),
         Line::from("Logs"),
         Line::from("Events"),
+        Line::from("Audit"),
+        Line::from("Backup"),
     ])
     .select(active_idx)
     .block(Block::default().borders(Borders::ALL).title("Manage"))
@@ -3594,6 +3871,16 @@ fn draw_manage_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
         return;
     }
 
+    if matches!(app.admin_sub, AdminSubPanel::Audit) {
+        draw_audit_tab(frame, app, layout[1]);
+        return;
+    }
+
+    if matches!(app.admin_sub, AdminSubPanel::Backup) {
+        draw_backup_tab(frame, app, layout[1]);
+        return;
+    }
+
     if matches!(app.admin_sub, AdminSubPanel::Events) {
         let items = app
             .filtered_events()
@@ -3687,6 +3974,8 @@ fn draw_manage_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
         AdminSubPanel::Users => (Vec::new(), "Users", 0),
         AdminSubPanel::Logs => (Vec::new(), "Logs", 0),
         AdminSubPanel::Events => (Vec::new(), "Events", 0),
+        AdminSubPanel::Audit => (Vec::new(), "Audit", 0),
+        AdminSubPanel::Backup => (Vec::new(), "Backup", 0),
     };
     let list = List::new(items)
         .block(Block::default().borders(Borders::ALL).title(title))
@@ -3849,6 +4138,163 @@ fn draw_timer_editor(frame: &mut Frame<'_>, editor: &TimerEditor) {
         Paragraph::new("Tab field  |  Enter create  |  Esc cancel").alignment(Alignment::Center),
         layout[2],
     );
+}
+
+// ── Glue creator modal ────────────────────────────────────────────────────────
+//
+// Centered overlay. Shows the type cycler at the top, then common fields,
+// then any type-specific fields per GlueCreator::fields_for_type. Highlights
+// the current cursor field and surfaces save errors at the bottom.
+
+fn draw_glue_creator(frame: &mut Frame<'_>, creator: &GlueCreator) {
+    let area = centered_rect(64, 60, frame.area());
+    frame.render_widget(Clear, area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title("Create Glue Device")
+        .style(Style::default().fg(Color::White));
+    frame.render_widget(block, area);
+
+    let inner = Rect {
+        x: area.x + 2,
+        y: area.y + 2,
+        width: area.width.saturating_sub(4),
+        height: area.height.saturating_sub(4),
+    };
+
+    let active = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+    let inactive = Style::default().fg(Color::DarkGray);
+
+    let row_style = |field: GlueEditField| {
+        if creator.field == field { active } else { inactive }
+    };
+
+    // Visible fields drive layout — only render the ones relevant to type.
+    let visible = GlueCreator::fields_for_type(creator.glue_type);
+    let mut lines: Vec<Line> = Vec::new();
+
+    // Type row — always present.
+    lines.push(Line::from(vec![
+        Span::styled(format!("{:<14}", "type"), row_style(GlueEditField::Type)),
+        Span::raw("  "),
+        Span::styled(
+            format!("{}  (Space to cycle)", creator.glue_type.as_str()),
+            Style::default().fg(Color::Cyan),
+        ),
+    ]));
+    lines.push(Line::from(""));
+
+    // ID row.
+    if visible.contains(&GlueEditField::Id) {
+        lines.push(Line::from(vec![
+            Span::styled(format!("{:<14}", "id"), row_style(GlueEditField::Id)),
+            Span::raw("  "),
+            Span::styled(creator.id.clone(), Style::default().fg(Color::White)),
+            Span::styled(
+                if creator.field == GlueEditField::Id { "_" } else { "" },
+                Style::default().fg(Color::Cyan),
+            ),
+        ]));
+    }
+
+    // Name row.
+    if visible.contains(&GlueEditField::Name) {
+        lines.push(Line::from(vec![
+            Span::styled(format!("{:<14}", "name"), row_style(GlueEditField::Name)),
+            Span::raw("  "),
+            Span::styled(creator.name.clone(), Style::default().fg(Color::White)),
+            Span::styled(
+                if creator.field == GlueEditField::Name { "_" } else { "" },
+                Style::default().fg(Color::Cyan),
+            ),
+        ]));
+    }
+
+    // Type-specific fields.
+    if visible.contains(&GlueEditField::Options) {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "select options (comma-separated, e.g. \"red,green,blue\"):",
+            Style::default().fg(Color::DarkGray),
+        )));
+        lines.push(Line::from(vec![
+            Span::styled(format!("{:<14}", "options"), row_style(GlueEditField::Options)),
+            Span::raw("  "),
+            Span::styled(creator.options.clone(), Style::default().fg(Color::White)),
+            Span::styled(
+                if creator.field == GlueEditField::Options { "_" } else { "" },
+                Style::default().fg(Color::Cyan),
+            ),
+        ]));
+    }
+    if visible.contains(&GlueEditField::Members) {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "group members (comma-separated device IDs):",
+            Style::default().fg(Color::DarkGray),
+        )));
+        lines.push(Line::from(vec![
+            Span::styled(format!("{:<14}", "members"), row_style(GlueEditField::Members)),
+            Span::raw("  "),
+            Span::styled(creator.members.clone(), Style::default().fg(Color::White)),
+            Span::styled(
+                if creator.field == GlueEditField::Members { "_" } else { "" },
+                Style::default().fg(Color::Cyan),
+            ),
+        ]));
+    }
+    if visible.contains(&GlueEditField::SourceDeviceId) {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "threshold tracks one numeric attribute on a source device:",
+            Style::default().fg(Color::DarkGray),
+        )));
+        lines.push(Line::from(vec![
+            Span::styled(format!("{:<14}", "source dev"), row_style(GlueEditField::SourceDeviceId)),
+            Span::raw("  "),
+            Span::styled(creator.source_device_id.clone(), Style::default().fg(Color::White)),
+            Span::styled(
+                if creator.field == GlueEditField::SourceDeviceId { "_" } else { "" },
+                Style::default().fg(Color::Cyan),
+            ),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled(format!("{:<14}", "source attr"), row_style(GlueEditField::SourceAttribute)),
+            Span::raw("  "),
+            Span::styled(creator.source_attribute.clone(), Style::default().fg(Color::White)),
+            Span::styled(
+                if creator.field == GlueEditField::SourceAttribute { "_" } else { "" },
+                Style::default().fg(Color::Cyan),
+            ),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled(format!("{:<14}", "threshold"), row_style(GlueEditField::Threshold)),
+            Span::raw("  "),
+            Span::styled(creator.threshold.clone(), Style::default().fg(Color::White)),
+            Span::styled(
+                if creator.field == GlueEditField::Threshold { "_" } else { "" },
+                Style::default().fg(Color::Cyan),
+            ),
+        ]));
+    }
+
+    // Error row, if any.
+    if let Some(err) = &creator.error {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            format!("Error: {err}"),
+            Style::default().fg(Color::Red),
+        )));
+    }
+
+    let para = Paragraph::new(lines)
+        .style(Style::default().fg(Color::White))
+        .wrap(Wrap { trim: false });
+    frame.render_widget(para, inner);
 }
 
 fn draw_mode_editor(frame: &mut Frame<'_>, editor: &ModeEditor) {

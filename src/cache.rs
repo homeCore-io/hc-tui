@@ -1,6 +1,4 @@
-use crate::api::{
-    Area, Dashboard, DeviceState, EventEntry, ModeRecord, PluginRecord, Rule, UserInfo,
-};
+use crate::api::{Area, DeviceState, EventEntry, ModeRecord, PluginRecord, Rule, UserInfo};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -31,8 +29,6 @@ pub struct CacheSnapshot {
     pub timers: Vec<DeviceState>,
     #[serde(default)]
     pub modes: Vec<ModeRecord>,
-    #[serde(default)]
-    pub dashboards: Vec<Dashboard>,
 }
 
 #[derive(Clone)]
@@ -71,8 +67,6 @@ impl CacheStore {
             .await?;
         self.write_json(dir.join("modes.json"), &snapshot.modes)
             .await?;
-        self.write_json(dir.join("dashboards.json"), &snapshot.dashboards)
-            .await?;
         Ok(())
     }
 
@@ -95,9 +89,6 @@ impl CacheStore {
             switches: self.read_json_or_default(dir.join("switches.json")).await?,
             timers: self.read_json_or_default(dir.join("timers.json")).await?,
             modes: self.read_json_or_default(dir.join("modes.json")).await?,
-            dashboards: self
-                .read_json_or_default(dir.join("dashboards.json"))
-                .await?,
         })
     }
 
