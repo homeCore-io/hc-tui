@@ -3,8 +3,9 @@ use crate::app::{
     AdminSubPanel, App, AreaEditor, AutomationFilterBar, AutomationFilterField, DeleteConfirm,
     DeviceEditField, DeviceSubPanel, DeviceViewMode, FocusField, GlueCreator, GlueEditField,
     LogLevelFilter, LoginPhase, MatterCommissionEditor, MatterCommissionField, ModeEditField,
-    ModeEditor, ModeKind, PluginDetailPanel, SwitchEditField, SwitchEditor, Tab, TimerEditField,
-    TimerEditor, UserEditField, UserEditMode, UserEditor, format_timestamp_utc,
+    ModeEditor, ModeKind, PluginDetailPanel, StreamingAction, StreamingStage, SwitchEditField,
+    SwitchEditor, Tab, TimerEditField, TimerEditor, UserEditField, UserEditMode, UserEditor,
+    format_timestamp_utc,
 };
 use chrono::Utc;
 use ratatui::{
@@ -75,6 +76,9 @@ pub fn draw(frame: &mut Frame<'_>, app: &App) {
     // Automation overlays (drawn on top of everything)
     if let Some(confirm) = app.automation_delete_confirm.as_ref() {
         draw_delete_confirm(frame, confirm);
+    }
+    if app.streaming_action.is_some() {
+        draw_streaming_action_modal(frame, app);
     }
     if app.groups_open {
         draw_groups_overlay(frame, app);
@@ -288,6 +292,15 @@ fn status_hints(app: &App) -> Vec<&'static str> {
     }
     if app.user_editor.is_some() {
         return vec!["Tab field", "Space cycle role", "Enter save", "Esc cancel"];
+    }
+    if let Some(ref s) = app.streaming_action {
+        if s.stage.is_terminal() {
+            return vec!["Esc close"];
+        }
+        if s.pending_prompt.is_some() {
+            return vec!["type response", "Enter send", "c cancel run", "Esc close"];
+        }
+        return vec!["c cancel", "Esc close"];
     }
     if app.plugin_detail_open {
         return vec![
@@ -1063,6 +1076,270 @@ fn draw_delete_confirm(frame: &mut Frame<'_>, confirm: &DeleteConfirm) {
         .style(Style::default().fg(Color::Yellow))
         .alignment(Alignment::Center);
     frame.render_widget(help, layout[2]);
+}
+
+/// Streaming-action modal. Layout (top-down):
+/// 1. Header — action label + status pill
+/// 2. Progress bar (when a `progress` event has arrived)
+/// 3. Recent items list (when item events have arrived)
+/// 4. Awaiting-user prompt with response input (when in AwaitingUser stage)
+/// 5. Warnings list (when any)
+/// 6. Terminal payload summary (when terminal stage reached)
+/// 7. Footer with status text
+fn draw_streaming_action_modal(frame: &mut Frame<'_>, app: &App) {
+    let Some(state) = app.streaming_action.as_ref() else {
+        return;
+    };
+
+    let popup = centered_rect(80, 70, frame.area());
+    frame.render_widget(Clear, popup);
+
+    let pill_color = match state.stage {
+        StreamingStage::Starting => Color::Gray,
+        StreamingStage::Running => Color::Cyan,
+        StreamingStage::AwaitingUser => Color::Yellow,
+        StreamingStage::Complete => Color::Green,
+        StreamingStage::Error | StreamingStage::Timeout => Color::Red,
+        StreamingStage::Canceled => Color::Magenta,
+    };
+
+    let title = format!(" {} — {} ", state.label, state.stage.label());
+    let outer = Block::default()
+        .borders(Borders::ALL)
+        .title(title)
+        .border_style(Style::default().fg(pill_color));
+    let inner = outer.inner(popup);
+    frame.render_widget(outer, popup);
+
+    // Decide which sub-blocks to allocate space for.
+    let has_progress = state.last_progress.is_some();
+    let has_items = !state.items.is_empty();
+    let has_prompt = state.pending_prompt.is_some();
+    let has_warnings = !state.warnings.is_empty();
+    let has_terminal = state.terminal.is_some();
+
+    let mut constraints: Vec<Constraint> = Vec::new();
+    if has_progress {
+        constraints.push(Constraint::Length(3));
+    }
+    if has_items {
+        constraints.push(Constraint::Min(5));
+    }
+    if has_prompt {
+        constraints.push(Constraint::Length(7));
+    }
+    if has_warnings {
+        constraints.push(Constraint::Length(4));
+    }
+    if has_terminal {
+        constraints.push(Constraint::Length(5));
+    }
+    // Footer always last.
+    constraints.push(Constraint::Length(2));
+    if constraints.len() == 1 {
+        // No content yet — show a centered "starting" placeholder.
+        constraints.insert(0, Constraint::Min(1));
+    }
+
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(constraints)
+        .split(inner);
+
+    let mut idx = 0;
+
+    if !has_progress && !has_items && !has_prompt && !has_warnings && !has_terminal {
+        let waiting = Paragraph::new(state.footer.as_str())
+            .style(Style::default().fg(Color::DarkGray))
+            .alignment(Alignment::Center);
+        frame.render_widget(waiting, layout[idx]);
+        idx += 1;
+    }
+
+    if has_progress {
+        draw_streaming_progress(frame, layout[idx], state);
+        idx += 1;
+    }
+    if has_items {
+        draw_streaming_items(frame, layout[idx], state);
+        idx += 1;
+    }
+    if has_prompt {
+        draw_streaming_prompt(frame, layout[idx], state);
+        idx += 1;
+    }
+    if has_warnings {
+        draw_streaming_warnings(frame, layout[idx], state);
+        idx += 1;
+    }
+    if has_terminal {
+        draw_streaming_terminal(frame, layout[idx], state);
+        idx += 1;
+    }
+
+    // Footer
+    let footer = Paragraph::new(state.footer.as_str())
+        .style(Style::default().fg(Color::Yellow))
+        .alignment(Alignment::Left);
+    frame.render_widget(footer, layout[idx]);
+}
+
+fn draw_streaming_progress(frame: &mut Frame<'_>, area: Rect, state: &StreamingAction) {
+    let Some(progress) = state.last_progress.as_ref() else {
+        return;
+    };
+    let pct = progress
+        .get("pct")
+        .and_then(serde_json::Value::as_f64)
+        .map(|p| p.clamp(0.0, 100.0));
+    let message = progress
+        .get("message")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+
+    if let Some(p) = pct {
+        let label = if message.is_empty() {
+            format!("{:>3.0}%", p)
+        } else {
+            format!("{:>3.0}% — {}", p, message)
+        };
+        let gauge = Gauge::default()
+            .block(Block::default().borders(Borders::ALL).title("Progress"))
+            .gauge_style(Style::default().fg(Color::Cyan))
+            .ratio((p / 100.0).clamp(0.0, 1.0))
+            .label(label);
+        frame.render_widget(gauge, area);
+    } else {
+        let para = Paragraph::new(message.to_string())
+            .block(Block::default().borders(Borders::ALL).title("Progress"))
+            .style(Style::default().fg(Color::Cyan));
+        frame.render_widget(para, area);
+    }
+}
+
+fn draw_streaming_items(frame: &mut Frame<'_>, area: Rect, state: &StreamingAction) {
+    // Show the last N items (one line each). Older items scroll off the
+    // top — the modal's job is "what's happening now", not full history.
+    let take = area.height.saturating_sub(2) as usize;
+    let start = state.items.len().saturating_sub(take);
+    let items: Vec<ListItem> = state.items[start..]
+        .iter()
+        .map(|v| {
+            let line = match v {
+                serde_json::Value::Object(map) => map
+                    .get("name")
+                    .or_else(|| map.get("id"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string)
+                    .unwrap_or_else(|| serde_json::to_string(v).unwrap_or_default()),
+                serde_json::Value::String(s) => s.clone(),
+                _ => v.to_string(),
+            };
+            ListItem::new(Line::from(Span::raw(line)))
+        })
+        .collect();
+    let title = format!("Items ({})", state.items.len());
+    let list = List::new(items).block(Block::default().borders(Borders::ALL).title(title));
+    frame.render_widget(list, area);
+}
+
+fn draw_streaming_prompt(frame: &mut Frame<'_>, area: Rect, state: &StreamingAction) {
+    let Some(prompt) = state.pending_prompt.as_ref() else {
+        return;
+    };
+    let outer = Block::default()
+        .borders(Borders::ALL)
+        .title(" Awaiting your response ")
+        .border_style(Style::default().fg(Color::Yellow));
+    let inner = outer.inner(area);
+    frame.render_widget(outer, area);
+
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(2), Constraint::Length(1), Constraint::Length(1)])
+        .split(inner);
+
+    let prompt_text = prompt
+        .get("prompt")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            // Fall back to dumping the schema so the user has *something*
+            // to act on if the plugin omitted a human-readable prompt.
+            prompt
+                .get("schema")
+                .map(|s| s.to_string())
+                .unwrap_or_default()
+        });
+    let para = Paragraph::new(prompt_text)
+        .style(Style::default().fg(Color::White))
+        .wrap(Wrap { trim: false });
+    frame.render_widget(para, layout[0]);
+
+    let input_label = "Response:";
+    let label_widget = Paragraph::new(input_label).style(Style::default().fg(Color::DarkGray));
+    frame.render_widget(label_widget, layout[1]);
+
+    let input = Paragraph::new(state.response_input.as_str())
+        .style(Style::default().fg(Color::Yellow));
+    frame.render_widget(input, layout[2]);
+}
+
+fn draw_streaming_warnings(frame: &mut Frame<'_>, area: Rect, state: &StreamingAction) {
+    let take = area.height.saturating_sub(2) as usize;
+    let start = state.warnings.len().saturating_sub(take);
+    let items: Vec<ListItem> = state.warnings[start..]
+        .iter()
+        .map(|v| {
+            let msg = v
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| v.to_string());
+            ListItem::new(Line::from(Span::styled(
+                msg,
+                Style::default().fg(Color::Yellow),
+            )))
+        })
+        .collect();
+    let title = format!("Warnings ({})", state.warnings.len());
+    let list = List::new(items).block(Block::default().borders(Borders::ALL).title(title));
+    frame.render_widget(list, area);
+}
+
+fn draw_streaming_terminal(frame: &mut Frame<'_>, area: Rect, state: &StreamingAction) {
+    let Some(terminal) = state.terminal.as_ref() else {
+        return;
+    };
+    let stage = terminal
+        .get("stage")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    let detail = terminal
+        .get("error")
+        .or_else(|| terminal.get("message"))
+        .or_else(|| terminal.get("result"))
+        .map(|v| match v {
+            serde_json::Value::String(s) => s.clone(),
+            other => other.to_string(),
+        })
+        .unwrap_or_default();
+    let color = match stage {
+        "complete" => Color::Green,
+        "error" | "timeout" => Color::Red,
+        "canceled" => Color::Magenta,
+        _ => Color::Gray,
+    };
+    let body = if detail.is_empty() {
+        stage.to_string()
+    } else {
+        format!("{stage}: {detail}")
+    };
+    let para = Paragraph::new(body)
+        .block(Block::default().borders(Borders::ALL).title(" Result "))
+        .style(Style::default().fg(color))
+        .wrap(Wrap { trim: false });
+    frame.render_widget(para, area);
 }
 
 fn draw_groups_overlay(frame: &mut Frame<'_>, app: &App) {

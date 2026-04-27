@@ -876,7 +876,11 @@ impl HomeCoreClient {
 
     /// `POST /plugins/:id/command` — invoke a non-streaming action and
     /// return the server's JSON response. Streaming actions go through
-    /// `start_streaming_action` (TUI Phase 2).
+    /// `start_streaming_action`.
+    ///
+    /// The server flattens the body: `action` is the top-level key and
+    /// every other field is forwarded to the plugin as a parameter. We
+    /// reshape `params` here to match that contract.
     pub async fn post_plugin_command(
         &self,
         plugin_id: &str,
@@ -884,9 +888,63 @@ impl HomeCoreClient {
         params: Value,
     ) -> Result<Value> {
         let path = format!("/plugins/{plugin_id}/command");
-        let body = json!({ "action": action, "params": params });
+        let body = build_plugin_command_body(action, params);
         let resp = self.request_with_json(Method::POST, &path, body).await?;
         Self::parse_json(resp).await
+    }
+
+    /// Same shape as `post_plugin_command` but used to kick off a
+    /// streaming action. The server mints a `request_id` and returns
+    /// it in the response; the caller then opens the SSE stream at
+    /// `/plugins/:id/command/:request_id/stream` to consume progress.
+    ///
+    /// On a `concurrency: single` busy response the server returns
+    /// `{"status": "busy", "active_request_id": "..."}`. Caller should
+    /// surface that and offer a "cancel active run" affordance.
+    pub async fn start_streaming_action(
+        &self,
+        plugin_id: &str,
+        action: &str,
+        params: Value,
+    ) -> Result<Value> {
+        // POST is identical; the difference is purely how the caller
+        // interprets the response (stream consumer vs. one-shot).
+        self.post_plugin_command(plugin_id, action, params).await
+    }
+
+    /// Cancel an in-flight streaming action by its `request_id`.
+    /// Implemented as a normal POST with `action = "cancel"` and a
+    /// `target_request_id` parameter — the same protocol the web client
+    /// uses for the busy banner's "Cancel active run" button.
+    pub async fn cancel_streaming_action(
+        &self,
+        plugin_id: &str,
+        request_id: &str,
+    ) -> Result<Value> {
+        let body = json!({ "target_request_id": request_id });
+        self.post_plugin_command(plugin_id, "cancel", body).await
+    }
+
+    /// Reply to an `awaiting_user` prompt. `response` is the user-supplied
+    /// payload the plugin will receive as the prompt result.
+    pub async fn respond_streaming_action(
+        &self,
+        plugin_id: &str,
+        request_id: &str,
+        response: Value,
+    ) -> Result<Value> {
+        let body = json!({
+            "target_request_id": request_id,
+            "response": response,
+        });
+        self.post_plugin_command(plugin_id, "respond", body).await
+    }
+
+    /// Return the same base URL the rest of the API uses, without the
+    /// `/api/v1` suffix. Used by the SSE consumer for plugin-action
+    /// streams.
+    pub fn base_url(&self) -> &str {
+        &self.base_url
     }
 
     // ── Glue devices ────────────────────────────────────────────────────────
@@ -1365,6 +1423,22 @@ impl HomeCoreClient {
             device_ids,
         })
     }
+}
+
+/// Reshape a plugin-action invocation into the body shape the server
+/// expects: `{ action: "...", ...params }`. Non-object `params` collapse
+/// to an empty object — the server always treats unknown extra fields
+/// as parameters, so misuse is harmless but `null`/strings/arrays are
+/// nonsensical at this layer.
+fn build_plugin_command_body(action: &str, params: Value) -> Value {
+    let mut body = match params {
+        Value::Object(_) => params,
+        _ => json!({}),
+    };
+    if let Value::Object(ref mut map) = body {
+        map.insert("action".to_string(), Value::String(action.to_string()));
+    }
+    body
 }
 
 fn summarize_event_detail(

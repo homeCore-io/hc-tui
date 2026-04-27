@@ -14,6 +14,16 @@ pub enum WsAppMsg {
     LogConnected,
     LogDisconnected(String),
     LogLine(LogLine),
+    /// Streaming plugin-action SSE consumer attached. Used to clear the
+    /// "starting…" pill on the modal.
+    StreamConnected,
+    /// One SSE event from the streaming plugin-action endpoint. The
+    /// `stage` field on the value drives modal state transitions.
+    StreamEvent(Value),
+    /// Stream finished cleanly (terminal stage observed or server hung up).
+    StreamClosed,
+    /// Stream failed before reaching a terminal stage.
+    StreamError(String),
 }
 
 pub fn spawn_events_stream(

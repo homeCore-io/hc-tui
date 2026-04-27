@@ -121,6 +121,148 @@ impl PluginDetailPanel {
     }
 }
 
+/// Per-stage status pill for the streaming-action modal. Mirrors the web
+/// client's pill set; the modal renders this directly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StreamingStage {
+    Starting,
+    Running,
+    AwaitingUser,
+    Complete,
+    Error,
+    Canceled,
+    Timeout,
+}
+
+impl StreamingStage {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Starting => "starting",
+            Self::Running => "running",
+            Self::AwaitingUser => "awaiting input",
+            Self::Complete => "complete",
+            Self::Error => "error",
+            Self::Canceled => "canceled",
+            Self::Timeout => "timeout",
+        }
+    }
+
+    pub fn is_terminal(self) -> bool {
+        matches!(self, Self::Complete | Self::Error | Self::Canceled | Self::Timeout)
+    }
+}
+
+/// State for one in-flight (or just-finished) streaming plugin-action
+/// invocation. Held in `App::streaming_action` while the modal is open.
+#[derive(Debug, Clone)]
+pub struct StreamingAction {
+    pub plugin_id: String,
+    /// Retained for debug/audit even though the modal renders `label`;
+    /// useful when surfacing failed runs in `status` later.
+    #[allow(dead_code)]
+    pub action_id: String,
+    pub label: String,
+    /// Server-minted request_id once the start POST returns. `None` while
+    /// the start request is still in flight.
+    pub request_id: Option<String>,
+    pub stage: StreamingStage,
+    /// Latest `progress` event payload (if any) — usually carries `pct`
+    /// and a `message` field.
+    pub last_progress: Option<serde_json::Value>,
+    /// Live item list aggregated from `item` events using the action's
+    /// optional `item_key` for dedup. We just push everything for the
+    /// MVP; if it overflows, we trim the head.
+    pub items: Vec<serde_json::Value>,
+    pub warnings: Vec<serde_json::Value>,
+    /// Currently-open `awaiting_user` prompt event (if any). Modal shows
+    /// the `prompt`/`schema` from the payload and lets the user fill in
+    /// a free-form text response.
+    pub pending_prompt: Option<serde_json::Value>,
+    /// Terminal payload — `Some` once a `complete`/`error`/`canceled`/
+    /// `timeout` event arrives. Drives the post-run summary.
+    pub terminal: Option<serde_json::Value>,
+    /// User-typed response buffer for `awaiting_user` prompts.
+    pub response_input: String,
+    /// Free-form footer message ("starting…", "cancel sent…", etc.)
+    pub footer: String,
+}
+
+impl StreamingAction {
+    pub fn new(plugin_id: String, action_id: String, label: String) -> Self {
+        Self {
+            plugin_id,
+            action_id,
+            label,
+            request_id: None,
+            stage: StreamingStage::Starting,
+            last_progress: None,
+            items: Vec::new(),
+            warnings: Vec::new(),
+            pending_prompt: None,
+            terminal: None,
+            response_input: String::new(),
+            footer: "starting…".into(),
+        }
+    }
+
+    /// Apply one SSE event payload to the modal state.
+    pub fn apply_event(&mut self, ev: serde_json::Value) {
+        let stage = ev
+            .get("stage")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        match stage.as_str() {
+            "progress" => {
+                self.last_progress = Some(ev);
+                self.stage = StreamingStage::Running;
+            }
+            "item" => {
+                if let Some(data) = ev.get("data").cloned() {
+                    self.items.push(data);
+                    // Cap list to keep the modal renderable.
+                    if self.items.len() > 200 {
+                        let drop = self.items.len() - 200;
+                        self.items.drain(..drop);
+                    }
+                }
+                self.stage = StreamingStage::Running;
+            }
+            "warning" => {
+                self.warnings.push(ev);
+                self.stage = StreamingStage::Running;
+            }
+            "awaiting_user" => {
+                self.pending_prompt = Some(ev);
+                self.response_input.clear();
+                self.stage = StreamingStage::AwaitingUser;
+                self.footer = "awaiting your response — type then press R to send".into();
+            }
+            "complete" => {
+                self.terminal = Some(ev);
+                self.stage = StreamingStage::Complete;
+                self.footer = "complete — press Esc to close".into();
+            }
+            "error" => {
+                self.terminal = Some(ev);
+                self.stage = StreamingStage::Error;
+                self.footer = "error — press Esc to close".into();
+            }
+            "canceled" => {
+                self.terminal = Some(ev);
+                self.stage = StreamingStage::Canceled;
+                self.footer = "canceled — press Esc to close".into();
+            }
+            "timeout" => {
+                self.terminal = Some(ev);
+                self.stage = StreamingStage::Timeout;
+                self.footer = "timed out — press Esc to close".into();
+            }
+            _ => {}
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeviceSubPanel {
     All,
@@ -564,6 +706,13 @@ pub struct App {
     /// Last status message from the Actions panel ("Action X completed",
     /// "Error: …"). Surfaced in the panel footer.
     pub action_status: String,
+    /// Active streaming-action modal — `Some` while the user is driving
+    /// a streaming plugin action. `None` when no modal is open.
+    pub streaming_action: Option<StreamingAction>,
+    /// Background-message sender shared with the SSE consumer. Wired from
+    /// `main.rs` after the channel is created. `None` only on the login
+    /// screen before the WS plumbing is set up.
+    pub ws_sender: Option<tokio::sync::mpsc::UnboundedSender<crate::ws::WsAppMsg>>,
     pub devices: Vec<DeviceState>,
     pub scenes: Vec<Scene>,
     pub areas: Vec<Area>,
@@ -865,6 +1014,8 @@ impl App {
             plugin_capabilities_error: None,
             action_busy: false,
             action_status: String::new(),
+            streaming_action: None,
+            ws_sender: None,
             devices: Vec::new(),
             scenes: Vec::new(),
             areas: Vec::new(),
@@ -1360,6 +1511,14 @@ impl App {
 
     pub async fn on_key_authenticated(&mut self, key: KeyEvent) {
         self.error = None;
+
+        // Streaming-action modal swallows all keystrokes while open.
+        // Esc closes the modal at any stage; the action keeps running
+        // server-side mid-run unless the user explicitly cancels.
+        if self.streaming_action.is_some() {
+            self.handle_streaming_action_key(key).await;
+            return;
+        }
 
         // Handle delete confirmation dialog first
         if self.automation_delete_confirm.is_some() {
@@ -3379,10 +3538,11 @@ impl App {
         };
 
         if action.stream {
-            self.action_status = format!(
-                "Streaming action `{}` — open the web client to drive this flow (TUI Phase 2 will support it).",
-                action.id
-            );
+            // Streaming actions take the SSE path: open the modal,
+            // POST to start, and on success spawn the SSE consumer.
+            // The modal renders progress/items/warnings/prompts/terminal
+            // and offers Cancel + Respond.
+            self.start_streaming_action(action).await;
             return;
         }
 
@@ -3443,6 +3603,272 @@ impl App {
             }
             Err(e) => {
                 self.action_status = format!("`{}` failed: {e}", action.id);
+            }
+        }
+    }
+
+    /// Open the streaming-action modal, POST the start command, and
+    /// (on success) spawn the SSE consumer that pumps progress events
+    /// into `streaming_action.apply_event` via the shared WS channel.
+    async fn start_streaming_action(&mut self, action: crate::api::Action) {
+        let Some(plugin_id) = self.plugin_detail_plugin_id.clone() else {
+            return;
+        };
+
+        let label = if action.label.is_empty() {
+            action.id.clone()
+        } else {
+            action.label.clone()
+        };
+        let mut state = StreamingAction::new(plugin_id.clone(), action.id.clone(), label);
+        state.footer = "starting…".into();
+        self.streaming_action = Some(state);
+
+        // Phase 2 sends empty params for the start (typed param form
+        // for streaming actions lives behind the same TODO as Phase 1's
+        // non-streaming form). Plugins that require parameters surface
+        // a validation `error` stage that the modal renders normally.
+        let result = self
+            .client
+            .start_streaming_action(&plugin_id, &action.id, serde_json::json!({}))
+            .await;
+
+        match result {
+            Ok(resp) => {
+                if resp.get("status").and_then(serde_json::Value::as_str) == Some("busy") {
+                    let active = resp
+                        .get("active_request_id")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
+                    if let Some(ref mut s) = self.streaming_action {
+                        s.stage = StreamingStage::Error;
+                        s.terminal = Some(serde_json::json!({
+                            "stage": "error",
+                            "error": format!(
+                                "another invocation is in flight (request_id={active})"
+                            ),
+                        }));
+                        s.footer = "busy — press Esc to close".into();
+                    }
+                    return;
+                }
+                let Some(rid) = resp
+                    .get("request_id")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string)
+                else {
+                    if let Some(ref mut s) = self.streaming_action {
+                        s.stage = StreamingStage::Error;
+                        s.terminal = Some(serde_json::json!({
+                            "stage": "error",
+                            "error": "plugin did not return a request_id",
+                        }));
+                        s.footer = "error — press Esc to close".into();
+                    }
+                    return;
+                };
+
+                let Some(ref tx) = self.ws_sender.clone() else {
+                    if let Some(ref mut s) = self.streaming_action {
+                        s.stage = StreamingStage::Error;
+                        s.terminal = Some(serde_json::json!({
+                            "stage": "error",
+                            "error": "internal: no ws sender available",
+                        }));
+                        s.footer = "error — press Esc to close".into();
+                    }
+                    return;
+                };
+                let Some(token) = self.ws_token() else {
+                    if let Some(ref mut s) = self.streaming_action {
+                        s.stage = StreamingStage::Error;
+                        s.terminal = Some(serde_json::json!({
+                            "stage": "error",
+                            "error": "not authenticated",
+                        }));
+                        s.footer = "error — press Esc to close".into();
+                    }
+                    return;
+                };
+
+                if let Some(ref mut s) = self.streaming_action {
+                    s.request_id = Some(rid.clone());
+                    s.footer = "connecting to event stream…".into();
+                }
+                crate::sse::spawn_streaming_action(
+                    self.client.base_url().to_string(),
+                    plugin_id,
+                    rid,
+                    token,
+                    tx.clone(),
+                );
+            }
+            Err(e) => {
+                if let Some(ref mut s) = self.streaming_action {
+                    s.stage = StreamingStage::Error;
+                    s.terminal = Some(serde_json::json!({
+                        "stage": "error",
+                        "error": format!("start failed: {e}"),
+                    }));
+                    s.footer = "error — press Esc to close".into();
+                }
+            }
+        }
+    }
+
+    /// Send `cancel` for the in-flight streaming action. The SSE stream
+    /// will close itself on the resulting terminal `canceled` event.
+    pub async fn cancel_streaming_action(&mut self) {
+        let Some(state) = &self.streaming_action else {
+            return;
+        };
+        if state.stage.is_terminal() {
+            return;
+        }
+        let Some(rid) = state.request_id.clone() else {
+            return;
+        };
+        let plugin_id = state.plugin_id.clone();
+        if let Some(ref mut s) = self.streaming_action {
+            s.footer = "cancel sent — waiting for terminal…".into();
+        }
+        if let Err(e) = self
+            .client
+            .cancel_streaming_action(&plugin_id, &rid)
+            .await
+        {
+            if let Some(ref mut s) = self.streaming_action {
+                s.footer = format!("cancel failed: {e}");
+            }
+        }
+    }
+
+    /// Send `respond` to satisfy a current `awaiting_user` prompt.
+    pub async fn respond_streaming_action(&mut self) {
+        let Some(state) = &self.streaming_action else {
+            return;
+        };
+        if state.pending_prompt.is_none() {
+            return;
+        }
+        let Some(rid) = state.request_id.clone() else {
+            return;
+        };
+        let plugin_id = state.plugin_id.clone();
+        // For the MVP the response is a single string; the plugin can
+        // still parse JSON if the user types a JSON literal.
+        let raw = state.response_input.clone();
+        let response = serde_json::from_str::<serde_json::Value>(&raw)
+            .unwrap_or(serde_json::Value::String(raw));
+
+        if let Some(ref mut s) = self.streaming_action {
+            s.footer = "response sent — waiting for plugin…".into();
+            s.pending_prompt = None;
+            s.response_input.clear();
+        }
+        if let Err(e) = self
+            .client
+            .respond_streaming_action(&plugin_id, &rid, response)
+            .await
+        {
+            if let Some(ref mut s) = self.streaming_action {
+                s.footer = format!("respond failed: {e}");
+            }
+        }
+    }
+
+    /// Close the streaming-action modal. No-op when no modal is open.
+    /// Cancellation is handled separately — closing the modal mid-run
+    /// just hides the UI; the action keeps running server-side until
+    /// the user explicitly cancels.
+    pub fn close_streaming_action(&mut self) {
+        self.streaming_action = None;
+    }
+
+    /// Key dispatch for the streaming-action modal. Branches on the
+    /// current stage (terminal vs. running vs. awaiting_user) so the
+    /// same key can mean different things depending on context.
+    pub async fn handle_streaming_action_key(&mut self, key: KeyEvent) {
+        let Some(state) = &self.streaming_action else {
+            return;
+        };
+        let stage = state.stage;
+        let awaiting = state.pending_prompt.is_some();
+
+        // Esc always closes the modal.
+        if matches!(key.code, KeyCode::Esc) {
+            self.close_streaming_action();
+            return;
+        }
+
+        // After terminal stage, only Esc/q close (no Cancel/Respond).
+        if stage.is_terminal() {
+            if matches!(key.code, KeyCode::Char('q')) {
+                self.close_streaming_action();
+            }
+            return;
+        }
+
+        if awaiting {
+            // Type into the response buffer; Enter sends.
+            match key.code {
+                KeyCode::Enter => {
+                    self.respond_streaming_action().await;
+                }
+                KeyCode::Backspace => {
+                    if let Some(ref mut s) = self.streaming_action {
+                        s.response_input.pop();
+                    }
+                }
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.cancel_streaming_action().await;
+                }
+                KeyCode::Char(ch) => {
+                    if let Some(ref mut s) = self.streaming_action {
+                        s.response_input.push(ch);
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        // Running with no prompt — `c` cancels.
+        if matches!(key.code, KeyCode::Char('c') | KeyCode::Char('C')) {
+            self.cancel_streaming_action().await;
+        }
+    }
+
+    pub fn on_stream_connected(&mut self) {
+        if let Some(ref mut s) = self.streaming_action {
+            s.footer = "streaming…".into();
+        }
+    }
+
+    pub fn on_stream_event(&mut self, ev: serde_json::Value) {
+        if let Some(ref mut s) = self.streaming_action {
+            s.apply_event(ev);
+        }
+    }
+
+    pub fn on_stream_closed(&mut self) {
+        if let Some(ref mut s) = self.streaming_action {
+            if !s.stage.is_terminal() {
+                s.footer = "stream closed without terminal — press Esc".into();
+            }
+        }
+    }
+
+    pub fn on_stream_error(&mut self, reason: String) {
+        if let Some(ref mut s) = self.streaming_action {
+            if !s.stage.is_terminal() {
+                s.stage = StreamingStage::Error;
+                s.terminal = Some(serde_json::json!({
+                    "stage": "error",
+                    "error": reason.clone(),
+                }));
+                s.footer = format!("stream error: {reason}");
             }
         }
     }

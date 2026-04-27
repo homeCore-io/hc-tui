@@ -2,6 +2,7 @@ mod api;
 mod app;
 mod cache;
 mod config;
+mod sse;
 mod ui;
 mod ws;
 
@@ -100,6 +101,9 @@ async fn run_app(
 ) -> Result<()> {
     let (ws_tx, mut ws_rx) = mpsc::unbounded_channel::<WsAppMsg>();
     let (async_tx, mut async_rx) = mpsc::unbounded_channel::<AsyncMsg>();
+    // The streaming-action SSE consumer needs the same channel as the
+    // WS event stream so its messages land in the same drain.
+    app.ws_sender = Some(ws_tx.clone());
     let mut ws_started = false;
     let mut auto_login_fired = false;
     let mut log_ws_started = false;
@@ -158,6 +162,10 @@ async fn run_app(
                 WsAppMsg::LogConnected => app.on_log_ws_connected(),
                 WsAppMsg::LogDisconnected(reason) => app.on_log_ws_disconnected(reason),
                 WsAppMsg::LogLine(line) => app.on_log_line(line),
+                WsAppMsg::StreamConnected => app.on_stream_connected(),
+                WsAppMsg::StreamEvent(value) => app.on_stream_event(value),
+                WsAppMsg::StreamClosed => app.on_stream_closed(),
+                WsAppMsg::StreamError(reason) => app.on_stream_error(reason),
             }
             saw_ws_update = true;
         }
