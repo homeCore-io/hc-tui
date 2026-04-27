@@ -61,17 +61,22 @@ async fn main() -> Result<()> {
 
     let cache = CacheStore::new(cache_dir);
 
-    // Try to restore a previously saved session token
-    let restored: Option<LoginWorkflowResult> = if persist_token {
-        if let Ok(Some(saved)) = cache.load_session().await {
-            let client = api::HomeCoreClient::new(base_url.clone());
-            App::try_restore_session(client, cache.clone(), saved.token).await
-        } else {
-            None
-        }
+    // Try to restore a previously saved session token, and also
+    // remember the cached username regardless — we'll use it to
+    // pre-fill the login form when restoration fails (expired token,
+    // server unreachable, etc.) so users don't retype it.
+    let cached_session = if persist_token {
+        cache.load_session().await.ok().flatten()
     } else {
         None
     };
+    let restored: Option<LoginWorkflowResult> =
+        if let Some(ref saved) = cached_session {
+            let client = api::HomeCoreClient::new(base_url.clone());
+            App::try_restore_session(client, cache.clone(), saved.token.clone()).await
+        } else {
+            None
+        };
 
     let mut terminal = setup_terminal()?;
     let mut app = App::new(base_url, cache);
@@ -82,6 +87,11 @@ async fn main() -> Result<()> {
     } else if let Some(ref al) = auto_login {
         // Pre-fill username; spawn auto-login in the background
         app.begin_auto_login(al.username.clone());
+    } else if let Some(saved) = cached_session {
+        // Token failed to restore but we know who logged in last;
+        // pre-fill the username and jump focus to the password.
+        app.username = saved.username;
+        app.focus = app::FocusField::Password;
     }
 
     let run_result = run_app(&mut terminal, &mut app, auto_login, persist_token).await;

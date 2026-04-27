@@ -398,91 +398,201 @@ fn fit_hints_lines(hints: &[&str], max_chars: usize) -> Vec<String> {
     }
 }
 
+/// Login screen — centered card with wordmark, base-URL preview,
+/// inline username + password fields, animated phase indicator,
+/// distinct error banner, and a key-binding footer.
 fn draw_login(frame: &mut Frame<'_>, app: &App) {
-    let popup = centered_rect(70, 55, frame.area());
+    // Modest dimensions — login is a focused interaction, not a full
+    // settings dialog. Constraints below assume ≥ 24 rows.
+    let popup = centered_rect_min(60, 22, 18, frame.area());
     frame.render_widget(Clear, popup);
 
+    // Outer card with a teal-leaning accent. The block intentionally
+    // has no title — the wordmark inside owns the identity.
+    let outer = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(LOGIN_ACCENT));
+    let inner = outer.inner(popup);
+    frame.render_widget(outer, popup);
+
+    // Vertical layout: wordmark, kicker, gap, server line, gap,
+    // username, password, gap, status line, gap, footer hints.
     let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(2),
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(2),
-            Constraint::Length(3),
-            Constraint::Min(1),
+            Constraint::Length(1), // wordmark
+            Constraint::Length(1), // kicker
+            Constraint::Length(1), // gap
+            Constraint::Length(1), // server URL
+            Constraint::Length(1), // gap
+            Constraint::Length(3), // username
+            Constraint::Length(3), // password
+            Constraint::Length(1), // gap
+            Constraint::Length(1), // status / spinner / error
+            Constraint::Min(0),    // expand
+            Constraint::Length(1), // footer hint
         ])
-        .split(popup);
+        .horizontal_margin(2)
+        .vertical_margin(1)
+        .split(inner);
 
-    let title = Paragraph::new("HomeCore TUI Login")
-        .style(
+    let wordmark = Paragraph::new(Line::from(vec![
+        Span::styled(
+            "homeCore",
             Style::default()
-                .fg(Color::Cyan)
+                .fg(LOGIN_ACCENT)
                 .add_modifier(Modifier::BOLD),
-        )
-        .alignment(Alignment::Center)
-        .block(Block::default().borders(Borders::ALL).title("Authenticate"));
-    frame.render_widget(title, layout[0]);
+        ),
+    ]))
+    .alignment(Alignment::Center);
+    frame.render_widget(wordmark, layout[0]);
 
-    let username_style = if matches!(app.focus, FocusField::Username) {
-        Style::default().fg(Color::Yellow)
+    let kicker = Paragraph::new(Span::styled(
+        "T E R M I N A L",
+        Style::default().fg(Color::DarkGray),
+    ))
+    .alignment(Alignment::Center);
+    frame.render_widget(kicker, layout[1]);
+
+    // Server URL pulled from the API client. Useful for catching
+    // "wrong host" mistakes before the user types credentials.
+    let server_line = Paragraph::new(Line::from(vec![
+        Span::styled("server  ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            app.client.base_url(),
+            Style::default().fg(Color::Gray),
+        ),
+    ]))
+    .alignment(Alignment::Center);
+    frame.render_widget(server_line, layout[3]);
+
+    // Username field — visible cursor when focused, dimmed
+    // placeholder when empty.
+    let username_focused = matches!(app.focus, FocusField::Username);
+    let username_block = field_block("username", username_focused);
+    let username_text = field_text(&app.username, username_focused, "type your username");
+    let username = Paragraph::new(username_text).block(username_block);
+    frame.render_widget(username, layout[5]);
+
+    // Password — same shape, but mask + cursor placement.
+    let password_focused = matches!(app.focus, FocusField::Password);
+    let password_block = field_block("password", password_focused);
+    let masked = if app.password.is_empty() && !password_focused {
+        Line::from(Span::styled(
+            "•••••••••",
+            Style::default().fg(Color::DarkGray),
+        ))
     } else {
-        Style::default()
-    };
-    let username = Paragraph::new(app.username.as_str()).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title("Username")
-            .border_style(username_style),
-    );
-    frame.render_widget(username, layout[1]);
-
-    let password_style = if matches!(app.focus, FocusField::Password) {
-        Style::default().fg(Color::Yellow)
-    } else {
-        Style::default()
-    };
-    let masked = "*".repeat(app.password.len());
-    let password = Paragraph::new(masked).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title("Password")
-            .border_style(password_style),
-    );
-    frame.render_widget(password, layout[2]);
-
-    let help =
-        Paragraph::new("Tab switch field | Enter login | Esc quit").alignment(Alignment::Center);
-    frame.render_widget(help, layout[3]);
-
-    let loading_label = if app.login_in_progress {
-        match app.login_phase {
-            LoginPhase::Authenticating => {
-                format!("{} authenticating with HomeCore...", app.login_spinner())
-            }
-            LoginPhase::Synthesizing => {
-                format!("{} Synthesizing homeCore...", app.login_spinner())
-            }
+        let mut spans: Vec<Span> = Vec::new();
+        spans.push(Span::raw("•".repeat(app.password.len())));
+        if password_focused {
+            spans.push(Span::styled("▎", Style::default().fg(LOGIN_ACCENT)));
         }
-    } else {
-        "Idle".to_string()
+        Line::from(spans)
     };
-    let loading = Gauge::default()
-        .block(Block::default().borders(Borders::ALL).title(loading_label))
-        .gauge_style(
-            Style::default()
-                .fg(Color::LightGreen)
-                .bg(Color::Black)
-                .add_modifier(Modifier::BOLD),
-        )
-        .ratio(app.login_progress_ratio());
-    frame.render_widget(loading, layout[4]);
+    let password = Paragraph::new(masked).block(password_block);
+    frame.render_widget(password, layout[6]);
 
-    let message = app.error.clone().unwrap_or_else(|| {
-        "Connects to /api/v1/auth/login and loads/saves cache snapshots locally".to_string()
-    });
-    let msg = Paragraph::new(message).alignment(Alignment::Center);
-    frame.render_widget(msg, layout[5]);
+    // Status row: error banner if set, otherwise spinner/idle.
+    if let Some(err) = app.error.as_ref() {
+        let err_line = Paragraph::new(Line::from(vec![
+            Span::styled(
+                " ✗ ",
+                Style::default()
+                    .bg(Color::Red)
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled(err.clone(), Style::default().fg(Color::Red)),
+        ]))
+        .alignment(Alignment::Center);
+        frame.render_widget(err_line, layout[8]);
+    } else if app.login_in_progress {
+        let (glyph, label) = match app.login_phase {
+            LoginPhase::Authenticating => ("[*]", "authenticating"),
+            LoginPhase::Synthesizing => ("[#]", "synthesizing local cache"),
+        };
+        let status = Paragraph::new(Line::from(vec![
+            Span::styled(
+                format!(" {} ", app.login_spinner()),
+                Style::default().fg(LOGIN_ACCENT),
+            ),
+            Span::styled(
+                format!("{glyph} "),
+                Style::default().fg(Color::DarkGray),
+            ),
+            Span::styled(label, Style::default().fg(Color::Gray)),
+        ]))
+        .alignment(Alignment::Center);
+        frame.render_widget(status, layout[8]);
+    } else {
+        let hint = Paragraph::new(Span::styled(
+            "credentials are sent over /api/v1/auth/login",
+            Style::default().fg(Color::DarkGray),
+        ))
+        .alignment(Alignment::Center);
+        frame.render_widget(hint, layout[8]);
+    }
+
+    let footer = Paragraph::new(Line::from(vec![
+        Span::styled("Tab", Style::default().fg(LOGIN_ACCENT)),
+        Span::styled(" switch field  ", Style::default().fg(Color::DarkGray)),
+        Span::styled("Enter", Style::default().fg(LOGIN_ACCENT)),
+        Span::styled(" sign in  ", Style::default().fg(Color::DarkGray)),
+        Span::styled("Esc", Style::default().fg(LOGIN_ACCENT)),
+        Span::styled(" quit", Style::default().fg(Color::DarkGray)),
+    ]))
+    .alignment(Alignment::Center);
+    frame.render_widget(footer, layout[10]);
+}
+
+/// Accent color used by the login screen — slight teal lean to match
+/// the Leptos client's identity refresh palette without depending on
+/// terminal RGB support.
+const LOGIN_ACCENT: Color = Color::Cyan;
+
+fn field_block(label: &'static str, focused: bool) -> Block<'static> {
+    let style = if focused {
+        Style::default().fg(LOGIN_ACCENT).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    Block::default()
+        .borders(Borders::ALL)
+        .border_style(style)
+        .title(format!(" {label} "))
+        .title_style(style)
+}
+
+fn field_text<'a>(value: &'a str, focused: bool, placeholder: &'static str) -> Line<'a> {
+    if value.is_empty() && !focused {
+        return Line::from(Span::styled(
+            placeholder,
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
+    let mut spans: Vec<Span<'a>> = Vec::new();
+    spans.push(Span::raw(value));
+    if focused {
+        spans.push(Span::styled("▎", Style::default().fg(LOGIN_ACCENT)));
+    }
+    Line::from(spans)
+}
+
+/// Centered rectangle of fixed `width` (clamped to `[min_w, max_w]`
+/// against `area.width`) and fixed `height` (clamped to `area.height`).
+/// Fits gracefully on small terminals: when `area.width < min_w` it
+/// uses whatever width is available rather than overflowing.
+fn centered_rect_min(min_w: u16, max_w: u16, height: u16, area: Rect) -> Rect {
+    let width = max_w.min(area.width).max(min_w.min(area.width));
+    let height = height.min(area.height);
+    Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    }
 }
 
 fn draw_tab_body(frame: &mut Frame<'_>, app: &App, area: Rect) {

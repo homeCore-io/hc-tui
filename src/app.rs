@@ -1174,12 +1174,13 @@ impl App {
     }
 
     pub fn login_spinner(&self) -> &'static str {
-        const SPINNER: [&str; 8] = ["|", "/", "-", "\\", "|", "/", "-", "\\"];
+        // Braille-pattern spinner — smoother than ASCII slash cycle.
+        // Falls back gracefully on terminals without unicode support
+        // since each frame is a single visible glyph.
+        const SPINNER: [&str; 10] = [
+            "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏",
+        ];
         SPINNER[(self.login_animation_step as usize) % SPINNER.len()]
-    }
-
-    pub fn login_progress_ratio(&self) -> f64 {
-        ((self.login_animation_step % 100) as f64) / 100.0
     }
 
     pub fn apply_login_success(&mut self, result: LoginWorkflowResult) {
@@ -6033,7 +6034,7 @@ pub async fn login_workflow_from_auth(
         .await
         .unwrap_or_default();
 
-    let fetched = fetch_remote_snapshot(&client, auth.user.role.clone()).await;
+    let fetched = fetch_remote_snapshot(&client, auth.user.role).await;
     match fetched {
         Ok((snapshot, warning)) => {
             cache.save_snapshot(&auth.user.username, &snapshot).await?;
@@ -6061,36 +6062,67 @@ async fn fetch_remote_snapshot(
     client: &HomeCoreClient,
     role: Role,
 ) -> Result<(CacheSnapshot, Option<String>)> {
-    let devices = client.list_devices().await.unwrap_or_default();
-    let mut scenes = client.list_scenes().await.unwrap_or_default();
+    // Fetch every snapshot piece in parallel — the post-login latency
+    // path was previously ~9 sequential REST calls (~150-250ms on a
+    // LAN). The only ordering dependency is `scenes` augmenting from
+    // `devices`, and that's a post-fetch transformation, not a
+    // sequencing requirement on the network calls themselves.
+    //
+    // Admin-only fetches (users, plugins) are wrapped so non-admins
+    // skip the request entirely rather than 403'ing on it.
+    let admin = role.is_admin();
+    let (
+        devices,
+        scenes_raw,
+        areas,
+        rules,
+        events,
+        switches,
+        timers,
+        modes,
+        users,
+        plugins,
+    ) = tokio::join!(
+        client.list_devices(),
+        client.list_scenes(),
+        client.list_areas(),
+        client.list_rules(),
+        client.list_events(50),
+        client.list_switches(),
+        client.list_timers(),
+        client.list_modes(),
+        async {
+            if admin {
+                client.list_users().await
+            } else {
+                Ok(Vec::new())
+            }
+        },
+        async {
+            if admin {
+                client.list_plugins().await
+            } else {
+                Ok(Vec::new())
+            }
+        },
+    );
+
+    let devices = devices.unwrap_or_default();
+    let mut scenes = scenes_raw.unwrap_or_default();
     scenes.extend(hue_scenes_from_devices(&devices));
-    let areas = client.list_areas().await.unwrap_or_default();
-    let rules = client.list_rules().await.unwrap_or_default();
-    let events = client.list_events(50).await.unwrap_or_default();
-    let switches = client.list_switches().await.unwrap_or_default();
-    let timers = client.list_timers().await.unwrap_or_default();
-    let modes = client.list_modes().await.unwrap_or_default();
-    let (users, plugins) = if role.is_admin() {
-        (
-            client.list_users().await.unwrap_or_default(),
-            client.list_plugins().await.unwrap_or_default(),
-        )
-    } else {
-        (Vec::new(), Vec::new())
-    };
 
     Ok((
         CacheSnapshot {
             devices,
             scenes,
-            areas,
-            rules,
-            events,
-            users,
-            plugins,
-            switches,
-            timers,
-            modes,
+            areas: areas.unwrap_or_default(),
+            rules: rules.unwrap_or_default(),
+            events: events.unwrap_or_default(),
+            users: users.unwrap_or_default(),
+            plugins: plugins.unwrap_or_default(),
+            switches: switches.unwrap_or_default(),
+            timers: timers.unwrap_or_default(),
+            modes: modes.unwrap_or_default(),
         },
         None,
     ))
