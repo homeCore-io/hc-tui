@@ -148,7 +148,10 @@ impl StreamingStage {
     }
 
     pub fn is_terminal(self) -> bool {
-        matches!(self, Self::Complete | Self::Error | Self::Canceled | Self::Timeout)
+        matches!(
+            self,
+            Self::Complete | Self::Error | Self::Canceled | Self::Timeout
+        )
     }
 }
 
@@ -382,11 +385,17 @@ pub enum AdminSubPanel {
 /// Actions on the Backup admin sub-panel. Exposed to the UI as a fixed
 /// list; the user navigates with Up/Down and triggers with Enter.
 pub const BACKUP_ACTIONS: &[(&str, &str)] = &[
-    ("backup_zip",     "Download system backup (.zip)"),
-    ("export_rules",   "Export all rules to JSON"),
-    ("export_scenes",  "Export all scenes to JSON"),
-    ("import_rules",   "Import rules from ~/.homecore/imports/rules.json"),
-    ("import_scenes",  "Import scenes from ~/.homecore/imports/scenes.json"),
+    ("backup_zip", "Download system backup (.zip)"),
+    ("export_rules", "Export all rules to JSON"),
+    ("export_scenes", "Export all scenes to JSON"),
+    (
+        "import_rules",
+        "Import rules from ~/.homecore/imports/rules.json",
+    ),
+    (
+        "import_scenes",
+        "Import scenes from ~/.homecore/imports/scenes.json",
+    ),
 ];
 
 fn home_dir() -> std::path::PathBuf {
@@ -1116,12 +1125,7 @@ impl App {
     }
 
     pub fn tabs(&self) -> Vec<Tab> {
-        let mut tabs = vec![
-            Tab::Devices,
-            Tab::Scenes,
-            Tab::Areas,
-            Tab::Rules,
-        ];
+        let mut tabs = vec![Tab::Devices, Tab::Scenes, Tab::Areas, Tab::Rules];
         if self.is_admin() {
             tabs.push(Tab::Plugins);
         }
@@ -1177,9 +1181,7 @@ impl App {
         // Braille-pattern spinner — smoother than ASCII slash cycle.
         // Falls back gracefully on terminals without unicode support
         // since each frame is a single visible glyph.
-        const SPINNER: [&str; 10] = [
-            "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏",
-        ];
+        const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
         SPINNER[(self.login_animation_step as usize) % SPINNER.len()]
     }
 
@@ -1446,14 +1448,11 @@ impl App {
                 }
             }
             "device_name_changed" => {
-                if let Some(device_id) = event.get("device_id").and_then(Value::as_str) {
-                    if let Some(name) = event.get("current_name").and_then(Value::as_str) {
-                        if let Some(device) =
-                            self.devices.iter_mut().find(|d| d.device_id == device_id)
-                        {
-                            device.name = name.to_string();
-                        }
-                    }
+                if let Some(device_id) = event.get("device_id").and_then(Value::as_str)
+                    && let Some(name) = event.get("current_name").and_then(Value::as_str)
+                    && let Some(device) = self.devices.iter_mut().find(|d| d.device_id == device_id)
+                {
+                    device.name = name.to_string();
                 }
             }
             _ => {}
@@ -1619,10 +1618,11 @@ impl App {
                 KeyCode::Char('p') => {
                     self.pair_bridges_for_selected_plugin().await;
                 }
-                KeyCode::Up if matches!(self.plugin_detail_panel, PluginDetailPanel::Actions) => {
-                    if self.selected > 0 {
-                        self.selected -= 1;
-                    }
+                KeyCode::Up
+                    if matches!(self.plugin_detail_panel, PluginDetailPanel::Actions)
+                        && self.selected > 0 =>
+                {
+                    self.selected -= 1;
                 }
                 KeyCode::Down if matches!(self.plugin_detail_panel, PluginDetailPanel::Actions) => {
                     let len = self
@@ -1634,7 +1634,9 @@ impl App {
                         self.selected += 1;
                     }
                 }
-                KeyCode::Enter if matches!(self.plugin_detail_panel, PluginDetailPanel::Actions) => {
+                KeyCode::Enter
+                    if matches!(self.plugin_detail_panel, PluginDetailPanel::Actions) =>
+                {
                     self.run_selected_plugin_action().await;
                 }
                 _ => {}
@@ -1853,7 +1855,7 @@ impl App {
                 }
             }
             // Number keys 1-9 for quick tab selection
-            KeyCode::Char(c) if c >= '1' && c <= '9' => {
+            KeyCode::Char(c) if ('1'..='9').contains(&c) => {
                 let tab_count = self.tabs().len();
                 let tab_idx = c as usize - '1' as usize;
                 if tab_idx < tab_count {
@@ -2007,17 +2009,13 @@ impl App {
                 Tab::Rules => self.disable_selected_rule().await,
                 _ => {}
             },
-            KeyCode::Char('D') => match self.active_tab() {
-                Tab::Rules => {
-                    if self.rule_bulk_select_mode && !self.rule_selected_ids.is_empty()
-                    {
-                        self.bulk_disable_rules().await;
-                    } else {
-                        self.disable_selected_rule().await;
-                    }
+            KeyCode::Char('D') if self.active_tab() == Tab::Rules => {
+                if self.rule_bulk_select_mode && !self.rule_selected_ids.is_empty() {
+                    self.bulk_disable_rules().await;
+                } else {
+                    self.disable_selected_rule().await;
                 }
-                _ => {}
-            },
+            }
             KeyCode::Char('p') => match self.active_tab() {
                 Tab::Devices if matches!(self.device_sub, DeviceSubPanel::MediaPlayers) => {
                     self.media_player_play_pause().await
@@ -2052,10 +2050,9 @@ impl App {
                 }
                 _ => {}
             },
-            KeyCode::Char('t') => match self.active_tab() {
-                Tab::Devices => self.toggle_selected_device().await,
-                _ => {}
-            },
+            KeyCode::Char('t') if self.active_tab() == Tab::Devices => {
+                self.toggle_selected_device().await
+            }
             KeyCode::Char('m')
                 if matches!(self.active_tab(), Tab::Devices)
                     && matches!(self.device_sub, DeviceSubPanel::MediaPlayers) =>
@@ -2173,8 +2170,7 @@ impl App {
             }
             KeyCode::Char('e') => match self.active_tab() {
                 Tab::Rules => {
-                    if self.rule_bulk_select_mode && !self.rule_selected_ids.is_empty()
-                    {
+                    if self.rule_bulk_select_mode && !self.rule_selected_ids.is_empty() {
                         self.bulk_enable_rules().await;
                     } else {
                         self.enable_selected_rule().await;
@@ -2186,24 +2182,19 @@ impl App {
                 }
                 _ => {}
             },
-            KeyCode::Char('E') => match self.active_tab() {
-                Tab::Rules => {
-                    if self.rule_bulk_select_mode && !self.rule_selected_ids.is_empty()
-                    {
-                        self.bulk_enable_rules().await;
-                    } else {
-                        self.enable_selected_rule().await;
-                    }
+            KeyCode::Char('E') if self.active_tab() == Tab::Rules => {
+                if self.rule_bulk_select_mode && !self.rule_selected_ids.is_empty() {
+                    self.bulk_enable_rules().await;
+                } else {
+                    self.enable_selected_rule().await;
                 }
-                _ => {}
-            },
-            KeyCode::Char('w') => {
+            }
+            KeyCode::Char('w')
                 if matches!(self.active_tab(), Tab::Manage)
-                    && matches!(self.admin_sub, AdminSubPanel::Logs)
-                {
-                    self.log_level_filter = LogLevelFilter::Warn;
-                    self.status = "Log level: WARN".to_string();
-                }
+                    && matches!(self.admin_sub, AdminSubPanel::Logs) =>
+            {
+                self.log_level_filter = LogLevelFilter::Warn;
+                self.status = "Log level: WARN".to_string();
             }
             KeyCode::Char('i') => {
                 if matches!(self.active_tab(), Tab::Manage)
@@ -2262,20 +2253,17 @@ impl App {
                     self.initiate_delete_rule();
                 }
             }
-            KeyCode::Esc => match self.active_tab() {
-                Tab::Rules => {
-                    if self.fire_history_open {
-                        self.fire_history_open = false;
-                        self.fire_history_rule_id = None;
-                        self.fire_history.clear();
-                    } else if self.rule_bulk_select_mode {
-                        self.rule_bulk_select_mode = false;
-                        self.rule_selected_ids.clear();
-                        self.status = "Selection cleared".to_string();
-                    }
+            KeyCode::Esc if self.active_tab() == Tab::Rules => {
+                if self.fire_history_open {
+                    self.fire_history_open = false;
+                    self.fire_history_rule_id = None;
+                    self.fire_history.clear();
+                } else if self.rule_bulk_select_mode {
+                    self.rule_bulk_select_mode = false;
+                    self.rule_selected_ids.clear();
+                    self.status = "Selection cleared".to_string();
                 }
-                _ => {}
-            },
+            }
             _ => {}
         }
     }
@@ -2405,10 +2393,8 @@ impl App {
             KeyCode::Esc => {
                 self.groups_open = false;
             }
-            KeyCode::Down | KeyCode::Char('j') => {
-                if !self.groups.is_empty() {
-                    self.groups_selected = min(self.groups_selected + 1, self.groups.len() - 1);
-                }
+            KeyCode::Down | KeyCode::Char('j') if !self.groups.is_empty() => {
+                self.groups_selected = min(self.groups_selected + 1, self.groups.len() - 1);
             }
             KeyCode::Up | KeyCode::Char('k') => {
                 self.groups_selected = self.groups_selected.saturating_sub(1);
@@ -3863,14 +3849,10 @@ impl App {
         if let Some(ref mut s) = self.streaming_action {
             s.footer = "cancel sent — waiting for terminal…".into();
         }
-        if let Err(e) = self
-            .client
-            .cancel_streaming_action(&plugin_id, &rid)
-            .await
+        if let Err(e) = self.client.cancel_streaming_action(&plugin_id, &rid).await
+            && let Some(ref mut s) = self.streaming_action
         {
-            if let Some(ref mut s) = self.streaming_action {
-                s.footer = format!("cancel failed: {e}");
-            }
+            s.footer = format!("cancel failed: {e}");
         }
     }
 
@@ -3901,10 +3883,9 @@ impl App {
             .client
             .respond_streaming_action(&plugin_id, &rid, response)
             .await
+            && let Some(ref mut s) = self.streaming_action
         {
-            if let Some(ref mut s) = self.streaming_action {
-                s.footer = format!("respond failed: {e}");
-            }
+            s.footer = format!("respond failed: {e}");
         }
     }
 
@@ -3983,23 +3964,23 @@ impl App {
     }
 
     pub fn on_stream_closed(&mut self) {
-        if let Some(ref mut s) = self.streaming_action {
-            if !s.stage.is_terminal() {
-                s.footer = "stream closed without terminal — press Esc".into();
-            }
+        if let Some(ref mut s) = self.streaming_action
+            && !s.stage.is_terminal()
+        {
+            s.footer = "stream closed without terminal — press Esc".into();
         }
     }
 
     pub fn on_stream_error(&mut self, reason: String) {
-        if let Some(ref mut s) = self.streaming_action {
-            if !s.stage.is_terminal() {
-                s.stage = StreamingStage::Error;
-                s.terminal = Some(serde_json::json!({
-                    "stage": "error",
-                    "error": reason.clone(),
-                }));
-                s.footer = format!("stream error: {reason}");
-            }
+        if let Some(ref mut s) = self.streaming_action
+            && !s.stage.is_terminal()
+        {
+            s.stage = StreamingStage::Error;
+            s.terminal = Some(serde_json::json!({
+                "stage": "error",
+                "error": reason.clone(),
+            }));
+            s.footer = format!("stream error: {reason}");
         }
     }
 
@@ -4063,10 +4044,10 @@ impl App {
         } else {
             self.error = Some(format!("Pairing request errors: {}", failed.join(" | ")));
 
-            if let Err(err) = self.refresh_all().await {
-                if self.error.is_none() {
-                    self.error = Some(err.to_string());
-                }
+            if let Err(err) = self.refresh_all().await
+                && self.error.is_none()
+            {
+                self.error = Some(err.to_string());
             }
         }
     }
@@ -4162,7 +4143,6 @@ impl App {
             self.selected = len - 1;
         }
     }
-
 
     async fn toggle_selected_device(&mut self) {
         let (device_id, device_name, current_on, media_action) = {
@@ -4633,10 +4613,8 @@ impl App {
                     self.areas_selected_area_id = Some(area.id.clone());
                 }
             }
-            KeyCode::Char('l') | KeyCode::Right => {
-                if self.areas_selected_area_id.is_some() {
-                    self.areas_pane_focus = AreasPane::DeviceList;
-                }
+            KeyCode::Char('l') | KeyCode::Right if self.areas_selected_area_id.is_some() => {
+                self.areas_pane_focus = AreasPane::DeviceList;
             }
 
             // Navigation within current pane
@@ -4714,42 +4692,38 @@ impl App {
 
             // Space: toggle device selection in device list pane
             KeyCode::Char(' ') => {
-                if matches!(self.areas_pane_focus, AreasPane::DeviceList) {
-                    if let Some(area_id) = &self.areas_selected_area_id {
-                        let device_ids = self
-                            .areas
-                            .iter()
-                            .find(|a| &a.id == area_id)
-                            .map(|a| a.device_ids.clone())
-                            .unwrap_or_default();
+                if matches!(self.areas_pane_focus, AreasPane::DeviceList)
+                    && let Some(area_id) = &self.areas_selected_area_id
+                {
+                    let device_ids = self
+                        .areas
+                        .iter()
+                        .find(|a| &a.id == area_id)
+                        .map(|a| a.device_ids.clone())
+                        .unwrap_or_default();
 
-                        let visible_devices: Vec<_> = self
-                            .devices
-                            .iter()
-                            .filter(|d| device_ids.contains(&d.device_id))
-                            .collect();
+                    let visible_devices: Vec<_> = self
+                        .devices
+                        .iter()
+                        .filter(|d| device_ids.contains(&d.device_id))
+                        .collect();
 
-                        if let Some(device) = visible_devices.get(self.areas_devices_selected) {
-                            if self.areas_selected_devices.contains(&device.device_id) {
-                                self.areas_selected_devices.remove(&device.device_id);
-                            } else {
-                                self.areas_selected_devices.insert(device.device_id.clone());
-                            }
+                    if let Some(device) = visible_devices.get(self.areas_devices_selected) {
+                        if self.areas_selected_devices.contains(&device.device_id) {
+                            self.areas_selected_devices.remove(&device.device_id);
+                        } else {
+                            self.areas_selected_devices.insert(device.device_id.clone());
                         }
                     }
                 }
             }
 
             // Plus/Minus: add/remove devices from area
-            KeyCode::Char('+') | KeyCode::Char('=') => {
-                if !self.areas_selected_devices.is_empty() {
-                    self.add_selected_devices_to_area().await;
-                }
+            KeyCode::Char('+') | KeyCode::Char('=') if !self.areas_selected_devices.is_empty() => {
+                self.add_selected_devices_to_area().await;
             }
-            KeyCode::Char('-') => {
-                if !self.areas_selected_devices.is_empty() {
-                    self.remove_selected_devices_from_area().await;
-                }
+            KeyCode::Char('-') if !self.areas_selected_devices.is_empty() => {
+                self.remove_selected_devices_from_area().await;
             }
 
             _ => {}
@@ -4785,33 +4759,33 @@ impl App {
             return;
         }
 
-        if let Some(area_id) = &self.areas_selected_area_id {
-            if let Some(area) = self.areas.iter().find(|a| &a.id == area_id) {
-                let mut new_device_ids = area.device_ids.clone();
+        if let Some(area_id) = &self.areas_selected_area_id
+            && let Some(area) = self.areas.iter().find(|a| &a.id == area_id)
+        {
+            let mut new_device_ids = area.device_ids.clone();
 
-                // Add selected devices that aren't already in the area
-                for device_id in &self.areas_selected_devices {
-                    if !new_device_ids.contains(device_id) {
-                        new_device_ids.push(device_id.clone());
+            // Add selected devices that aren't already in the area
+            for device_id in &self.areas_selected_devices {
+                if !new_device_ids.contains(device_id) {
+                    new_device_ids.push(device_id.clone());
+                }
+            }
+
+            // Call API to set area devices
+            match self.client.set_area_devices(area_id, &new_device_ids).await {
+                Ok(_) => {
+                    self.status = format!(
+                        "Added {} device(s) to area",
+                        self.areas_selected_devices.len()
+                    );
+                    self.areas_selected_devices.clear();
+                    // Refresh to get updated area
+                    if let Err(e) = self.refresh_all().await {
+                        self.error = Some(e.to_string());
                     }
                 }
-
-                // Call API to set area devices
-                match self.client.set_area_devices(area_id, &new_device_ids).await {
-                    Ok(_) => {
-                        self.status = format!(
-                            "Added {} device(s) to area",
-                            self.areas_selected_devices.len()
-                        );
-                        self.areas_selected_devices.clear();
-                        // Refresh to get updated area
-                        if let Err(e) = self.refresh_all().await {
-                            self.error = Some(e.to_string());
-                        }
-                    }
-                    Err(e) => {
-                        self.error = Some(format!("Failed to add devices: {}", e));
-                    }
+                Err(e) => {
+                    self.error = Some(format!("Failed to add devices: {}", e));
                 }
             }
         }
@@ -4825,29 +4799,29 @@ impl App {
             return;
         }
 
-        if let Some(area_id) = &self.areas_selected_area_id {
-            if let Some(area) = self.areas.iter().find(|a| &a.id == area_id) {
-                let new_device_ids: Vec<String> = area
-                    .device_ids
-                    .iter()
-                    .filter(|d| !self.areas_selected_devices.contains(*d))
-                    .cloned()
-                    .collect();
+        if let Some(area_id) = &self.areas_selected_area_id
+            && let Some(area) = self.areas.iter().find(|a| &a.id == area_id)
+        {
+            let new_device_ids: Vec<String> = area
+                .device_ids
+                .iter()
+                .filter(|d| !self.areas_selected_devices.contains(*d))
+                .cloned()
+                .collect();
 
-                // Call API to set area devices (now with removed devices)
-                match self.client.set_area_devices(area_id, &new_device_ids).await {
-                    Ok(_) => {
-                        let count = self.areas_selected_devices.len();
-                        self.status = format!("Removed {} device(s) from area", count);
-                        self.areas_selected_devices.clear();
-                        // Refresh to get updated area
-                        if let Err(e) = self.refresh_all().await {
-                            self.error = Some(e.to_string());
-                        }
+            // Call API to set area devices (now with removed devices)
+            match self.client.set_area_devices(area_id, &new_device_ids).await {
+                Ok(_) => {
+                    let count = self.areas_selected_devices.len();
+                    self.status = format!("Removed {} device(s) from area", count);
+                    self.areas_selected_devices.clear();
+                    // Refresh to get updated area
+                    if let Err(e) = self.refresh_all().await {
+                        self.error = Some(e.to_string());
                     }
-                    Err(e) => {
-                        self.error = Some(format!("Failed to remove devices: {}", e));
-                    }
+                }
+                Err(e) => {
+                    self.error = Some(format!("Failed to remove devices: {}", e));
                 }
             }
         }
@@ -4952,7 +4926,7 @@ impl App {
             current_password: String::new(),
             password: String::new(),
             confirm_password: String::new(),
-            role: user.role.clone(),
+            role: user.role,
         });
     }
 
@@ -5391,9 +5365,8 @@ impl App {
                     .map(|s| Value::String(s.to_string()))
                     .collect();
                 if opts.is_empty() {
-                    self.error = Some(
-                        "select needs at least one option (comma-separated)".to_string(),
-                    );
+                    self.error =
+                        Some("select needs at least one option (comma-separated)".to_string());
                     return;
                 }
                 config.insert("options".into(), Value::Array(opts));
@@ -5437,7 +5410,12 @@ impl App {
 
         match self
             .client
-            .create_glue(&id, &name, creator.glue_type.as_str(), Value::Object(config))
+            .create_glue(
+                &id,
+                &name,
+                creator.glue_type.as_str(),
+                Value::Object(config),
+            )
             .await
         {
             Ok(dev) => {
@@ -6071,18 +6049,7 @@ async fn fetch_remote_snapshot(
     // Admin-only fetches (users, plugins) are wrapped so non-admins
     // skip the request entirely rather than 403'ing on it.
     let admin = role.is_admin();
-    let (
-        devices,
-        scenes_raw,
-        areas,
-        rules,
-        events,
-        switches,
-        timers,
-        modes,
-        users,
-        plugins,
-    ) = tokio::join!(
+    let (devices, scenes_raw, areas, rules, events, switches, timers, modes, users, plugins) = tokio::join!(
         client.list_devices(),
         client.list_scenes(),
         client.list_areas(),

@@ -80,9 +80,7 @@ impl CacheStore {
             devices: self.read_json_or_default(dir.join("devices.json")).await?,
             scenes: self.read_json_or_default(dir.join("scenes.json")).await?,
             areas: self.read_json_or_default(dir.join("areas.json")).await?,
-            rules: self
-                .read_json_or_default(dir.join("rules.json"))
-                .await?,
+            rules: self.read_json_or_default(dir.join("rules.json")).await?,
             events: self.read_json_or_default(dir.join("events.json")).await?,
             users: self.read_json_or_default(dir.join("users.json")).await?,
             plugins: self.read_json_or_default(dir.join("plugins.json")).await?,

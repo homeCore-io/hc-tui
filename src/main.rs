@@ -26,7 +26,9 @@ use tokio::sync::mpsc;
 use ws::{WsAppMsg, spawn_events_stream, spawn_log_stream};
 
 enum AsyncMsg {
-    LoginFinished(Result<LoginWorkflowResult, String>),
+    // Result is significantly larger than the unit variant — box it to keep
+    // the enum compact (clippy::large_enum_variant).
+    LoginFinished(Box<Result<LoginWorkflowResult, String>>),
     LoginPhaseSynthesizing,
 }
 
@@ -70,13 +72,12 @@ async fn main() -> Result<()> {
     } else {
         None
     };
-    let restored: Option<LoginWorkflowResult> =
-        if let Some(ref saved) = cached_session {
-            let client = api::HomeCoreClient::new(base_url.clone());
-            App::try_restore_session(client, cache.clone(), saved.token.clone()).await
-        } else {
-            None
-        };
+    let restored: Option<LoginWorkflowResult> = if let Some(ref saved) = cached_session {
+        let client = api::HomeCoreClient::new(base_url.clone());
+        App::try_restore_session(client, cache.clone(), saved.token.clone()).await
+    } else {
+        None
+    };
 
     let mut terminal = setup_terminal()?;
     let mut app = App::new(base_url, cache);
@@ -121,11 +122,11 @@ async fn run_app(
     let mut last_login_animation_tick = Instant::now();
 
     // If already authenticated (restored session), start WS immediately
-    if app.authenticated {
-        if let Some(token) = app.ws_token() {
-            spawn_events_stream(app.ws_endpoint(), token.clone(), ws_tx.clone());
-            ws_started = true;
-        }
+    if app.authenticated
+        && let Some(token) = app.ws_token()
+    {
+        spawn_events_stream(app.ws_endpoint(), token.clone(), ws_tx.clone());
+        ws_started = true;
     }
 
     loop {
@@ -139,28 +140,29 @@ async fn run_app(
         }
 
         // Fire auto-login on first iteration if configured and not yet authenticated
-        if !app.authenticated && !auto_login_fired {
-            if let Some(ref al) = auto_login {
-                auto_login_fired = true;
-                let username = al.username.clone();
-                let password = al.password.clone();
-                let tx = async_tx.clone();
-                let client = app.client.clone();
-                let cache = app.cache.clone();
-                tokio::spawn(async move {
-                    let result = match client.login(&username, &password).await {
-                        Ok(auth) => {
-                            let _ = tx.send(AsyncMsg::LoginPhaseSynthesizing);
-                            login_workflow_from_auth(client, cache, auth)
-                                .await
-                                .map_err(|e| e.to_string())
-                        }
-                        Err(e) => Err(e.to_string()),
-                    };
-                    let _ = tx.send(AsyncMsg::LoginFinished(result));
-                });
-                needs_draw = true;
-            }
+        if !app.authenticated
+            && !auto_login_fired
+            && let Some(ref al) = auto_login
+        {
+            auto_login_fired = true;
+            let username = al.username.clone();
+            let password = al.password.clone();
+            let tx = async_tx.clone();
+            let client = app.client.clone();
+            let cache = app.cache.clone();
+            tokio::spawn(async move {
+                let result = match client.login(&username, &password).await {
+                    Ok(auth) => {
+                        let _ = tx.send(AsyncMsg::LoginPhaseSynthesizing);
+                        login_workflow_from_auth(client, cache, auth)
+                            .await
+                            .map_err(|e| e.to_string())
+                    }
+                    Err(e) => Err(e.to_string()),
+                };
+                let _ = tx.send(AsyncMsg::LoginFinished(Box::new(result)));
+            });
+            needs_draw = true;
         }
 
         let mut saw_ws_update = false;
@@ -186,23 +188,26 @@ async fn run_app(
         let mut saw_async_update = false;
         while let Ok(msg) = async_rx.try_recv() {
             match msg {
-                AsyncMsg::LoginFinished(Ok(result)) => {
-                    // Save the session token before applying the result
-                    if persist_token {
-                        let _ = app
-                            .cache
-                            .save_session(&result.auth.user.username, &result.auth.token)
-                            .await;
-                    }
-                    app.apply_login_success(result);
-                    if app.authenticated && !ws_started {
-                        if let Some(token) = app.ws_token() {
+                AsyncMsg::LoginFinished(boxed) => match *boxed {
+                    Ok(result) => {
+                        // Save the session token before applying the result
+                        if persist_token {
+                            let _ = app
+                                .cache
+                                .save_session(&result.auth.user.username, &result.auth.token)
+                                .await;
+                        }
+                        app.apply_login_success(result);
+                        if app.authenticated
+                            && !ws_started
+                            && let Some(token) = app.ws_token()
+                        {
                             spawn_events_stream(app.ws_endpoint(), token.clone(), ws_tx.clone());
                             ws_started = true;
                         }
                     }
-                }
-                AsyncMsg::LoginFinished(Err(error)) => app.apply_login_failure(error),
+                    Err(error) => app.apply_login_failure(error),
+                },
                 AsyncMsg::LoginPhaseSynthesizing => app.set_login_phase_synthesizing(),
             }
             saw_async_update = true;
@@ -211,14 +216,15 @@ async fn run_app(
             needs_draw = true;
         }
 
-        if app.wants_log_stream() && !log_ws_started {
-            if let Some(token) = app.ws_token() {
-                let log_url = app.ws_logs_endpoint();
-                let level = app.log_level_filter.as_str().to_string();
-                spawn_log_stream(log_url, token, level, String::new(), ws_tx.clone());
-                log_ws_started = true;
-                needs_draw = true;
-            }
+        if app.wants_log_stream()
+            && !log_ws_started
+            && let Some(token) = app.ws_token()
+        {
+            let log_url = app.ws_logs_endpoint();
+            let level = app.log_level_filter.as_str().to_string();
+            spawn_log_stream(log_url, token, level, String::new(), ws_tx.clone());
+            log_ws_started = true;
+            needs_draw = true;
         }
 
         if event::poll(Duration::from_millis(100))? {
@@ -226,24 +232,22 @@ async fn run_app(
             if let Event::Key(key) = evt {
                 if !app.authenticated {
                     let submit = app.on_key_login(key);
-                    if submit {
-                        if let Some((username, password)) = app.begin_login() {
-                            let tx = async_tx.clone();
-                            let client = app.client.clone();
-                            let cache = app.cache.clone();
-                            tokio::spawn(async move {
-                                let result = match client.login(&username, &password).await {
-                                    Ok(auth) => {
-                                        let _ = tx.send(AsyncMsg::LoginPhaseSynthesizing);
-                                        login_workflow_from_auth(client, cache, auth)
-                                            .await
-                                            .map_err(|e| e.to_string())
-                                    }
-                                    Err(e) => Err(e.to_string()),
-                                };
-                                let _ = tx.send(AsyncMsg::LoginFinished(result));
-                            });
-                        }
+                    if submit && let Some((username, password)) = app.begin_login() {
+                        let tx = async_tx.clone();
+                        let client = app.client.clone();
+                        let cache = app.cache.clone();
+                        tokio::spawn(async move {
+                            let result = match client.login(&username, &password).await {
+                                Ok(auth) => {
+                                    let _ = tx.send(AsyncMsg::LoginPhaseSynthesizing);
+                                    login_workflow_from_auth(client, cache, auth)
+                                        .await
+                                        .map_err(|e| e.to_string())
+                                }
+                                Err(e) => Err(e.to_string()),
+                            };
+                            let _ = tx.send(AsyncMsg::LoginFinished(Box::new(result)));
+                        });
                     }
                 } else {
                     app.on_key_authenticated(key).await;

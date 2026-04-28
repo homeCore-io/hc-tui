@@ -489,15 +489,16 @@ impl HomeCoreClient {
         stale: bool,
     ) -> Result<Vec<Rule>> {
         let mut params: Vec<String> = Vec::new();
-        if let Some(t) = tag {
-            if !t.is_empty() {
-                params.push(format!("tag={}", urlencoding::encode(t)));
-            }
+        if let Some(t) = tag
+            && !t.is_empty()
+        {
+            params.push(format!("tag={}", urlencoding::encode(t)));
         }
-        if let Some(tr) = trigger {
-            if !tr.is_empty() && tr != "all" {
-                params.push(format!("trigger={}", urlencoding::encode(tr)));
-            }
+        if let Some(tr) = trigger
+            && !tr.is_empty()
+            && tr != "all"
+        {
+            params.push(format!("trigger={}", urlencoding::encode(tr)));
         }
         if stale {
             params.push("stale=true".to_string());
@@ -983,9 +984,7 @@ impl HomeCoreClient {
             "glue_type": glue_type,
             "config": config,
         });
-        let resp = self
-            .request_with_json(Method::POST, "/glue", body)
-            .await?;
+        let resp = self.request_with_json(Method::POST, "/glue", body).await?;
         Self::parse_json(resp).await
     }
 
@@ -1009,10 +1008,7 @@ impl HomeCoreClient {
             let message = Self::extract_error_message(resp).await;
             return Err(anyhow!("{}: {}", status, message));
         }
-        let bytes = resp
-            .bytes()
-            .await
-            .context("failed to read backup body")?;
+        let bytes = resp.bytes().await.context("failed to read backup body")?;
         Ok(bytes.to_vec())
     }
 
@@ -1029,10 +1025,7 @@ impl HomeCoreClient {
             .request_with_json(Method::POST, "/automations/import", rules)
             .await?;
         let body: Value = Self::parse_json(resp).await?;
-        Ok(body
-            .get("imported")
-            .and_then(Value::as_u64)
-            .unwrap_or(0) as usize)
+        Ok(body.get("imported").and_then(Value::as_u64).unwrap_or(0) as usize)
     }
 
     /// Returns all scenes as a JSON Value (array of Scene).
@@ -1048,10 +1041,7 @@ impl HomeCoreClient {
             .request_with_json(Method::POST, "/scenes/import", scenes)
             .await?;
         let body: Value = Self::parse_json(resp).await?;
-        Ok(body
-            .get("imported")
-            .and_then(Value::as_u64)
-            .unwrap_or(0) as usize)
+        Ok(body.get("imported").and_then(Value::as_u64).unwrap_or(0) as usize)
     }
 
     fn endpoint(&self, path: &str) -> String {
@@ -1560,4 +1550,3 @@ fn summarize_event_detail(
         _ => None,
     }
 }
-

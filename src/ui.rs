@@ -1,11 +1,10 @@
 use crate::api::DeviceState;
 use crate::app::{
-    AdminSubPanel, App, AreaEditor, RuleFilterBar, RuleFilterField, DeleteConfirm,
-    DeviceEditField, DeviceSubPanel, DeviceViewMode, FocusField, GlueCreator, GlueEditField,
-    LogLevelFilter, LoginPhase, MatterCommissionEditor, MatterCommissionField, ModeEditField,
-    ModeEditor, ModeKind, PluginDetailPanel, StreamingAction, StreamingStage, SwitchEditField,
-    SwitchEditor, Tab, TimerEditField, TimerEditor, UserEditField, UserEditMode, UserEditor,
-    format_timestamp_utc,
+    AdminSubPanel, App, AreaEditor, DeleteConfirm, DeviceEditField, DeviceSubPanel, DeviceViewMode,
+    FocusField, GlueCreator, GlueEditField, LogLevelFilter, LoginPhase, MatterCommissionEditor,
+    MatterCommissionField, ModeEditField, ModeEditor, ModeKind, PluginDetailPanel, RuleFilterBar,
+    RuleFilterField, StreamingAction, StreamingStage, SwitchEditField, SwitchEditor, Tab,
+    TimerEditField, TimerEditor, UserEditField, UserEditMode, UserEditor, format_timestamp_utc,
 };
 use chrono::Utc;
 use ratatui::{
@@ -436,14 +435,12 @@ fn draw_login(frame: &mut Frame<'_>, app: &App) {
         .vertical_margin(1)
         .split(inner);
 
-    let wordmark = Paragraph::new(Line::from(vec![
-        Span::styled(
-            "homeCore",
-            Style::default()
-                .fg(LOGIN_ACCENT)
-                .add_modifier(Modifier::BOLD),
-        ),
-    ]))
+    let wordmark = Paragraph::new(Line::from(vec![Span::styled(
+        "homeCore",
+        Style::default()
+            .fg(LOGIN_ACCENT)
+            .add_modifier(Modifier::BOLD),
+    )]))
     .alignment(Alignment::Center);
     frame.render_widget(wordmark, layout[0]);
 
@@ -458,10 +455,7 @@ fn draw_login(frame: &mut Frame<'_>, app: &App) {
     // "wrong host" mistakes before the user types credentials.
     let server_line = Paragraph::new(Line::from(vec![
         Span::styled("server  ", Style::default().fg(Color::DarkGray)),
-        Span::styled(
-            app.client.base_url(),
-            Style::default().fg(Color::Gray),
-        ),
+        Span::styled(app.client.base_url(), Style::default().fg(Color::Gray)),
     ]))
     .alignment(Alignment::Center);
     frame.render_widget(server_line, layout[3]);
@@ -518,10 +512,7 @@ fn draw_login(frame: &mut Frame<'_>, app: &App) {
                 format!(" {} ", app.login_spinner()),
                 Style::default().fg(LOGIN_ACCENT),
             ),
-            Span::styled(
-                format!("{glyph} "),
-                Style::default().fg(Color::DarkGray),
-            ),
+            Span::styled(format!("{glyph} "), Style::default().fg(Color::DarkGray)),
             Span::styled(label, Style::default().fg(Color::Gray)),
         ]))
         .alignment(Alignment::Center);
@@ -554,7 +545,9 @@ const LOGIN_ACCENT: Color = Color::Cyan;
 
 fn field_block(label: &'static str, focused: bool) -> Block<'static> {
     let style = if focused {
-        Style::default().fg(LOGIN_ACCENT).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(LOGIN_ACCENT)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::DarkGray)
     };
@@ -897,8 +890,7 @@ fn draw_area_devices(frame: &mut Frame<'_>, app: &App, area: Rect) {
         .devices
         .iter()
         .filter(|d| device_ids.contains(&d.device_id))
-        .enumerate()
-        .map(|(_i, d)| {
+        .map(|d| {
             let is_selected = app.areas_selected_devices.contains(&d.device_id);
             let sel_mark = if is_selected { "[✓]" } else { "[ ]" };
             let (avail_dot, avail_color) = if d.available {
@@ -995,9 +987,9 @@ fn draw_rule_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),    // header
-            Constraint::Min(5),       // RON pane (takes the rest)
-            Constraint::Length(8),    // fire history (fixed)
+            Constraint::Length(3), // header
+            Constraint::Min(5),    // RON pane (takes the rest)
+            Constraint::Length(8), // fire history (fixed)
         ])
         .split(area);
 
@@ -1007,7 +999,9 @@ fn draw_rule_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
             let mut spans: Vec<Span> = Vec::new();
             spans.push(Span::styled(
                 r.name.clone(),
-                Style::default().add_modifier(Modifier::BOLD).fg(Color::White),
+                Style::default()
+                    .add_modifier(Modifier::BOLD)
+                    .fg(Color::White),
             ));
             spans.push(Span::raw("  "));
             spans.push(if r.enabled {
@@ -1038,8 +1032,8 @@ fn draw_rule_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
             Style::default().fg(Color::Yellow),
         ))],
     };
-    let header = Paragraph::new(header_lines)
-        .block(Block::default().borders(Borders::ALL).title(" Rule "));
+    let header =
+        Paragraph::new(header_lines).block(Block::default().borders(Borders::ALL).title(" Rule "));
     frame.render_widget(header, layout[0]);
 
     // RON pane.
@@ -1106,8 +1100,8 @@ fn draw_rule_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
         Some(h) => format!(" Fire history ({}) ", h.len()),
         None => " Fire history ".to_string(),
     };
-    let history = List::new(history_items)
-        .block(Block::default().borders(Borders::ALL).title(history_title));
+    let history =
+        List::new(history_items).block(Block::default().borders(Borders::ALL).title(history_title));
     frame.render_widget(history, layout[2]);
 }
 
@@ -1507,7 +1501,11 @@ fn draw_streaming_prompt(frame: &mut Frame<'_>, area: Rect, state: &StreamingAct
 
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(2), Constraint::Length(1), Constraint::Length(1)])
+        .constraints([
+            Constraint::Min(2),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
         .split(inner);
 
     let prompt_text = prompt
@@ -1531,8 +1529,8 @@ fn draw_streaming_prompt(frame: &mut Frame<'_>, area: Rect, state: &StreamingAct
     let label_widget = Paragraph::new(input_label).style(Style::default().fg(Color::DarkGray));
     frame.render_widget(label_widget, layout[1]);
 
-    let input = Paragraph::new(state.response_input.as_str())
-        .style(Style::default().fg(Color::Yellow));
+    let input =
+        Paragraph::new(state.response_input.as_str()).style(Style::default().fg(Color::Yellow));
     frame.render_widget(input, layout[2]);
 }
 
@@ -1983,7 +1981,7 @@ fn draw_audit_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
         })
         .collect();
     let title = if app.audit_loading {
-        format!("Audit [loading…]")
+        "Audit [loading…]".to_string()
     } else {
         format!("Audit ({} entries)", app.audit_entries.len())
     };
@@ -2005,42 +2003,42 @@ fn draw_audit_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
     frame.render_stateful_widget(list, layout[0], &mut state);
 
     // Optional expanded detail
-    if let Some(idx) = app.audit_expanded_idx {
-        if let Some(entry) = app.audit_entries.get(idx) {
-            let mut lines: Vec<Line> = Vec::new();
+    if let Some(idx) = app.audit_expanded_idx
+        && let Some(entry) = app.audit_entries.get(idx)
+    {
+        let mut lines: Vec<Line> = Vec::new();
+        lines.push(Line::from(vec![
+            Span::styled("ts: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(entry.ts.clone(), Style::default().fg(Color::White)),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("actor: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                format!("{} ({})", entry.actor_label, entry.actor_type.as_str()),
+                Style::default().fg(Color::White),
+            ),
+        ]));
+        if let Some(scope) = &entry.scope_used {
             lines.push(Line::from(vec![
-                Span::styled("ts: ", Style::default().fg(Color::DarkGray)),
-                Span::styled(entry.ts.clone(), Style::default().fg(Color::White)),
+                Span::styled("scope: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(scope.clone(), Style::default().fg(Color::Cyan)),
             ]));
-            lines.push(Line::from(vec![
-                Span::styled("actor: ", Style::default().fg(Color::DarkGray)),
-                Span::styled(
-                    format!("{} ({})", entry.actor_label, entry.actor_type.as_str()),
-                    Style::default().fg(Color::White),
-                ),
-            ]));
-            if let Some(scope) = &entry.scope_used {
-                lines.push(Line::from(vec![
-                    Span::styled("scope: ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(scope.clone(), Style::default().fg(Color::Cyan)),
-                ]));
-            }
-            if let Some(ip) = &entry.ip {
-                lines.push(Line::from(vec![
-                    Span::styled("ip: ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(ip.clone(), Style::default().fg(Color::White)),
-                ]));
-            }
-            let detail_str = serde_json::to_string_pretty(&entry.detail)
-                .unwrap_or_else(|_| entry.detail.to_string());
-            for line in detail_str.lines().take(20) {
-                lines.push(Line::from(line.to_string()));
-            }
-            let detail_widget = Paragraph::new(lines)
-                .block(Block::default().borders(Borders::ALL).title("Detail"))
-                .wrap(Wrap { trim: false });
-            frame.render_widget(detail_widget, layout[1]);
         }
+        if let Some(ip) = &entry.ip {
+            lines.push(Line::from(vec![
+                Span::styled("ip: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(ip.clone(), Style::default().fg(Color::White)),
+            ]));
+        }
+        let detail_str = serde_json::to_string_pretty(&entry.detail)
+            .unwrap_or_else(|_| entry.detail.to_string());
+        for line in detail_str.lines().take(20) {
+            lines.push(Line::from(line.to_string()));
+        }
+        let detail_widget = Paragraph::new(lines)
+            .block(Block::default().borders(Borders::ALL).title("Detail"))
+            .wrap(Wrap { trim: false });
+        frame.render_widget(detail_widget, layout[1]);
     }
 
     // Footer: page + offset + error
@@ -2067,14 +2065,14 @@ fn draw_audit_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
 }
 
 fn draw_backup_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
-    use crate::app::{backup_exports_dir, backup_imports_dir, BACKUP_ACTIONS};
+    use crate::app::{BACKUP_ACTIONS, backup_exports_dir, backup_imports_dir};
 
     let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(8),     // action list
-            Constraint::Length(3),  // path hint
-            Constraint::Length(3),  // status line
+            Constraint::Min(8),    // action list
+            Constraint::Length(3), // path hint
+            Constraint::Length(3), // status line
         ])
         .split(area);
 
@@ -2094,7 +2092,11 @@ fn draw_backup_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
             ListItem::new(Line::from(Span::styled(format!("  {label}"), style)))
         })
         .collect();
-    let list_title = if app.backup_busy { "Backup [busy]" } else { "Backup" };
+    let list_title = if app.backup_busy {
+        "Backup [busy]"
+    } else {
+        "Backup"
+    };
     let list = List::new(items)
         .block(Block::default().borders(Borders::ALL).title(list_title))
         .highlight_style(
@@ -2105,7 +2107,9 @@ fn draw_backup_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
         )
         .highlight_symbol(">> ");
     let mut state = ratatui::widgets::ListState::default();
-    state.select(Some(app.selected.min(BACKUP_ACTIONS.len().saturating_sub(1))));
+    state.select(Some(
+        app.selected.min(BACKUP_ACTIONS.len().saturating_sub(1)),
+    ));
     frame.render_stateful_widget(list, layout[0], &mut state);
 
     // Path hint
@@ -2286,7 +2290,11 @@ fn draw_plugin_actions(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let title = if app.plugin_capabilities_loading {
         "Actions [loading…]".to_string()
     } else if let Some(caps) = app.plugin_capabilities.as_ref() {
-        format!("Actions ({} actions, spec v{})", caps.actions.len(), caps.spec)
+        format!(
+            "Actions ({} actions, spec v{})",
+            caps.actions.len(),
+            caps.spec
+        )
     } else if app.plugin_capabilities_error.is_some() {
         "Actions [error]".to_string()
     } else {
@@ -2312,7 +2320,11 @@ fn draw_plugin_actions(frame: &mut Frame<'_>, app: &App, area: Rect) {
                     crate::api::RequiresRole::ReadOnly => Color::DarkGray,
                 };
                 let stream_badge = if a.stream { "stream" } else { "sync  " };
-                let stream_color = if a.stream { Color::Magenta } else { Color::DarkGray };
+                let stream_color = if a.stream {
+                    Color::Magenta
+                } else {
+                    Color::DarkGray
+                };
                 let concurrency = a.concurrency.as_str();
                 ListItem::new(Line::from(vec![
                     Span::styled(format!("  {:<24}", a.id), row_style),
@@ -2320,15 +2332,15 @@ fn draw_plugin_actions(frame: &mut Frame<'_>, app: &App, area: Rect) {
                         format!(" {:<10}", a.requires_role.as_str()),
                         Style::default().fg(role_color),
                     ),
-                    Span::styled(format!(" {stream_badge}"), Style::default().fg(stream_color)),
+                    Span::styled(
+                        format!(" {stream_badge}"),
+                        Style::default().fg(stream_color),
+                    ),
                     Span::styled(
                         format!(" {:<7}", concurrency),
                         Style::default().fg(Color::DarkGray),
                     ),
-                    Span::styled(
-                        format!(" {}", a.label),
-                        Style::default().fg(Color::White),
-                    ),
+                    Span::styled(format!(" {}", a.label), Style::default().fg(Color::White)),
                 ]))
             })
             .collect()
@@ -2346,10 +2358,10 @@ fn draw_plugin_actions(frame: &mut Frame<'_>, app: &App, area: Rect) {
         )
         .highlight_symbol(">> ");
     let mut state = ratatui::widgets::ListState::default();
-    if let Some(caps) = app.plugin_capabilities.as_ref() {
-        if !caps.actions.is_empty() {
-            state.select(Some(app.selected.min(caps.actions.len().saturating_sub(1))));
-        }
+    if let Some(caps) = app.plugin_capabilities.as_ref()
+        && !caps.actions.is_empty()
+    {
+        state.select(Some(app.selected.min(caps.actions.len().saturating_sub(1))));
     }
     frame.render_stateful_widget(list, layout[0], &mut state);
 
@@ -2993,20 +3005,20 @@ fn device_list_row(
     let status_shows_humidity = status.ends_with("%rh");
     let status_shows_battery = status.ends_with('%') && !status_shows_humidity;
 
-    if let Some(b) = App::device_battery(device) {
-        if !status_shows_battery {
-            suffix.push_str(&format!(" {b}%🔋"));
-        }
+    if let Some(b) = App::device_battery(device)
+        && !status_shows_battery
+    {
+        suffix.push_str(&format!(" {b}%🔋"));
     }
-    if let Some(t) = App::device_temperature(device) {
-        if !status_shows_temp {
-            suffix.push_str(&format!(" {t:.1}°"));
-        }
+    if let Some(t) = App::device_temperature(device)
+        && !status_shows_temp
+    {
+        suffix.push_str(&format!(" {t:.1}°"));
     }
-    if let Some(h) = App::device_humidity(device) {
-        if !status_shows_humidity {
-            suffix.push_str(&format!(" {h:.0}%"));
-        }
+    if let Some(h) = App::device_humidity(device)
+        && !status_shows_humidity
+    {
+        suffix.push_str(&format!(" {h:.0}%"));
     }
     // Timer countdown suffix
     if device.plugin_id == "core.timer" {
@@ -3032,7 +3044,7 @@ fn device_list_row(
             .bg(Color::Cyan)
             .add_modifier(Modifier::BOLD);
         let line = Line::from(vec![
-            Span::styled(format!("{prefix}"), sel_style),
+            Span::styled(prefix.to_string(), sel_style),
             Span::styled("● ", sel_style),
             Span::styled(format!("{name_truncated:<26}"), sel_style),
             Span::styled(format!(" {:<10}", &status), sel_style),
@@ -3051,7 +3063,7 @@ fn device_list_row(
             Style::default().fg(Color::DarkGray)
         };
         let line = Line::from(vec![
-            Span::styled(format!("{prefix}"), base_style),
+            Span::styled(prefix.to_string(), base_style),
             avail_dot,
             Span::styled(format!("{name_truncated:<26}"), base_style),
             Span::styled(format!(" {:<10}", &status), status_style),
@@ -3089,16 +3101,16 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
         "Device ID",
         vec![Span::raw(device.device_id.clone())],
     ));
-    if let Some(canonical_name) = &device.canonical_name {
-        if !canonical_name.is_empty() {
-            lines.push(detail_row(
-                "Canonical",
-                vec![Span::styled(
-                    canonical_name.clone(),
-                    Style::default().fg(Color::Cyan),
-                )],
-            ));
-        }
+    if let Some(canonical_name) = &device.canonical_name
+        && !canonical_name.is_empty()
+    {
+        lines.push(detail_row(
+            "Canonical",
+            vec![Span::styled(
+                canonical_name.clone(),
+                Style::default().fg(Color::Cyan),
+            )],
+        ));
     }
 
     // Status
@@ -3135,16 +3147,16 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
     ));
 
     // ZWave node location (from nodeInfo, distinct from the HC area field)
-    if let Some(loc) = device.attributes.get("location").and_then(|v| v.as_str()) {
-        if !loc.is_empty() {
-            lines.push(detail_row(
-                "ZW Location",
-                vec![Span::styled(
-                    loc.to_string(),
-                    Style::default().fg(Color::DarkGray),
-                )],
-            ));
-        }
+    if let Some(loc) = device.attributes.get("location").and_then(|v| v.as_str())
+        && !loc.is_empty()
+    {
+        lines.push(detail_row(
+            "ZW Location",
+            vec![Span::styled(
+                loc.to_string(),
+                Style::default().fg(Color::DarkGray),
+            )],
+        ));
     }
 
     // Last seen
@@ -3226,10 +3238,10 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
             ));
         }
 
-        if let Some(lbl) = device.attributes.get("label").and_then(|v| v.as_str()) {
-            if !lbl.is_empty() {
-                lines.push(detail_row("Label", vec![Span::raw(lbl.to_string())]));
-            }
+        if let Some(lbl) = device.attributes.get("label").and_then(|v| v.as_str())
+            && !lbl.is_empty()
+        {
+            lines.push(detail_row("Label", vec![Span::raw(lbl.to_string())]));
         }
 
         if let Some(started) = device.attributes.get("started_at").and_then(|v| v.as_str()) {
@@ -3401,10 +3413,9 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
             .attributes
             .get("auto_lock_secs")
             .and_then(|v| v.as_u64())
+            && secs > 0
         {
-            if secs > 0 {
-                lines.push(detail_row("Auto-lock", vec![Span::raw(format!("{secs}s"))]));
-            }
+            lines.push(detail_row("Auto-lock", vec![Span::raw(format!("{secs}s"))]));
         }
         // Operation type: 1=Constant, 2=Timed (ZWave)
         if let Some(op_type) = device
@@ -3424,25 +3435,23 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
             .attributes
             .get("lock_timeout_secs")
             .and_then(|v| v.as_f64())
+            && timeout > 0.0
         {
-            if timeout > 0.0 {
-                lines.push(detail_row(
-                    "Timeout",
-                    vec![Span::raw(format!("{timeout:.0}s"))],
-                ));
-            }
+            lines.push(detail_row(
+                "Timeout",
+                vec![Span::raw(format!("{timeout:.0}s"))],
+            ));
         }
         if let Some(relock) = device
             .attributes
             .get("lock_auto_relock_secs")
             .and_then(|v| v.as_f64())
+            && relock > 0.0
         {
-            if relock > 0.0 {
-                lines.push(detail_row(
-                    "Auto-relock",
-                    vec![Span::raw(format!("{relock:.0}s"))],
-                ));
-            }
+            lines.push(detail_row(
+                "Auto-relock",
+                vec![Span::raw(format!("{relock:.0}s"))],
+            ));
         }
     }
 
@@ -4698,7 +4707,11 @@ fn draw_glue_creator(frame: &mut Frame<'_>, creator: &GlueCreator) {
     let inactive = Style::default().fg(Color::DarkGray);
 
     let row_style = |field: GlueEditField| {
-        if creator.field == field { active } else { inactive }
+        if creator.field == field {
+            active
+        } else {
+            inactive
+        }
     };
 
     // Visible fields drive layout — only render the ones relevant to type.
@@ -4723,7 +4736,11 @@ fn draw_glue_creator(frame: &mut Frame<'_>, creator: &GlueCreator) {
             Span::raw("  "),
             Span::styled(creator.id.clone(), Style::default().fg(Color::White)),
             Span::styled(
-                if creator.field == GlueEditField::Id { "_" } else { "" },
+                if creator.field == GlueEditField::Id {
+                    "_"
+                } else {
+                    ""
+                },
                 Style::default().fg(Color::Cyan),
             ),
         ]));
@@ -4736,7 +4753,11 @@ fn draw_glue_creator(frame: &mut Frame<'_>, creator: &GlueCreator) {
             Span::raw("  "),
             Span::styled(creator.name.clone(), Style::default().fg(Color::White)),
             Span::styled(
-                if creator.field == GlueEditField::Name { "_" } else { "" },
+                if creator.field == GlueEditField::Name {
+                    "_"
+                } else {
+                    ""
+                },
                 Style::default().fg(Color::Cyan),
             ),
         ]));
@@ -4750,11 +4771,18 @@ fn draw_glue_creator(frame: &mut Frame<'_>, creator: &GlueCreator) {
             Style::default().fg(Color::DarkGray),
         )));
         lines.push(Line::from(vec![
-            Span::styled(format!("{:<14}", "options"), row_style(GlueEditField::Options)),
+            Span::styled(
+                format!("{:<14}", "options"),
+                row_style(GlueEditField::Options),
+            ),
             Span::raw("  "),
             Span::styled(creator.options.clone(), Style::default().fg(Color::White)),
             Span::styled(
-                if creator.field == GlueEditField::Options { "_" } else { "" },
+                if creator.field == GlueEditField::Options {
+                    "_"
+                } else {
+                    ""
+                },
                 Style::default().fg(Color::Cyan),
             ),
         ]));
@@ -4766,11 +4794,18 @@ fn draw_glue_creator(frame: &mut Frame<'_>, creator: &GlueCreator) {
             Style::default().fg(Color::DarkGray),
         )));
         lines.push(Line::from(vec![
-            Span::styled(format!("{:<14}", "members"), row_style(GlueEditField::Members)),
+            Span::styled(
+                format!("{:<14}", "members"),
+                row_style(GlueEditField::Members),
+            ),
             Span::raw("  "),
             Span::styled(creator.members.clone(), Style::default().fg(Color::White)),
             Span::styled(
-                if creator.field == GlueEditField::Members { "_" } else { "" },
+                if creator.field == GlueEditField::Members {
+                    "_"
+                } else {
+                    ""
+                },
                 Style::default().fg(Color::Cyan),
             ),
         ]));
@@ -4782,29 +4817,56 @@ fn draw_glue_creator(frame: &mut Frame<'_>, creator: &GlueCreator) {
             Style::default().fg(Color::DarkGray),
         )));
         lines.push(Line::from(vec![
-            Span::styled(format!("{:<14}", "source dev"), row_style(GlueEditField::SourceDeviceId)),
-            Span::raw("  "),
-            Span::styled(creator.source_device_id.clone(), Style::default().fg(Color::White)),
             Span::styled(
-                if creator.field == GlueEditField::SourceDeviceId { "_" } else { "" },
+                format!("{:<14}", "source dev"),
+                row_style(GlueEditField::SourceDeviceId),
+            ),
+            Span::raw("  "),
+            Span::styled(
+                creator.source_device_id.clone(),
+                Style::default().fg(Color::White),
+            ),
+            Span::styled(
+                if creator.field == GlueEditField::SourceDeviceId {
+                    "_"
+                } else {
+                    ""
+                },
                 Style::default().fg(Color::Cyan),
             ),
         ]));
         lines.push(Line::from(vec![
-            Span::styled(format!("{:<14}", "source attr"), row_style(GlueEditField::SourceAttribute)),
-            Span::raw("  "),
-            Span::styled(creator.source_attribute.clone(), Style::default().fg(Color::White)),
             Span::styled(
-                if creator.field == GlueEditField::SourceAttribute { "_" } else { "" },
+                format!("{:<14}", "source attr"),
+                row_style(GlueEditField::SourceAttribute),
+            ),
+            Span::raw("  "),
+            Span::styled(
+                creator.source_attribute.clone(),
+                Style::default().fg(Color::White),
+            ),
+            Span::styled(
+                if creator.field == GlueEditField::SourceAttribute {
+                    "_"
+                } else {
+                    ""
+                },
                 Style::default().fg(Color::Cyan),
             ),
         ]));
         lines.push(Line::from(vec![
-            Span::styled(format!("{:<14}", "threshold"), row_style(GlueEditField::Threshold)),
+            Span::styled(
+                format!("{:<14}", "threshold"),
+                row_style(GlueEditField::Threshold),
+            ),
             Span::raw("  "),
             Span::styled(creator.threshold.clone(), Style::default().fg(Color::White)),
             Span::styled(
-                if creator.field == GlueEditField::Threshold { "_" } else { "" },
+                if creator.field == GlueEditField::Threshold {
+                    "_"
+                } else {
+                    ""
+                },
                 Style::default().fg(Color::Cyan),
             ),
         ]));
