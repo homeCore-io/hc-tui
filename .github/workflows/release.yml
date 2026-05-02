@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: write
+  packages: write   # required for the reusable workflow's docker-publish job
+                    # to resolve, even though hc-tui doesn't enable it.
 
 jobs:
   release:
