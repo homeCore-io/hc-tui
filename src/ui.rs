@@ -1873,7 +1873,7 @@ fn draw_logs_body(frame: &mut Frame<'_>, app: &App, area: Rect) {
 
             ListItem::new(Line::from(vec![
                 Span::styled(
-                    format!("[{:<5}] ", &level_upper),
+                    format!("[{:<5}] ", level_upper),
                     Style::default().fg(level_color).add_modifier(level_mod),
                 ),
                 Span::styled(format!("{ts} "), Style::default().fg(Color::DarkGray)),
@@ -3047,7 +3047,7 @@ fn device_list_row(
             Span::styled(prefix.to_string(), sel_style),
             Span::styled("● ", sel_style),
             Span::styled(format!("{name_truncated:<26}"), sel_style),
-            Span::styled(format!(" {:<10}", &status), sel_style),
+            Span::styled(format!(" {:<10}", status), sel_style),
             Span::styled(suffix, sel_style),
         ]);
         ListItem::new(line)
@@ -3066,7 +3066,7 @@ fn device_list_row(
             Span::styled(prefix.to_string(), base_style),
             avail_dot,
             Span::styled(format!("{name_truncated:<26}"), base_style),
-            Span::styled(format!(" {:<10}", &status), status_style),
+            Span::styled(format!(" {:<10}", status), status_style),
             Span::styled(suffix, Style::default().fg(Color::DarkGray)),
         ]);
         ListItem::new(line)
