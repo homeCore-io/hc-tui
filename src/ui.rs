@@ -5075,3 +5075,89 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
         ])
         .split(popup_layout[1])[1]
 }
+
+#[cfg(test)]
+mod render_tests {
+    use super::*;
+    use crate::app::{App, Tab};
+    use crate::cache::CacheStore;
+    use ratatui::{Terminal, backend::TestBackend};
+    use std::path::PathBuf;
+
+    /// Rendering had no tests, so the ratatui 0.29 -> 0.30 upgrade — which
+    /// split the crate into `ratatui-core` and `ratatui-crossterm` — had
+    /// nothing to break. It compiled unchanged, which says the *types* still
+    /// line up and nothing about whether a frame comes out right.
+    ///
+    /// `TestBackend` renders into an in-memory buffer, so these exercise the
+    /// real widget tree with no terminal involved.
+    fn app() -> App {
+        App::new(
+            "http://127.0.0.1:8080".to_string(),
+            CacheStore::new(PathBuf::from("/tmp/hc-tui-render-tests")),
+        )
+    }
+
+    fn render(app: &App, w: u16, h: u16) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
+        terminal.draw(|frame| draw(frame, app)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        (0..buf.area.height)
+            .map(|y| {
+                (0..buf.area.width)
+                    .map(|x| buf[(x, y)].symbol().to_string())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn the_login_screen_draws_when_unauthenticated() {
+        let a = app();
+        assert!(!a.authenticated, "a fresh App should not be authenticated");
+        let screen = render(&a, 80, 24);
+        assert!(
+            screen.to_lowercase().contains("login") || screen.to_lowercase().contains("password"),
+            "login screen did not render:\n{screen}"
+        );
+    }
+
+    #[test]
+    fn the_main_ui_draws_its_tabs_when_authenticated() {
+        let mut a = app();
+        a.authenticated = true;
+        let screen = render(&a, 120, 40);
+        // The menu is the frame every other pane hangs off; if the widget API
+        // changed shape this is what stops appearing. Plugins is deliberately
+        // absent — it is admin-only, as test_admin_has_more_tabs pins.
+        for tab in [Tab::Devices, Tab::Scenes, Tab::Areas, Tab::Rules] {
+            assert!(
+                screen.contains(tab.title()),
+                "tab {:?} missing from the frame:\n{screen}",
+                tab.title()
+            );
+        }
+    }
+
+    /// A TUI that panics on a small terminal is a TUI that panics when someone
+    /// drags a window. Layout arithmetic is exactly what a ratatui major can
+    /// change underneath us.
+    #[test]
+    fn rendering_survives_awkward_terminal_sizes() {
+        let mut a = app();
+        a.authenticated = true;
+        for (w, h) in [(20u16, 5u16), (40, 10), (200, 60), (80, 3)] {
+            let _ = render(&a, w, h); // must not panic
+        }
+    }
+
+    #[test]
+    fn the_frame_fills_the_backend_it_was_given() {
+        let mut a = app();
+        a.authenticated = true;
+        let screen = render(&a, 100, 30);
+        assert_eq!(screen.lines().count(), 30);
+        assert!(screen.lines().all(|l| l.chars().count() == 100));
+    }
+}
