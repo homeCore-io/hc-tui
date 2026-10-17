@@ -4549,6 +4549,7 @@ fn draw_users_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
                 crate::api::Role::DeviceOperator => Color::Cyan,
                 crate::api::Role::RuleEditor => Color::Magenta,
                 crate::api::Role::ServiceOperator => Color::Blue,
+                crate::api::Role::HouseholdMember => Color::Green,
             };
             let me_tag = if is_self { " (you)" } else { "" };
             let date = u.created_at.chars().take(10).collect::<String>();

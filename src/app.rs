@@ -3676,6 +3676,7 @@ impl App {
                 Role::DeviceOperator => "device_operator",
                 Role::RuleEditor => "rule_editor",
                 Role::ServiceOperator => "service_operator",
+                Role::HouseholdMember => "household_member",
             })
             .unwrap_or("user");
         if role_required == "admin" && user_role != "admin" {

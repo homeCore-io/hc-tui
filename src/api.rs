@@ -41,6 +41,13 @@ pub enum Role {
         alias = "SERVICE_OPERATOR"
     )]
     ServiceOperator,
+    #[serde(
+        alias = "household_member",
+        alias = "householdmember",
+        alias = "HouseholdMember",
+        alias = "HOUSEHOLD_MEMBER"
+    )]
+    HouseholdMember,
 }
 
 impl Role {
@@ -50,9 +57,10 @@ impl Role {
 
     /// All roles in a stable cycle order — drives the Space-to-cycle user
     /// editor and any future dropdowns.
-    pub const ALL: [Role; 7] = [
+    pub const ALL: [Role; 8] = [
         Role::Admin,
         Role::User,
+        Role::HouseholdMember,
         Role::ReadOnly,
         Role::Observer,
         Role::DeviceOperator,
