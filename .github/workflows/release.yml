@@ -15,4 +15,3 @@ jobs:
     uses: homeCore-io/hc-scripts/.github/workflows/rust-release.yml@main
     with:
       binary_name: hc-tui
-      rust_version: "stable"
