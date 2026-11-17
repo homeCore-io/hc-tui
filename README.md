@@ -25,7 +25,6 @@ It is built with:
   - Activate selected scene
 - Data views:
   - Devices
-  - Dashboards
   - Scenes
   - Areas
   - Automations
@@ -60,7 +59,6 @@ cargo run -- --base-url http://127.0.0.1:8080 --cache-dir ./cache
 - Real-time device status comes from WebSocket events. If the stream drops, the TUI auto-reconnects.
 - The terminal redraw path is event-driven during normal use, so idle screens should not continuously repaint or burn CPU. The login screen still animates while an authentication/sync is in progress.
 - The live log WebSocket is opened only when the `Manage > Logs` panel is actually used.
-- Dashboard sync now accepts both flat and wrapped dashboard API response shapes. If dashboard fetch fails during login or refresh, the TUI keeps working and reports the dashboard-specific warning in the status line instead of silently showing an empty dashboard list.
 
 ## Key Bindings
 
@@ -79,7 +77,6 @@ cargo run -- --base-url http://127.0.0.1:8080 --cache-dir ./cache
   - `p` play/pause, `x` stop, `n` next, `b` previous, `+`/`-` volume, `m` mute (Devices > Media Players)
   - `e` edit selected device metadata including canonical name (Devices tab, admin)
   - `a` activate selected scene (Scenes tab)
-  - `Enter` inspect selected dashboard summary (Dashboards tab)
 
 - Manage > Matter (admin):
   - `c` open commission form (pairing code, optional name/room/discriminator/passcode)
@@ -93,7 +90,6 @@ This client targets the existing endpoints in `homeCore`:
 - `POST /api/v1/auth/login`
 - `GET /api/v1/auth/me`
 - `GET /api/v1/devices`
-- `GET /api/v1/dashboards`
 - `PATCH /api/v1/devices/{id}/state`
 - `GET /api/v1/scenes`
 - `POST /api/v1/scenes/{id}/activate`
