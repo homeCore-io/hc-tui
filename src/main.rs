@@ -33,12 +33,12 @@ enum AsyncMsg {
 }
 
 #[derive(Debug, Parser)]
-#[command(name = "hc-tui", about = "Terminal UI client for HomeCore")]
+#[command(name = "hc-tui", about = "Terminal UI client for homeCore")]
 struct Args {
     /// Path to config file
     #[arg(long, default_value = "config/config.toml")]
     config: PathBuf,
-    /// HomeCore API base URL — overrides config file value
+    /// homeCore API base URL — overrides config file value
     #[arg(long)]
     base_url: Option<String>,
     /// Local cache directory — overrides config file value

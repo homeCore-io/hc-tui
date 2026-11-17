@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/homeCore-io/hc-tui/actions/workflows/ci.yml/badge.svg)](https://github.com/homeCore-io/hc-tui/actions/workflows/ci.yml) [![Release](https://github.com/homeCore-io/hc-tui/actions/workflows/release.yml/badge.svg)](https://github.com/homeCore-io/hc-tui/actions/workflows/release.yml) [![Dashboard](https://img.shields.io/badge/builds-dashboard-blue?style=flat-square)](https://homecore-io.github.io/ci-glance/)
 
-`hc-tui` is a terminal UI client for the HomeCore home automation server.
+`hc-tui` is a terminal UI client for the homeCore home automation server.
 
 It is built with:
 - Rust
@@ -12,7 +12,7 @@ It is built with:
 
 ## What It Supports
 
-- Login using HomeCore JWT auth (`/api/v1/auth/login`)
+- Login using homeCore JWT auth (`/api/v1/auth/login`)
 - Role-aware UI:
   - `user` / `read_only`: devices, scenes, areas, automations, events
   - `admin`: all of the above + users + plugins
@@ -48,12 +48,12 @@ It is built with:
 cargo run -- --base-url http://127.0.0.1:8080 --cache-dir ./cache
 ```
 
-`--base-url` should point to the HomeCore server root (without `/api/v1`).
+`--base-url` should point to the homeCore server root (without `/api/v1`).
 `--cache-dir` stores local JSON cache snapshots per user.
 
 ## Caching Behavior
 
-- On login, the TUI loads cached state/config first (if present), then syncs from HomeCore.
+- On login, the TUI loads cached state/config first (if present), then syncs from homeCore.
 - Manual refresh (`r`) pulls fresh data and updates cache files.
 - Device/scene actions sync and re-cache after completion.
 - There is no background auto-refresh loop while navigating selections.
@@ -87,7 +87,7 @@ cargo run -- --base-url http://127.0.0.1:8080 --cache-dir ./cache
   - `i` request reinterview for selected node
   - `d` request removal for selected node
 
-## HomeCore API Integration
+## homeCore API Integration
 
 This client targets the existing endpoints in `homeCore`:
 - `POST /api/v1/auth/login`

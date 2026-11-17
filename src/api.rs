@@ -764,7 +764,7 @@ impl HomeCoreClient {
     }
 
     pub async fn discover_plugin_bridges(&self, plugin_id: &str) -> Result<()> {
-        // Try known endpoint patterns so TUI can work across HomeCore API variants.
+        // Try known endpoint patterns so TUI can work across homeCore API variants.
         let paths = [
             format!("/plugins/{plugin_id}/discover"),
             format!("/plugins/{plugin_id}/bridges/discover"),

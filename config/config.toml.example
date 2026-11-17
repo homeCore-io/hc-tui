@@ -1,9 +1,9 @@
-# HomeCore TUI configuration
+# homeCore TUI configuration
 # Copy this file to config/config.toml and fill in your values.
 # config/config.toml is gitignored — it may contain credentials.
 
 [server]
-# HomeCore API base URL (without /api/v1)
+# homeCore API base URL (without /api/v1)
 base_url = "http://127.0.0.1:8080"
 
 [cache]
