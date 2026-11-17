@@ -989,7 +989,7 @@ impl HomeCoreClient {
         let body = json!({
             "id": id,
             "name": name,
-            "glue_type": glue_type,
+            "type": glue_type,
             "config": config,
         });
         let resp = self.request_with_json(Method::POST, "/glue", body).await?;
