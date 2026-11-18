@@ -1,0 +1,14 @@
+{
+  "version": "0.1.116",
+  "uptime_seconds": 19859,
+  "started_at": "2026-11-17T18:20:24Z",
+  "rules_total": 60,
+  "rules_enabled": 51,
+  "devices_total": 233,
+  "plugins_active": 8,
+  "state_db_bytes": 2727936,
+  "history_db_bytes": 109613056,
+  "timezone": "America/New_York",
+  "temperature_unit": "°F",
+  "last_backup_at": null
+}

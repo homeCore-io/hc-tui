@@ -1,0 +1,83 @@
+[
+  {
+    "device_id": "hue_bridge1_light_0001",
+    "name": "Desk Lamp",
+    "plugin_id": "plugin.hue",
+    "device_type": "light",
+    "canonical_name": "desk_lamp",
+    "area": "office",
+    "room": "office",
+    "manufacturer": "Signify",
+    "available": true,
+    "attributes": {
+      "on": true,
+      "brightness_pct": 62.5,
+      "color_temp": 3200,
+      "supports_dimming": true
+    },
+    "attributes_changed_at": { "on": "2026-11-17T20:00:00Z" },
+    "last_change": { "changed_at": "2026-11-17T20:00:00Z", "kind": "physical" },
+    "last_seen": "2026-11-17T20:00:00.123Z"
+  },
+  {
+    "device_id": "switch_porch_light",
+    "name": "Porch Light",
+    "name_override": "Front Porch",
+    "plugin_id": "core.glue",
+    "device_type": "switch",
+    "canonical_name": "porch_light",
+    "area_override": "garage",
+    "room": "garage",
+    "available": true,
+    "attributes": { "on": false },
+    "last_change": {
+      "changed_at": "2026-10-17T00:50:54Z",
+      "kind": "homecore",
+      "source": "rule",
+      "actor_name": "A rule"
+    },
+    "last_seen": "2026-10-17T00:50:54Z"
+  },
+  {
+    "device_id": "thermostat_hall",
+    "name": "Hall Thermostat",
+    "plugin_id": "plugin.thermostat",
+    "device_type": "thermostat",
+    "available": true,
+    "attributes": {
+      "temperature": 19.5,
+      "setpoint": 20.0,
+      "heat_setpoint": 20.0,
+      "cool_setpoint": 24.0,
+      "hvac_mode": "heat",
+      "hvac_action": "idle"
+    },
+    "last_seen": "2026-11-17T21:00:00Z"
+  },
+  {
+    "device_id": "lutron_scene_evening",
+    "name": "Evening",
+    "plugin_id": "plugin.lutron",
+    "device_type": "scene",
+    "available": true,
+    "attributes": {},
+    "last_seen": "2026-10-31T16:08:04Z"
+  },
+  {
+    "device_id": "timer_bathroom",
+    "name": "Bathroom Exhaust",
+    "plugin_id": "core.glue",
+    "device_type": "timer",
+    "parent_device_id": "switch_bathroom_fan",
+    "available": false,
+    "attributes": {
+      "default_secs": 300,
+      "duration_secs": 300,
+      "remaining_secs": 120,
+      "repeat": false,
+      "started_at": "2026-11-10T19:51:45+00:00",
+      "state": "paused"
+    },
+    "last_seen": "2026-11-10T19:51:53Z"
+  }
+]

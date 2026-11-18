@@ -1,0 +1,41 @@
+[
+  {
+    "plugin_id": "plugin.thermostat",
+    "registered_at": "2026-11-17T18:20:24.381Z",
+    "status": "active",
+    "enabled": true,
+    "managed": true,
+    "config_path": "/srv/homecore/config/plugins/plugin.thermostat.toml",
+    "binary_path": "/srv/homecore/bin/hc-thermostat",
+    "last_heartbeat": "2026-11-17T23:59:00Z",
+    "restart_count": 2,
+    "uptime_started": "2026-11-17T18:20:30Z",
+    "device_count": 6,
+    "log_level": "info",
+    "version": "0.1.23",
+    "installed_version": "0.1.13",
+    "supports_management": true,
+    "notices": [],
+    "capabilities": { "spec": "1", "plugin_id": "plugin.thermostat", "actions": [] },
+    "config_schema": { "type": "object" },
+    "ui": { "pages": [] }
+  },
+  {
+    "plugin_id": "plugin.nuheat",
+    "registered_at": "2026-11-17T18:20:24.381Z",
+    "status": "stopped",
+    "enabled": false,
+    "managed": true,
+    "restart_count": 0,
+    "device_count": 0,
+    "supports_management": false,
+    "notices": [
+      {
+        "code": "not_linked",
+        "level": "warning",
+        "message": "Not signed in, so no thermostats are published.",
+        "remedy": "Use \"Link account\" on this page."
+      }
+    ]
+  }
+]

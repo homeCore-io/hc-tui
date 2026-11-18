@@ -1,0 +1,39 @@
+[
+  {
+    "seq": 3,
+    "event_type": "custom",
+    "event": {
+      "type": "custom",
+      "timestamp": "2026-11-17T23:51:30Z",
+      "event_type": "webhook",
+      "payload": { "path": "doorbell" }
+    }
+  },
+  {
+    "seq": 2,
+    "event_type": "rule_fired",
+    "event": {
+      "type": "rule_fired",
+      "timestamp": "2026-11-17T23:51:25Z",
+      "rule_id": "6a1f0000-0000-4000-8000-000000000001",
+      "rule_name": "Garage open alert",
+      "trigger_type": "DeviceStateChanged",
+      "action_count": 1
+    }
+  },
+  {
+    "seq": 1,
+    "event_type": "device_state_changed",
+    "device_id": "thermostat_hall",
+    "event": {
+      "type": "device_state_changed",
+      "timestamp": "2026-11-17T23:51:24Z",
+      "device_id": "thermostat_hall",
+      "device_name": "Hall Thermostat",
+      "previous": { "temperature": 19.4 },
+      "current": { "temperature": 19.5 },
+      "changed": ["temperature"],
+      "change": { "changed_at": "2026-11-17T23:51:24Z", "kind": "unknown" }
+    }
+  }
+]
