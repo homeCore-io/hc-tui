@@ -785,6 +785,7 @@ dependencies = [
  "tokio-tungstenite",
  "toml",
  "urlencoding",
+ "zeroize",
 ]
 
 [[package]]

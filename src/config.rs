@@ -1,15 +1,18 @@
-//! TUI configuration file (`config/config.toml`).
+//! TUI configuration file.
 //!
-//! All fields have defaults so the file is entirely optional.  CLI flags
+//! All fields have defaults so the file is entirely optional. CLI flags
 //! override the corresponding config values when both are present.
+//!
+//! Default locations follow the XDG base directories:
+//! - config: `$XDG_CONFIG_HOME/hc-tui/config.toml` (`~/.config/hc-tui`)
+//! - cache:  `$XDG_CACHE_HOME/hc-tui` (`~/.cache/hc-tui`)
+//!
+//! A `config/config.toml` in the working directory is still read when no
+//! XDG config exists, so older checkouts keep working.
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
-use std::path::Path;
-
-// ---------------------------------------------------------------------------
-// Top-level
-// ---------------------------------------------------------------------------
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Deserialize, Default)]
 pub struct Config {
@@ -21,10 +24,6 @@ pub struct Config {
     pub session: SessionConfig,
     pub auto_login: Option<AutoLoginConfig>,
 }
-
-// ---------------------------------------------------------------------------
-// Sections
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Deserialize)]
 pub struct ServerConfig {
@@ -39,23 +38,17 @@ impl Default for ServerConfig {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 pub struct CacheConfig {
-    pub dir: String,
-}
-
-impl Default for CacheConfig {
-    fn default() -> Self {
-        Self {
-            dir: "./cache".to_string(),
-        }
-    }
+    /// Cache directory. Defaults to the XDG cache directory.
+    #[serde(default)]
+    pub dir: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct SessionConfig {
-    /// Persist the JWT to `{cache_dir}/session.json` and restore it on next
-    /// startup, skipping the login screen while the token is still valid.
+    /// Persist the session to `{cache_dir}/session.json` and restore it
+    /// on next startup, skipping the login screen while it is valid.
     #[serde(default = "default_true")]
     pub persist_token: bool,
 }
@@ -72,20 +65,24 @@ fn default_true() -> bool {
     true
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Deserialize, Clone)]
 pub struct AutoLoginConfig {
     pub username: String,
     pub password: String,
 }
 
-// ---------------------------------------------------------------------------
-// Loading
-// ---------------------------------------------------------------------------
+impl std::fmt::Debug for AutoLoginConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AutoLoginConfig")
+            .field("username", &self.username)
+            .field("password", &"<redacted>")
+            .finish()
+    }
+}
 
 impl Config {
-    /// Load config from `path`.  Returns `Config::default()` silently if the
-    /// file does not exist (the file is optional).  Returns an error if the
-    /// file exists but cannot be read or parsed.
+    /// Load config from `path`. Returns `Config::default()` if the file
+    /// does not exist; errors if it exists but cannot be read or parsed.
     pub fn load(path: &Path) -> Result<Self> {
         if !path.exists() {
             return Ok(Self::default());
@@ -93,5 +90,84 @@ impl Config {
         let text = std::fs::read_to_string(path)
             .with_context(|| format!("failed to read {}", path.display()))?;
         toml::from_str(&text).with_context(|| format!("failed to parse {}", path.display()))
+    }
+}
+
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .filter(|h| !h.is_empty())
+        .map(PathBuf::from)
+}
+
+fn xdg_dir(var: &str, fallback: &str) -> PathBuf {
+    if let Some(v) = std::env::var_os(var).filter(|v| !v.is_empty()) {
+        let p = PathBuf::from(v);
+        if p.is_absolute() {
+            return p;
+        }
+    }
+    home_dir()
+        .map(|h| h.join(fallback))
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// `$XDG_CONFIG_HOME/hc-tui`, else `~/.config/hc-tui`.
+pub fn default_config_dir() -> PathBuf {
+    xdg_dir("XDG_CONFIG_HOME", ".config").join("hc-tui")
+}
+
+/// `$XDG_CACHE_HOME/hc-tui`, else `~/.cache/hc-tui`.
+pub fn default_cache_dir() -> PathBuf {
+    xdg_dir("XDG_CACHE_HOME", ".cache").join("hc-tui")
+}
+
+/// The config file to read when `--config` was not given.
+pub fn default_config_path() -> PathBuf {
+    let xdg = default_config_dir().join("config.toml");
+    if xdg.exists() {
+        return xdg;
+    }
+    let legacy = PathBuf::from("config/config.toml");
+    if legacy.exists() {
+        return legacy;
+    }
+    xdg
+}
+
+/// Where backups and exports are written: `~/.homecore/exports`.
+pub fn exports_dir() -> PathBuf {
+    home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".homecore")
+        .join("exports")
+}
+
+/// Where imports are read from: `~/.homecore/imports`.
+pub fn imports_dir() -> PathBuf {
+    home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".homecore")
+        .join("imports")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn auto_login_debug_hides_password() {
+        let a = AutoLoginConfig {
+            username: "me".into(),
+            password: "hunter2".into(),
+        };
+        assert!(!format!("{a:?}").contains("hunter2"));
+    }
+
+    #[test]
+    fn cache_dir_is_optional() {
+        let c: Config = toml::from_str("[server]\nbase_url = \"http://x\"\n").unwrap();
+        assert!(c.cache.dir.is_none());
+        let c: Config = toml::from_str("[cache]\ndir = \"./cache\"\n").unwrap();
+        assert_eq!(c.cache.dir.as_deref(), Some("./cache"));
     }
 }
