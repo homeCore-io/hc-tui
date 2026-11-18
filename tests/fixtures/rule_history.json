@@ -1,0 +1,48 @@
+[
+  {
+    "timestamp": "2026-10-17T00:50:54.121Z",
+    "trigger_type": "DeviceStateChanged",
+    "trigger_context": {
+      "device_id": "contact_garage",
+      "attribute": "open",
+      "value": false,
+      "prev_value": true,
+      "event_type": "device_state_changed",
+      "change_kind": "unknown"
+    },
+    "outcome": {
+      "type": "condition_failed",
+      "at_index": 0,
+      "reason": "timer.state == \"running\" (actual: \"finished\")"
+    },
+    "conditions": [
+      {
+        "condition_type": "device_state",
+        "passed": false,
+        "actual": "finished",
+        "expected": "running",
+        "reason": "timer.state == \"running\" (actual: \"finished\")"
+      }
+    ],
+    "actions": [],
+    "eval_ms": 1
+  },
+  {
+    "timestamp": "2026-10-17T01:02:00.000Z",
+    "trigger_type": "ManualRun",
+    "trigger_context": {
+      "device_id": null,
+      "attribute": null,
+      "value": null,
+      "prev_value": null,
+      "event_type": null
+    },
+    "outcome": { "type": "fired" },
+    "conditions": [],
+    "actions": [
+      { "index": 0, "action_type": "SetDeviceState", "description": "lamp on", "outcome": { "status": "ok" }, "duration_ms": 3 },
+      { "index": 1, "action_type": "Notify", "description": "push", "outcome": { "status": "error", "message": "no channel" }, "duration_ms": 0 }
+    ],
+    "eval_ms": 4
+  }
+]

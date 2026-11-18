@@ -1,0 +1,23 @@
+[
+  {
+    "config": {
+      "id": "mode_night",
+      "kind": "solar",
+      "name": "Night Mode",
+      "off_event": "Sunrise",
+      "on_event": "Sunset",
+      "on_offset_minutes": -15
+    },
+    "definition": null,
+    "state": {
+      "device_id": "mode_night",
+      "name": "Night Mode",
+      "plugin_id": "core.mode",
+      "device_type": "mode",
+      "available": true,
+      "attributes": { "on": true, "kind": "solar" },
+      "last_seen": "2026-11-17T21:53:00Z"
+    }
+  },
+  { "config": { "id": "mode_guest", "kind": "manual", "name": "Guests" }, "state": null, "definition": null }
+]

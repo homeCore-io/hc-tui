@@ -176,7 +176,7 @@ impl App {
         Some(
             self.areas
                 .iter()
-                .find(|a| a.slug == room || a.id == room || a.name == room)
+                .find(|a| a.slug == room || a.id == room || a.name.eq_ignore_ascii_case(room))
                 .map(|a| a.name.clone())
                 .unwrap_or_else(|| room.to_string()),
         )

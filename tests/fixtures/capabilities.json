@@ -1,0 +1,31 @@
+{
+  "spec": "1",
+  "plugin_id": "plugin.nuheat",
+  "actions": [
+    {
+      "id": "link_account",
+      "label": "Link account",
+      "description": "Sign in and paste back the address you land on.",
+      "stream": true,
+      "cancelable": true,
+      "concurrency": "single",
+      "requires_role": "admin",
+      "result": { "linked": { "type": "boolean" } },
+      "timeout_ms": 600000
+    },
+    {
+      "id": "status",
+      "label": "Status",
+      "stream": false,
+      "cancelable": false,
+      "concurrency": "multi",
+      "requires_role": "signed_in"
+    },
+    {
+      "id": "forget_account",
+      "label": "Forget account",
+      "requires_role": "admin",
+      "danger": true
+    }
+  ]
+}

@@ -1,6 +1,8 @@
 mod app;
 mod cache;
 mod config;
+#[cfg(test)]
+mod fixture_tests;
 mod model;
 mod net;
 mod sync;

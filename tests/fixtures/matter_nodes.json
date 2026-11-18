@@ -1,0 +1,6 @@
+{
+  "nodes": [
+    { "node_id": "1", "device_count": 2 },
+    { "node_id": 42, "device_count": 1, "name": "Kitchen plug", "vendor": "Acme" }
+  ]
+}

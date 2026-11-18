@@ -1,0 +1,48 @@
+[
+  {
+    "id": "6a1f0000-0000-4000-8000-000000000001",
+    "name": "Garage open alert",
+    "enabled": true,
+    "priority": 10,
+    "tags": ["security", "garage"],
+    "trigger": {
+      "DeviceStateChanged": {
+        "device_id": "contact_garage",
+        "device_ids": ["contact_side", "contact_back"],
+        "attribute": "open",
+        "to": true
+      }
+    },
+    "conditions": [],
+    "actions": [
+      { "enabled": true, "action": { "Notify": { "channel": "push", "message": "Garage open" } } }
+    ],
+    "cancel_on_false": false,
+    "log_actions": false,
+    "log_events": false,
+    "log_triggers": false
+  },
+  {
+    "id": "6a1f0000-0000-4000-8000-000000000002",
+    "name": "Manual test",
+    "enabled": false,
+    "priority": 0,
+    "trigger": "ManualTrigger",
+    "conditions": [],
+    "actions": []
+  },
+  {
+    "id": "6a1f0000-0000-4000-8000-000000000003",
+    "name": "Sunset or button",
+    "enabled": true,
+    "priority": 5,
+    "trigger": { "SunEvent": { "event": "Sunset", "offset_minutes": -15 } },
+    "triggers": [
+      { "ButtonEvent": { "device_id": "pico_1", "event": "Pushed" } },
+      "SystemStarted"
+    ],
+    "error": "device pico_1 not found",
+    "conditions": [],
+    "actions": []
+  }
+]

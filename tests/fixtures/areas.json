@@ -1,0 +1,11 @@
+[
+  {
+    "id": "b75ab522-769a-5299-91ad-704e5c948e2b",
+    "name": "Office",
+    "slug": "office",
+    "aliases": ["study"],
+    "named_by": "person",
+    "device_ids": ["hue_bridge1_light_0001"]
+  },
+  { "id": "c75ab522-769a-5299-91ad-704e5c948e2c", "name": "Garage", "named_by": "bridge", "device_ids": [] }
+]
