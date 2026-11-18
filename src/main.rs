@@ -4,6 +4,7 @@ mod config;
 #[cfg(test)]
 mod fixture_tests;
 mod model;
+mod model_devices;
 mod net;
 mod plugin_admin;
 mod plugin_form;

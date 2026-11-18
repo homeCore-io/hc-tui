@@ -36,6 +36,7 @@ pub fn draw_overlays(frame: &mut Frame<'_>, app: &App) {
     super::home::draw_heading_editor(frame, app);
     super::helpers::draw_helper_overlays(frame, app);
     super::rules::draw_rule_overlays(frame, app);
+    super::scenes::draw_overlays(frame, app);
     super::help::draw_help(frame, app);
     // The question goes over everything.
     draw_confirm(frame, app);
@@ -120,8 +121,8 @@ fn draw_device_editor(frame: &mut Frame<'_>, app: &App) {
     let Some(ed) = &app.devices_tab.editor else {
         return;
     };
-    let inner = modal(frame, 72, 58, "Edit Device");
-    let r = rows(inner, 4);
+    let inner = modal(frame, 72, 70, "Edit Device");
+    let r = rows(inner, 5);
     frame.render_widget(Paragraph::new(format!("Device: {}", ed.device_id)), r[0]);
     frame.render_widget(
         input(
@@ -131,19 +132,40 @@ fn draw_device_editor(frame: &mut Frame<'_>, app: &App) {
         ),
         r[1],
     );
+    let room = if ed.area.trim().is_empty() {
+        "no room".to_string()
+    } else {
+        ed.area.clone()
+    };
     frame.render_widget(
-        input(&ed.area, "Area / Room", ed.field == DeviceEditField::Area),
+        input(
+            &room,
+            "Room (type one, or ←/→ through the rooms)",
+            ed.field == DeviceEditField::Area,
+        ),
         r[2],
+    );
+    let security = format!(
+        "‹ {} ›",
+        crate::app::editors::DeviceEditor::security_label(ed.security)
+    );
+    frame.render_widget(
+        input(
+            &security,
+            "Security (←/→)",
+            ed.field == DeviceEditField::Security,
+        ),
+        r[3],
     );
     frame.render_widget(
         input(
             &ed.canonical_name,
-            "Canonical Name",
+            "Name in automations",
             ed.field == DeviceEditField::CanonicalName,
         ),
-        r[3],
+        r[4],
     );
-    help(frame, "Tab switch field | Enter save | Esc cancel", r[4]);
+    help(frame, "Tab field | Enter save | Esc cancel", r[5]);
 }
 
 fn draw_area_editor(frame: &mut Frame<'_>, app: &App) {
@@ -253,41 +275,71 @@ fn draw_mode_editor(frame: &mut Frame<'_>, app: &App) {
     let Some(ed) = &app.manage.mode_editor else {
         return;
     };
-    let inner = modal(frame, 64, 50, "New Mode");
-    let r = rows(inner, 3);
-    frame.render_widget(
-        input(
-            &ed.id,
-            "ID  (must start with mode_)",
-            ed.field == ModeEditField::Id,
-        ),
-        r[0],
-    );
-    frame.render_widget(
-        input(&ed.name, "Name", ed.field == ModeEditField::Name),
-        r[1],
-    );
+    use crate::app::editors::sun_event_words;
+    let title = match &ed.editing {
+        Some(m) => format!("Edit mode {}", m.id),
+        None => "New mode".to_string(),
+    };
+    let fields = ed.fields();
+    let inner = modal(frame, 64, 80, &title);
+    let r = rows(inner, 6);
+    let offset = |o: i32| match o {
+        0 => "at the time".to_string(),
+        o if o > 0 => format!("{o} minutes after"),
+        o => format!("{} minutes before", -o),
+    };
     let kc = match ed.kind {
         ModeKind::Solar => Color::Yellow,
         ModeKind::Manual => Color::Cyan,
     };
-    frame.render_widget(
-        Paragraph::new(Span::styled(
-            format!("{}  (Space to toggle)", ed.kind.as_str()),
-            Style::default().fg(kc),
-        ))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Kind")
-                .border_style(super::widgets::focus_style(ed.field == ModeEditField::Kind)),
-        ),
-        r[2],
-    );
+    let mut i = 0;
+    for f in [
+        ModeEditField::Name,
+        ModeEditField::Kind,
+        ModeEditField::OnEvent,
+        ModeEditField::OnOffset,
+        ModeEditField::OffEvent,
+        ModeEditField::OffOffset,
+    ] {
+        let (label, value) = match f {
+            ModeEditField::Name => ("Name", ed.name.clone()),
+            ModeEditField::Kind => (
+                "Kind (←/→): manual you switch, solar follows the sun",
+                format!("‹ {} ›", ed.kind.as_str()),
+            ),
+            ModeEditField::OnEvent => (
+                "Turns on at",
+                format!("‹ {} ›", sun_event_words(&ed.on_event)),
+            ),
+            ModeEditField::OnOffset => ("On offset", format!("‹ {} ›", offset(ed.on_offset))),
+            ModeEditField::OffEvent => (
+                "Turns off at",
+                format!("‹ {} ›", sun_event_words(&ed.off_event)),
+            ),
+            ModeEditField::OffOffset => ("Off offset", format!("‹ {} ›", offset(ed.off_offset))),
+        };
+        if f == ModeEditField::Kind && ed.editing.is_some() {
+            continue;
+        }
+        if !fields.contains(&f) {
+            continue;
+        }
+        let mut p = input(&value, label, ed.field == f);
+        if f == ModeEditField::Kind {
+            p = p.style(Style::default().fg(kc));
+        }
+        frame.render_widget(p, r[i]);
+        i += 1;
+    }
+    let verb = if ed.editing.is_some() {
+        "save"
+    } else {
+        "create"
+    };
     help(
         frame,
-        "Tab field  |  Space cycle kind  |  Enter create  |  Esc cancel",
-        r[3],
+        &format!("Tab field  |  ←/→ change  |  Enter {verb}  |  Esc cancel"),
+        r[i],
     );
 }
 

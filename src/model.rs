@@ -208,6 +208,10 @@ pub struct DeviceState {
     /// switch that runs a light).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ui_hint: Option<String>,
+    /// A person's Security choice: in (true), out (false), or as its
+    /// type says (absent).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub security: Option<bool>,
     #[serde(default)]
     pub available: bool,
     #[serde(default)]
@@ -269,6 +273,9 @@ pub struct Scene {
     pub room: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active: Option<bool>,
+    /// A homeCore scene's commands, by device id.
+    #[serde(default, skip_serializing_if = "Map::is_empty")]
+    pub states: Map<String, Value>,
 }
 
 impl Scene {
@@ -280,6 +287,7 @@ impl Scene {
             plugin_id: Some(d.plugin_id.clone()),
             room: d.room_name().map(str::to_string),
             active: d.attributes.get("active").and_then(Value::as_bool),
+            states: Map::new(),
         }
     }
 }

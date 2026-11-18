@@ -9,17 +9,14 @@ use crate::app::devices::{
 };
 use crate::app::media::media_player_model;
 use crate::app::{App, DeviceSubPanel, DeviceViewMode, format_timestamp_utc};
-use crate::model::{DeviceState, SceneSource};
+use crate::model::DeviceState;
 use crate::text::{normalize_label, take_chars};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{
-        Block, Borders, Cell, List, ListItem, ListState, Paragraph, Row, Table, TableState, Tabs,
-        Wrap,
-    },
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Tabs, Wrap},
 };
 use serde_json::Value;
 
@@ -28,11 +25,19 @@ pub fn draw_devices_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(3), Constraint::Min(0)])
         .split(area);
-    let idx = match app.devices_tab.sub {
-        DeviceSubPanel::All => 0,
-        DeviceSubPanel::MediaPlayers => 1,
-    };
-    let tabs = Tabs::new(vec![Line::from("All"), Line::from("Media players")])
+    let subs = app.device_subs();
+    let idx = subs
+        .iter()
+        .position(|s| *s == app.devices_tab.sub)
+        .unwrap_or(0);
+    let titles: Vec<Line> = subs
+        .iter()
+        .map(|s| match s {
+            DeviceSubPanel::Offline => Line::from(format!("Offline ({})", app.offline_count())),
+            s => Line::from(s.title()),
+        })
+        .collect();
+    let tabs = Tabs::new(titles)
         .select(idx)
         .block(Block::default().borders(Borders::ALL).title("Devices"))
         .style(Style::default().fg(Color::Gray))
@@ -44,15 +49,17 @@ pub fn draw_devices_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
     frame.render_widget(tabs, layout[0]);
 
     match app.devices_tab.sub {
-        DeviceSubPanel::All => {
+        DeviceSubPanel::MediaPlayers => draw_media_players(frame, app, layout[1]),
+        DeviceSubPanel::Removed => super::controls::draw_removed(frame, app, layout[1]),
+        _ => {
             let panes = Layout::default()
                 .direction(Direction::Horizontal)
-                .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+                .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
                 .split(layout[1]);
             draw_device_list(frame, app, panes[0]);
-            draw_device_detail(frame, app, panes[1]);
+            let detail = super::controls::draw_controls(frame, app, panes[1]);
+            draw_device_detail(frame, app, detail);
         }
-        DeviceSubPanel::MediaPlayers => draw_media_players(frame, app, layout[1]),
     }
 }
 
@@ -297,8 +304,14 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
         vec![Span::styled(avail, Style::default().fg(avail_color))],
     ));
     if let Some(room) = app.room_label(d) {
-        lines.push(detail_row("Area", vec![Span::raw(room)]));
+        lines.push(detail_row("Room", vec![Span::raw(room)]));
     }
+    lines.push(detail_row(
+        "Security",
+        vec![Span::raw(
+            crate::app::editors::DeviceEditor::security_label(d.security),
+        )],
+    ));
     lines.push(detail_row(
         "Plugin",
         vec![Span::raw(clean_plugin_id(&d.plugin_id))],
@@ -820,72 +833,4 @@ fn draw_media_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
         )],
     ));
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
-}
-
-// ── Scenes ──────────────────────────────────────────────────────────────────
-
-pub fn draw_scenes_table(frame: &mut Frame<'_>, app: &App, area: Rect) {
-    let hl = highlight();
-    let header = Row::new(
-        ["  Scene", "From", "Room", "State"]
-            .iter()
-            .map(|h| Cell::from(*h).style(super::widgets::heading())),
-    );
-    let selected = app.selected_scene().map(|s| s.id.clone());
-    let mut sel_row = None;
-    let rows: Vec<Row> = app
-        .visible_scenes()
-        .enumerate()
-        .map(|(i, s)| {
-            let is_sel = selected.as_deref() == Some(s.id.as_str());
-            if is_sel {
-                sel_row = Some(i);
-            }
-            let source = match (s.source, s.plugin_id.as_deref()) {
-                (SceneSource::Native, _) => "homeCore".to_string(),
-                (SceneSource::Device, Some(p)) => p.trim_start_matches("plugin.").to_string(),
-                (SceneSource::Device, None) => "-".to_string(),
-            };
-            let room = s.room.clone().unwrap_or_else(|| "-".to_string());
-            let (st, color) = match s.active {
-                Some(true) => ("● active", Color::Green),
-                Some(false) => ("○ off", Color::DarkGray),
-                None => ("-", Color::DarkGray),
-            };
-            if is_sel {
-                Row::new(vec![
-                    Cell::from(format!("  {}", s.name)).style(hl),
-                    Cell::from(source).style(hl),
-                    Cell::from(room).style(hl),
-                    Cell::from(st).style(hl),
-                ])
-            } else {
-                Row::new(vec![
-                    Cell::from(format!("  {}", s.name)).style(Style::default().fg(Color::White)),
-                    Cell::from(source).style(Style::default().fg(Color::DarkGray)),
-                    Cell::from(room).style(Style::default().fg(Color::Gray)),
-                    Cell::from(st).style(Style::default().fg(color)),
-                ])
-            }
-        })
-        .collect();
-    let table = Table::new(
-        rows,
-        [
-            Constraint::Min(30),
-            Constraint::Length(16),
-            Constraint::Length(20),
-            Constraint::Length(12),
-        ],
-    )
-    .header(header)
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(format!(" Scenes ({}) ", app.views.scenes.len())),
-    )
-    .row_highlight_style(hl);
-    let mut state = TableState::default();
-    state.select(sel_row);
-    frame.render_stateful_widget(table, area, &mut state);
 }

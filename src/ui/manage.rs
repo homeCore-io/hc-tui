@@ -28,48 +28,6 @@ fn render_list(frame: &mut Frame<'_>, list: List<'_>, len: usize, index: usize, 
     frame.render_stateful_widget(list, area, &mut state);
 }
 
-pub fn draw_modes(frame: &mut Frame<'_>, app: &App, area: Rect) {
-    let items: Vec<ListItem> = app
-        .views
-        .modes
-        .iter()
-        .filter_map(|&i| app.modes.get(i))
-        .map(|m| {
-            let on = app.mode_on(&m.config.id);
-            let (dot, dc) = if on {
-                ("●", Color::Green)
-            } else {
-                ("○", Color::DarkGray)
-            };
-            let kc = match m.config.kind.as_str() {
-                "solar" => Color::Yellow,
-                "manual" => Color::Cyan,
-                _ => Color::White,
-            };
-            ListItem::new(Line::from(vec![
-                Span::styled(format!("  {dot} "), Style::default().fg(dc)),
-                Span::styled(
-                    format!("{:<24}", take_chars(&m.config.name, 24)),
-                    Style::default().fg(Color::White),
-                ),
-                Span::styled(format!("  {:<8}", m.config.kind), Style::default().fg(kc)),
-                Span::styled(
-                    format!("  {}", m.config.id),
-                    Style::default().fg(Color::DarkGray),
-                ),
-            ]))
-        })
-        .collect();
-    let n = items.len();
-    render_list(
-        frame,
-        selectable_list(items, format!("Modes ({n})")),
-        n,
-        app.manage.modes_sel.index(),
-        area,
-    );
-}
-
 pub fn draw_matter(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let m = &app.manage.matter;
     let layout = Layout::default()

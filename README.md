@@ -38,14 +38,35 @@ It is built with:
 - Rooms: each room with how many lights are on, a dot per light, the
   mean temperature and notes (open, low battery, offline), and the
   selected room's devices below. Space turns the whole room on or off
-  (`POST /areas/{id}/on|off`); Enter opens its devices.
-- Devices: on/off, brightness (`brightness_pct`), locks, and a Media
-  players tab with transport, volume, mute, progress and metadata.
-  Editing the name (a person's rename; empty restores the plugin's
-  name), room and canonical name sends only the fields that changed.
-- Scenes: homeCore scenes and scene devices (`device_type: "scene"`).
+  (`POST /areas/{id}/on|off`); Enter opens its devices, where `a`
+  adds devices to the room and `x` takes one out
+  (`PUT /areas/{id}/devices` with the room's fresh list).
+- Devices: tabs All, Lights, Climate, Media, Covers, Locks, Sensors,
+  Offline (with the count) and Removed, sorted into the categories the
+  way the app does it. The detail pane has controls built from the
+  device's schema (`GET /devices/{id}/schema`): every writable everyday
+  setting (on and off, brightness, colour temperature, colour presets,
+  position, lock, mode, setpoints, fan) and the actions that need no
+  input, with the shared vocabulary for a device without a schema.
+  Changes are sent 600 ms after the last key. Temperatures are shown
+  and stepped in the house's unit (1°F or 0.5°C a step) and sent in
+  °C. A sparkline shows the last 24 hours of the device's main reading
+  (`GET /devices/{id}/history`). Unlocking, and an action that asks
+  first, needs `y`. Editing the name (a person's rename; empty restores
+  the plugin's name), room, Security choice (yes, no, or as its type
+  says) and the name in automations sends only the fields that
+  changed. Removing a device first says how many automations use it.
+  Removed lists the devices homeCore was told to forget; Space lets one
+  come back. The Media tab has transport, volume, mute, progress and
+  metadata.
+- Scenes: homeCore scenes and scene devices (`device_type: "scene"`),
+  with where each comes from and how many devices or which room it
+  has. homeCore scenes can be made, edited and deleted: pick devices
+  and each is taken as it is now (its first few everyday settings, or
+  just off). A plugin's scenes only run.
 - Modes: Space turns a manual mode on or off; solar modes follow the
-  sun.
+  sun and show their next change (`until sunset 16:46`). A mode's name,
+  and a solar mode's events and offsets, can be edited.
 - Helpers: every kind of helper core has (switch, timer, counter,
   number, select, text, button, date and time, group, threshold,
   schedule) with its state and its keys. Running timers count down
@@ -162,13 +183,19 @@ Screens:
   heading (`Tab` in the box adds a new heading instead).
 - Rooms: `Space` room on/off, `Enter` its devices (`Esc` comes back),
   `n` new room, `e` rename, `x` delete.
-- Devices: `Space`/`t` on/off, `+`/`-` brightness, `l`/`u` lock and
-  unlock, `f` filter, `s` sort, `v` grouped or flat, `Enter` edit, `x`
-  remove, `←/→` Media players.
-- Media players: `Space` play or stop, `p` play or pause, `s` stop, `n`
-  next, `b` previous, `+`/`-` volume, `m` mute, `Enter` edit, `x` remove.
-- Scenes: `Space` (or `a`) activate.
-- Modes: `Space` mode on/off, `n` new, `x` delete.
+- Devices: `←/→` tab, `Tab` into the controls (`Shift+Tab` back,
+  `←/→` change, `Space` switch or press, `Esc` out), `Space`/`t` on/off,
+  `+`/`-` brightness, `l`/`u` lock and unlock, `f` filter, `s` sort,
+  `v` grouped or flat, `Enter` or `e` edit, `x` remove. A room's devices
+  (from Rooms): `a` add devices (type to search, `Space` mark, `Enter`
+  add), `x` take out of the room. Removed: `Space` bring back.
+- Media: `Space` play or stop, `p` play or pause, `s` stop, `>` next,
+  `<` previous, `+`/`-` volume, `m` mute, `Enter` edit.
+- Scenes: `a` (or `Space`) activate, `n` new, `Enter` edit, `x` delete.
+  In the editor: `Tab` name or devices, `a` add devices, `x` remove
+  one, `c` take how it is now, `Enter` save.
+- Modes: `Space` mode on/off, `n` new, `Enter` edit (`←/→` kind, sun
+  event and offset), `x` delete.
 - Helpers: `Space` the kind's main action (toggle, start or pause,
   up one, press, next choice), `n` new helper, `Enter` edit, `x`
   delete. A timer adds `0` cancel; a counter `+` up, `-` down, `0`
@@ -226,10 +253,14 @@ This client uses:
 - `POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout`,
   `GET /auth/me`, `POST /auth/change-password`
 - `GET /devices`, `PATCH /devices/{id}`, `PATCH /devices/{id}/state`,
-  `DELETE /devices/{id}`
-- `GET /scenes`, `POST /scenes/{id}/activate`, `/scenes/export|import`
+  `DELETE /devices/{id}`, `GET /devices/{id}/schema`,
+  `GET /devices/{id}/history`, `GET /devices/removed`,
+  `DELETE /devices/removed/{id}`, `GET /automations?device_id=&limit=0`
+  (`X-Total-Count`)
+- `GET|POST /scenes`, `PUT|DELETE /scenes/{id}`,
+  `POST /scenes/{id}/activate`, `/scenes/export|import`
 - `GET|POST /areas`, `PATCH|DELETE /areas/{id}`, `POST /areas/{id}/on`,
-  `POST /areas/{id}/off`
+  `POST /areas/{id}/off`, `PUT /areas/{id}/devices`
 - `GET /alerts`, `POST /alerts/{id}/acknowledge`,
   `POST /alerts/{id}/press`, `GET /alert-rules`,
   `PUT|DELETE /alert-rules/{id}` (`?automations=disable`),
@@ -252,7 +283,7 @@ This client uses:
 - `GET /auth/roles`, `GET|POST /auth/api-keys`,
   `DELETE /auth/api-keys/{id}`, `POST /auth/api-keys/{id}/rotate`,
   `GET /auth/sessions`, `DELETE /auth/sessions/{id}`
-- `GET|POST /modes`, `DELETE /modes/{id}`, `POST /glue`,
+- `GET|POST /modes`, `PATCH|DELETE /modes/{id}`, `POST /glue`,
   `PATCH|DELETE /glue/{id}`; manual modes and helpers are switched with
   `PATCH /devices/{id}/state` (`{"action": ...}` for a helper)
 - `GET|POST /auth/users`, `DELETE /auth/users/{id}`,

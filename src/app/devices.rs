@@ -14,11 +14,62 @@ pub enum DeviceViewMode {
     Flat,
 }
 
+/// The Devices sub-tabs, in order. The categories are worked out the
+/// way the app does it (see [`super::controls::category_of`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DeviceSubPanel {
     #[default]
     All,
+    Lights,
+    Climate,
     MediaPlayers,
+    Covers,
+    Locks,
+    Sensors,
+    Offline,
+    Removed,
+}
+
+impl DeviceSubPanel {
+    pub const ALL: [DeviceSubPanel; 9] = [
+        Self::All,
+        Self::Lights,
+        Self::Climate,
+        Self::MediaPlayers,
+        Self::Covers,
+        Self::Locks,
+        Self::Sensors,
+        Self::Offline,
+        Self::Removed,
+    ];
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::Lights => "Lights",
+            Self::Climate => "Climate",
+            Self::MediaPlayers => "Media",
+            Self::Covers => "Covers",
+            Self::Locks => "Locks",
+            Self::Sensors => "Sensors",
+            Self::Offline => "Offline",
+            Self::Removed => "Removed",
+        }
+    }
+
+    /// A list of devices with the detail pane and its controls.
+    pub fn is_list(self) -> bool {
+        !matches!(self, Self::MediaPlayers | Self::Removed)
+    }
+
+    /// Whether `d` is listed under this tab.
+    pub fn holds(self, d: &DeviceState) -> bool {
+        match self {
+            Self::All | Self::MediaPlayers | Self::Removed => true,
+            Self::Offline => !d.available,
+            c => super::controls::category_of(d) == Some(c),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -87,6 +138,7 @@ pub struct DevicesTab {
     pub sel: ListSel,
     pub media_sel: ListSel,
     pub editor: Option<DeviceEditor>,
+    pub controls: super::controls::ControlsState,
 }
 
 // ── Attribute readers ───────────────────────────────────────────────────────
@@ -217,10 +269,12 @@ impl App {
     }
 
     pub(crate) fn compute_device_views(&mut self) {
+        let sub = self.devices_tab.sub;
         let mut idx: Vec<usize> = (0..self.devices.len())
             .filter(|&i| {
                 let d = &self.devices[i];
                 shown_in_devices(d)
+                    && sub.holds(d)
                     && self.device_matches_filter(d)
                     && self.device_matches_search(d)
             })
@@ -273,6 +327,17 @@ impl App {
             self.views.devices = idx;
             self.views.device_groups.clear();
         }
+        if self.devices_tab.sub.is_list() {
+            self.load_selected_device_extras();
+        }
+    }
+
+    /// Devices that are offline now, for the Offline tab's count.
+    pub fn offline_count(&self) -> usize {
+        self.devices
+            .iter()
+            .filter(|d| shown_in_devices(d) && !d.available)
+            .count()
     }
 
     pub(crate) fn device_view_ids(&self) -> Vec<String> {
@@ -308,8 +373,9 @@ impl App {
     /// The device under the cursor on the current sub-panel.
     pub fn selected_device(&self) -> Option<&DeviceState> {
         let (sel, view) = match self.devices_tab.sub {
-            DeviceSubPanel::All => (&self.devices_tab.sel, &self.views.devices),
+            DeviceSubPanel::Removed => return None,
             DeviceSubPanel::MediaPlayers => (&self.devices_tab.media_sel, &self.views.media),
+            _ => (&self.devices_tab.sel, &self.views.devices),
         };
         if let Some(id) = sel.id()
             && let Some(d) = self.device_by_id(id)
@@ -397,11 +463,27 @@ impl App {
 
     // ── Keys ─────────────────────────────────────────────────────────────
 
-    pub fn devices_switch_sub(&mut self) {
-        self.devices_tab.sub = match self.devices_tab.sub {
-            DeviceSubPanel::All => DeviceSubPanel::MediaPlayers,
-            DeviceSubPanel::MediaPlayers => DeviceSubPanel::All,
-        };
+    /// The sub-tabs this person sees: Removed needs `devices:write`.
+    pub fn device_subs(&self) -> Vec<DeviceSubPanel> {
+        DeviceSubPanel::ALL
+            .into_iter()
+            .filter(|s| *s != DeviceSubPanel::Removed || self.can("devices:write"))
+            .collect()
+    }
+
+    /// ←/→: the next or previous sub-tab.
+    pub fn devices_switch_sub(&mut self, dir: isize) {
+        let subs = self.device_subs();
+        let n = subs.len() as isize;
+        let i = subs
+            .iter()
+            .position(|s| *s == self.devices_tab.sub)
+            .unwrap_or(0) as isize;
+        self.devices_tab.sub = subs[(i + dir).rem_euclid(n) as usize];
+        self.devices_tab.controls.focus = None;
+        if self.devices_tab.sub == DeviceSubPanel::Removed {
+            self.load_removed_devices();
+        }
     }
 
     pub fn devices_toggle_view(&mut self) {
@@ -427,20 +509,22 @@ impl App {
         match (self.devices_tab.sub, up) {
             (DeviceSubPanel::MediaPlayers, true) => self.media_adjust_volume(5),
             (DeviceSubPanel::MediaPlayers, false) => self.media_adjust_volume(-5),
-            (DeviceSubPanel::All, true) => self.adjust_brightness(1),
-            (DeviceSubPanel::All, false) => self.adjust_brightness(-1),
+            (_, true) => self.adjust_brightness(1),
+            (_, false) => self.adjust_brightness(-1),
         }
     }
 
     pub fn move_device_cursor(&mut self, delta: isize) {
         match self.devices_tab.sub {
-            DeviceSubPanel::All => {
-                let ids = self.device_view_ids();
-                self.devices_tab.sel.move_by(delta, &ids);
-            }
             DeviceSubPanel::MediaPlayers => {
                 let ids = self.media_view_ids();
                 self.devices_tab.media_sel.move_by(delta, &ids);
+            }
+            DeviceSubPanel::Removed => self.move_removed(delta),
+            _ => {
+                let ids = self.device_view_ids();
+                self.devices_tab.sel.move_by(delta, &ids);
+                self.devices_tab.controls.button = 0;
             }
         }
     }
@@ -523,12 +607,15 @@ impl App {
         let Some(d) = self.selected_device() else {
             return;
         };
-        self.devices_tab.editor = Some(DeviceEditor::new(
-            d.device_id.clone(),
-            d.display_name().to_string(),
-            self.room_label(d).unwrap_or_default(),
-            d.canonical_name.clone().unwrap_or_default(),
-        ));
+        self.devices_tab.editor = Some(
+            DeviceEditor::new(
+                d.device_id.clone(),
+                d.display_name().to_string(),
+                self.room_label(d).unwrap_or_default(),
+                d.canonical_name.clone().unwrap_or_default(),
+            )
+            .with_security(d.security),
+        );
     }
 
     pub(crate) fn save_device_editor(&mut self) {
@@ -561,6 +648,7 @@ impl App {
                     if cn != ed.initial_canonical_name.trim() {
                         d.canonical_name = (!cn.is_empty()).then(|| cn.to_string());
                     }
+                    d.security = ed.security;
                 }
                 app.save_cache(&[Section::Devices]);
             },
@@ -583,18 +671,52 @@ impl App {
             )
             .with_detail(format!("ID: {id}")),
         );
+        // Name the automations it would turn off, once core says.
+        if tokio::runtime::Handle::try_current().is_err() {
+            return;
+        }
+        let c = self.client.clone();
+        let target = id.clone();
+        self.spawn(
+            async move { c.automations_using(&target).await },
+            move |app, res| {
+                let Ok(Some(n)) = res else {
+                    return;
+                };
+                if let Some(confirm) = app.confirm.as_mut()
+                    && matches!(&confirm.action, ConfirmAction::DeleteDevice { id: x } if *x == id)
+                    && n > 0
+                {
+                    let word = if n == 1 {
+                        "automation uses"
+                    } else {
+                        "automations use"
+                    };
+                    confirm.detail =
+                        Some(format!("{n} {word} it; they will be turned off. ID: {id}"));
+                }
+            },
+        );
     }
 
     pub(crate) fn delete_device(&mut self, id: String) {
         let c = self.client.clone();
         let target = id.clone();
         self.spawn_ok(
-            "delete device",
-            async move { c.delete_device(&target).await },
-            move |app, ()| {
+            "remove device",
+            async move { c.remove_device(&target).await },
+            move |app, affected: Vec<String>| {
+                let name = app
+                    .device_by_id(&id)
+                    .map(|d| d.display_name().to_string())
+                    .unwrap_or_else(|| id.clone());
                 app.devices.retain(|d| d.device_id != id);
                 app.rebuild_scenes();
-                app.status = format!("Deleted device '{id}'");
+                app.status = if affected.is_empty() {
+                    format!("Removed {name}")
+                } else {
+                    format!("Removed {name}; turned off: {}", affected.join(", "))
+                };
                 app.save_cache(&[Section::Devices]);
             },
         );
@@ -699,5 +821,46 @@ mod tests {
         a.on_key(key(KeyCode::Char('n')));
         assert!(a.confirm.is_none());
         assert_eq!(a.devices.len(), 1);
+    }
+
+    #[test]
+    fn media_tracks_move_off_n_and_the_tabs_go_round() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _g = rt.enter();
+        let mut a = signed_in(Role::Admin);
+        a.screen = ScreenId::Devices;
+        a.devices_tab.sub = DeviceSubPanel::MediaPlayers;
+        let table = crate::screens::screen(ScreenId::Devices).bindings(&a);
+        let has = |c: char| table.iter().any(|b| b.keys.contains(&KeyCode::Char(c)));
+        assert!(has('>') && has('<'));
+        assert!(!has('n'), "n stays new");
+        a.devices_tab.sub = DeviceSubPanel::All;
+        a.on_key(key(KeyCode::Left));
+        assert_eq!(a.devices_tab.sub, DeviceSubPanel::Removed);
+        a.on_key(key(KeyCode::Right));
+        a.on_key(key(KeyCode::Right));
+        assert_eq!(a.devices_tab.sub, DeviceSubPanel::Lights);
+        let mut viewer = signed_in(Role::HouseholdMember);
+        viewer.screen = ScreenId::Devices;
+        assert!(!viewer.device_subs().contains(&DeviceSubPanel::Removed));
+    }
+
+    #[test]
+    fn category_tabs_list_their_devices_and_offline_counts() {
+        let mut a = signed_in(Role::Admin);
+        a.devices_tab.view_mode = DeviceViewMode::Flat;
+        let mut l = device("l", "Lamp");
+        l.device_type = Some("light".into());
+        let mut k = device("k", "Lock");
+        k.device_type = Some("lock".into());
+        k.available = false;
+        a.devices = vec![l, k];
+        a.devices_tab.sub = DeviceSubPanel::Lights;
+        a.refresh_views();
+        assert_eq!(a.device_view_ids(), vec!["l"]);
+        a.devices_tab.sub = DeviceSubPanel::Offline;
+        a.refresh_views();
+        assert_eq!(a.device_view_ids(), vec!["k"]);
+        assert_eq!(a.offline_count(), 1);
     }
 }
