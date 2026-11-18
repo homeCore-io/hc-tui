@@ -23,6 +23,8 @@ use serde_json::{Map, Value, json};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+mod settings;
+
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 /// Backups stream a zip of the whole state; give them longer.

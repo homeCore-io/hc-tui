@@ -7,6 +7,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+pub mod settings;
+
 // ── Users and roles ─────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -130,6 +132,9 @@ pub struct UserInfo {
     /// Present on `/auth/me`; absent on login and the users list.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scopes: Option<Vec<String>>,
+    /// Whether they have set a PIN for displays; the users list says.
+    #[serde(default)]
+    pub has_pin: bool,
 }
 
 impl UserInfo {

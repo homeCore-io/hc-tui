@@ -1,0 +1,5 @@
+[
+  {"id": "5dc69d35-7df2-4062-a8db-39beb653105c", "label": "Kitchen panel", "prefix": "aaaaaaaaaaaa", "owner_uid": "u1", "scopes": ["devices:read", "scenes:run"], "created_at": "2026-10-16T18:27:14Z", "last_used_at": "2026-10-16T18:32:04Z", "expires_at": null, "allowed_cidrs": [], "revoked_at": null, "display": true},
+  {"id": "5e56a9dd-fc1e-43cd-80ea-56ee69733aca", "label": "backup script", "prefix": "bbbbbbbbbbbb", "owner_uid": "u1", "scopes": ["devices:read"], "created_at": "2026-10-17T15:05:55Z", "last_used_at": null, "expires_at": "2027-01-15T15:05:55Z", "allowed_cidrs": [], "revoked_at": "2026-10-17T15:08:26Z", "display": false},
+  {"id": "ad8ddbe2-70a3-4bb7-8b99-1916999fd139", "label": "hc-mcp", "prefix": "cccccccccccc", "owner_uid": "u1", "scopes": ["devices:read", "devices:command"], "created_at": "2026-11-16T10:00:00Z", "last_used_at": "2026-11-17T21:00:00Z", "expires_at": null, "allowed_cidrs": [], "revoked_at": null, "plugin": "hc-mcp"}
+]

@@ -33,6 +33,7 @@ pub fn draw_overlays(frame: &mut Frame<'_>, app: &App) {
         draw_groups(frame, app);
     }
     draw_filter_bar(frame, app);
+    super::settings::draw_modal(frame, app);
     super::home::draw_picker(frame, app);
     super::home::draw_heading_editor(frame, app);
     super::help::draw_help(frame, app);
@@ -168,6 +169,7 @@ fn draw_user_editor(frame: &mut Frame<'_>, app: &App) {
         UserEditMode::Create => "New User",
         UserEditMode::EditRole => "Change Role",
         UserEditMode::ChangePassword => "Change Password",
+        UserEditMode::SetPassword => "Set Their Password",
     };
     let inner = modal(frame, 64, 60, title);
     let f = |x: UserEditField| ed.field == x;
@@ -198,6 +200,26 @@ fn draw_user_editor(frame: &mut Frame<'_>, app: &App) {
             frame.render_widget(Paragraph::new(format!("User: {}", ed.username)), r[0]);
             frame.render_widget(input(&role, "Role", true), r[1]);
             help(frame, "Space cycle | Enter save | Esc cancel", r[2]);
+        }
+        UserEditMode::SetPassword => {
+            let r = rows(inner, 3);
+            frame.render_widget(Paragraph::new(format!("User: {}", ed.username)), r[0]);
+            let pw = mask(&ed.password, "*");
+            frame.render_widget(input(&pw, "New Password", f(UserEditField::Password)), r[1]);
+            let cpw = mask(&ed.confirm_password, "*");
+            frame.render_widget(
+                input(
+                    &cpw,
+                    "Confirm New Password",
+                    f(UserEditField::ConfirmPassword),
+                ),
+                r[2],
+            );
+            help(
+                frame,
+                "Tab field | Enter save (signs them out everywhere) | Esc cancel",
+                r[3],
+            );
         }
         UserEditMode::ChangePassword => {
             let r = rows(inner, 4);

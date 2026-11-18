@@ -242,6 +242,9 @@ pub fn modal_hints(app: &App) -> Option<Vec<&'static str>> {
     if app.help_open {
         return Some(vec!["Esc or ? close"]);
     }
+    if let Some(m) = &app.manage.modal {
+        return Some(super::settings::modal_hints(m));
+    }
     if let Some(s) = &app.plugins_tab.streaming {
         if s.stage.is_terminal() {
             return Some(vec!["Esc close"]);

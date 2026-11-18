@@ -7,6 +7,8 @@ pub mod backup;
 pub mod logs;
 pub mod matter;
 pub mod modes;
+pub mod people;
+pub mod settings_modal;
 pub mod status;
 pub mod users;
 
@@ -33,6 +35,9 @@ pub struct ManageTab {
     pub events: EventsPanel,
     pub audit: audit::AuditPanel,
     pub backup: backup::BackupPanel,
+    pub people: people::PeoplePanel,
+    /// The open Settings dialog, if any.
+    pub modal: Option<settings_modal::SettingsModal>,
 }
 
 impl App {
@@ -51,8 +56,9 @@ impl App {
         self.manage.audit.sel.resolve(&ids);
         let ids = self.event_row_ids();
         self.manage.events.sel.resolve(&ids);
-        let ids: Vec<&str> = backup::BackupAction::ALL.iter().map(|a| a.key()).collect();
+        let ids = self.data_row_ids();
         self.manage.backup.sel.resolve(&ids);
+        self.resolve_people_selections();
         self.resolve_group_selection();
     }
 

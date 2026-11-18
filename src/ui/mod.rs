@@ -13,6 +13,7 @@ mod modals;
 pub mod plugins;
 pub mod rooms;
 pub mod rules;
+pub mod settings;
 mod widgets;
 
 use crate::app::App;

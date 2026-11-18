@@ -1015,6 +1015,10 @@ impl App {
             self.on_key_confirm(key);
             return;
         }
+        if self.manage.modal.is_some() {
+            self.on_key_settings_modal(key);
+            return;
+        }
         if self.help_open {
             if matches!(
                 key.code,
@@ -1277,6 +1281,7 @@ impl App {
             C::ImportRules => self.run_backup_action(manage::backup::BackupAction::ImportRules),
             C::ImportScenes => self.run_backup_action(manage::backup::BackupAction::ImportScenes),
             C::RunPluginAction { plugin_id, action } => self.run_plugin_action(plugin_id, *action),
+            C::Settings(a) => self.run_settings_confirmed(a),
         }
     }
 }
@@ -1322,6 +1327,7 @@ pub(crate) mod test_support {
             role,
             created_at: String::new(),
             scopes: None,
+            has_pin: false,
         }
     }
 
@@ -1358,7 +1364,12 @@ pub(crate) mod test_support {
         a.plugins_tab.detail = None;
         a.plugins_tab.sub = PluginsSub::Installed;
         a.devices_tab.room = None;
+        a.manage.people.tab = manage::people::PeopleTab::ALL[0];
         match (id, n) {
+            (ScreenId::People, n) if n < manage::people::PeopleTab::ALL.len() => {
+                a.manage.people.tab = manage::people::PeopleTab::ALL[n]
+            }
+            (ScreenId::Data, n) => manage::backup::test_state(a, n),
             (ScreenId::Devices, 1) => a.devices_tab.sub = DeviceSubPanel::MediaPlayers,
             (ScreenId::Devices, 2) => a.devices_tab.room = Some("r".into()),
             (ScreenId::Automations, 1) => {

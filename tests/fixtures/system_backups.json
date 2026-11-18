@@ -1,0 +1,10 @@
+{
+  "every_hours": 24,
+  "keep": 7,
+  "dir": "/homecore/backups",
+  "backups": [
+    {"name": "homecore-backup-20261117T210247Z.zip", "bytes": 19293798, "created_at": "2026-11-17T21:02:47.672629365Z"},
+    {"name": "homecore-backup-20261116T210231Z.zip", "bytes": 19100000, "created_at": "2026-11-16T21:02:31.100000000Z"},
+    {"name": "homecore-backup-20261115T210219Z.zip", "bytes": 18950000, "created_at": "2026-11-15T21:02:19.000000000Z"}
+  ]
+}

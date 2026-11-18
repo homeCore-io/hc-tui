@@ -480,7 +480,7 @@ mod tests {
                         }
                         if b.keys.contains(&KeyCode::Char('x')) {
                             assert!(
-                                ["delete", "remove", "uninstall"]
+                                ["delete", "remove", "uninstall", "revoke", "end"]
                                     .iter()
                                     .any(|w| b.help.contains(w)),
                                 "{id:?}: x does {}",

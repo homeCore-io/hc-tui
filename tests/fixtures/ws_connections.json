@@ -1,0 +1,9 @@
+{
+  "count": 4,
+  "connections": [
+    {"client_id": "a1", "connected_at": "2026-11-17T18:10:00Z", "connection_id": "c1", "endpoint": "events_stream", "ip": "10.0.0.5", "user": "admin", "user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0"},
+    {"client_id": "a2", "connected_at": "2026-11-17T18:00:00Z", "connection_id": "c2", "endpoint": "events_stream", "ip": "10.0.0.5", "user": "admin", "user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0"},
+    {"client_id": null, "connected_at": "2026-11-17T19:00:00Z", "connection_id": "c3", "endpoint": "logs_stream", "ip": "10.0.0.9", "user": "admin", "user_agent": "hc-tui/0.1.3"},
+    {"connected_at": "2026-11-17T17:00:00Z", "connection_id": "c4", "endpoint": "events_stream", "ip": "10.0.0.20", "user": "api_key:Kitchen panel", "user_agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36"}
+  ]
+}

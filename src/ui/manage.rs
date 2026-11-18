@@ -1,15 +1,13 @@
 //! Manage tab and its sub-panels.
 
-use super::widgets::{format_uptime, highlight, short_ts, status_detail_row};
+use super::widgets::highlight;
 use crate::app::App;
-use crate::app::manage::backup::BackupAction;
 use crate::app::manage::logs::LogLevelFilter;
-use crate::config::{exports_dir, imports_dir};
-use crate::model::{AuditResult, Role};
+use crate::model::AuditResult;
 use crate::text::take_chars;
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Tabs, Wrap},
@@ -143,143 +141,6 @@ pub fn draw_matter(frame: &mut Frame<'_>, app: &App, area: Rect) {
             )
             .wrap(Wrap { trim: true }),
         layout[1],
-    );
-}
-
-pub fn draw_status(frame: &mut Frame<'_>, app: &App, area: Rect) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(if app.manage.status.loading {
-            "System (loading)"
-        } else {
-            "System"
-        });
-    let Some(s) = app.system_status.as_ref() else {
-        let msg = match &app.manage.status.error {
-            Some(e) => format!("Could not load status: {e}"),
-            None if app.manage.status.loading => "Loading...".to_string(),
-            None => "Press r to load system status.".to_string(),
-        };
-        frame.render_widget(
-            Paragraph::new(msg)
-                .block(block)
-                .alignment(Alignment::Center),
-            area,
-        );
-        return;
-    };
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-    let cols = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(inner);
-    let section = |t: &'static str| {
-        Line::from(Span::styled(
-            t,
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
-        ))
-    };
-    let refresh = app.manage.status.last_refresh.as_deref().unwrap_or("never");
-    let mut left = vec![
-        section("System"),
-        Line::from(""),
-        status_detail_row("Version", &s.version),
-        status_detail_row("Started", &short_ts(&s.started_at)),
-        status_detail_row("Uptime", &format_uptime(s.uptime_seconds)),
-        status_detail_row("Timezone", s.timezone.as_deref().unwrap_or("-")),
-        status_detail_row("Temperatures", app.temp_unit.symbol()),
-        status_detail_row(
-            "Last refresh",
-            &format!(
-                "{refresh} {}",
-                if app.time_utc { "(UTC)" } else { "(local)" }
-            ),
-        ),
-        Line::from(""),
-        section("Automations"),
-        Line::from(""),
-        status_detail_row("Total", &s.rules_total.to_string()),
-        status_detail_row("Enabled", &s.rules_enabled.to_string()),
-    ];
-    if s.rules_total > 0 {
-        left.push(status_detail_row(
-            "Disabled",
-            &s.rules_total.saturating_sub(s.rules_enabled).to_string(),
-        ));
-    }
-    frame.render_widget(Paragraph::new(left).wrap(Wrap { trim: false }), cols[0]);
-    let right = vec![
-        section("Devices & Plugins"),
-        Line::from(""),
-        status_detail_row("Total devices", &s.devices_total.to_string()),
-        status_detail_row("Active plugins", &s.plugins_active.to_string()),
-        Line::from(""),
-        section("Storage"),
-        Line::from(""),
-        status_detail_row("State DB", &format!("{} KB", s.state_db_bytes / 1024)),
-        status_detail_row("History DB", &format!("{} KB", s.history_db_bytes / 1024)),
-        status_detail_row(
-            "Last backup",
-            &s.last_backup_at
-                .as_deref()
-                .map(short_ts)
-                .unwrap_or_else(|| "never".into()),
-        ),
-    ];
-    frame.render_widget(Paragraph::new(right).wrap(Wrap { trim: false }), cols[1]);
-}
-
-pub fn draw_users(frame: &mut Frame<'_>, app: &App, area: Rect) {
-    let me = app.current_user.as_ref().map(|u| u.id.as_str());
-    let items: Vec<ListItem> = app
-        .views
-        .users
-        .iter()
-        .filter_map(|&i| app.users.get(i))
-        .map(|u| {
-            let rc = match u.role {
-                Role::Admin => Color::Yellow,
-                Role::User => Color::White,
-                Role::ReadOnly => Color::DarkGray,
-                Role::Observer => Color::Gray,
-                Role::DeviceOperator => Color::Cyan,
-                Role::RuleEditor => Color::Magenta,
-                Role::ServiceOperator => Color::Blue,
-                Role::HouseholdMember => Color::Green,
-            };
-            let tag = if me == Some(u.id.as_str()) {
-                " (you)"
-            } else {
-                ""
-            };
-            ListItem::new(Line::from(vec![
-                Span::styled(
-                    format!("  {:<22}", take_chars(&format!("{}{tag}", u.username), 22)),
-                    Style::default().fg(Color::White),
-                ),
-                Span::styled(format!("{:<18}", u.role.label()), Style::default().fg(rc)),
-                Span::styled(
-                    take_chars(&u.created_at, 10),
-                    Style::default().fg(Color::DarkGray),
-                ),
-            ]))
-        })
-        .collect();
-    let n = items.len();
-    let title = if app.is_admin() {
-        format!("People ({n})")
-    } else {
-        "People (admin only; p changes your password)".to_string()
-    };
-    render_list(
-        frame,
-        selectable_list(items, title),
-        n,
-        app.manage.users_sel.index(),
-        area,
     );
 }
 
@@ -572,66 +433,5 @@ pub fn draw_audit(frame: &mut Frame<'_>, app: &App, area: Rect) {
             .style(Style::default().fg(color))
             .wrap(Wrap { trim: true }),
         footer_area,
-    );
-}
-
-pub fn draw_backup(frame: &mut Frame<'_>, app: &App, area: Rect) {
-    let b = &app.manage.backup;
-    let layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(8),
-            Constraint::Length(3),
-            Constraint::Length(3),
-        ])
-        .split(area);
-    let items: Vec<ListItem> = BackupAction::ALL
-        .iter()
-        .map(|a| ListItem::new(format!("  {}", a.label())))
-        .collect();
-    let title = if b.busy {
-        "Data & backups (busy)"
-    } else {
-        "Data & backups"
-    };
-    render_list(
-        frame,
-        selectable_list(items, title.into()),
-        BackupAction::ALL.len(),
-        b.sel.index(),
-        layout[0],
-    );
-    frame.render_widget(
-        Paragraph::new(format!(
-            "Exports → {}    Imports ← {}",
-            exports_dir().display(),
-            imports_dir().display()
-        ))
-        .block(Block::default().borders(Borders::ALL).title("Paths"))
-        .style(Style::default().fg(Color::DarkGray))
-        .wrap(Wrap { trim: true }),
-        layout[1],
-    );
-    let text = if b.status.is_empty() {
-        "Press Enter to run the selected action.".to_string()
-    } else {
-        b.status.clone()
-    };
-    let color = if b.status.starts_with("Error:") {
-        Color::Red
-    } else if ["Saved", "Exported", "Imported"]
-        .iter()
-        .any(|p| b.status.starts_with(p))
-    {
-        Color::Green
-    } else {
-        Color::Yellow
-    };
-    frame.render_widget(
-        Paragraph::new(text)
-            .block(Block::default().borders(Borders::ALL).title("Status"))
-            .style(Style::default().fg(color))
-            .wrap(Wrap { trim: true }),
-        layout[2],
     );
 }

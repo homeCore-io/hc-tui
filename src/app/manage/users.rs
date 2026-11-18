@@ -30,7 +30,7 @@ impl App {
                     self.open_user_role()
                 }
             }
-            KeyCode::Char('p') => self.open_change_password(),
+            KeyCode::Char('p') => self.open_password(),
             KeyCode::Char('x') | KeyCode::Delete => self.ask_delete_user(),
             _ => {}
         }
@@ -52,6 +52,21 @@ impl App {
         ed.username = u.username.clone();
         ed.role = u.role;
         self.manage.user_editor = Some(ed);
+    }
+
+    /// `p`: an admin on someone else sets their password; otherwise it is
+    /// your own, which needs your current one.
+    fn open_password(&mut self) {
+        let me = self.current_user.as_ref().map(|u| u.id.clone());
+        match self.selected_user() {
+            Some(u) if self.is_admin() && Some(&u.id) != me.as_ref() => {
+                let mut ed = UserEditor::new(UserEditMode::SetPassword, UserEditField::Password);
+                ed.id = Some(u.id.clone());
+                ed.username = u.username.clone();
+                self.manage.user_editor = Some(ed);
+            }
+            _ => self.open_change_password(),
+        }
     }
 
     /// Change-password always acts on the signed-in account.
@@ -110,6 +125,29 @@ impl App {
                         app.manage.user_editor = None;
                         app.status = format!("Updated role for '{}'", ed.username);
                         app.save_cache(&[Section::Users]);
+                    },
+                );
+            }
+            UserEditMode::SetPassword => {
+                if char_len(&ed.password) < MIN_PASSWORD_CHARS {
+                    self.error = Some("password must be at least 8 characters".to_string());
+                    return;
+                }
+                if ed.password != ed.confirm_password {
+                    self.error = Some("passwords do not match".to_string());
+                    return;
+                }
+                let Some(id) = ed.id.clone() else { return };
+                let new = ed.password.clone();
+                self.spawn_ok(
+                    "set password",
+                    async move { c.set_user_password(&id, &new).await },
+                    move |app, ()| {
+                        app.manage.user_editor = None;
+                        app.status = format!(
+                            "Set. {} is signed out everywhere; give them the new one in person.",
+                            ed.username
+                        );
                     },
                 );
             }

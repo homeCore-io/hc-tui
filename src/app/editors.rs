@@ -71,6 +71,8 @@ pub enum ConfirmAction {
         plugin_id: String,
         action: Box<Action>,
     },
+    /// People, Data & backups and System: see `manage::settings_modal`.
+    Settings(super::manage::settings_modal::SettingsConfirm),
 }
 
 #[derive(Debug, Clone)]
@@ -181,6 +183,8 @@ pub enum UserEditMode {
     Create,
     EditRole,
     ChangePassword,
+    /// An admin gives someone else a new password.
+    SetPassword,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -234,6 +238,7 @@ impl UserEditor {
             UserEditMode::Create => &[F::Username, F::Password, F::ConfirmPassword, F::Role],
             UserEditMode::EditRole => &[F::Role],
             UserEditMode::ChangePassword => &[F::CurrentPassword, F::Password, F::ConfirmPassword],
+            UserEditMode::SetPassword => &[F::Password, F::ConfirmPassword],
         }
     }
 
