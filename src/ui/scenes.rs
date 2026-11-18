@@ -1,7 +1,8 @@
-//! The Scenes list and the scene editor.
+//! Scenes and Modes lists, and the scene editor.
 
 use super::widgets::{heading, highlight};
 use crate::app::App;
+use crate::app::manage::modes::mode_schedule;
 use crate::app::scenes::{SceneField, state_summary};
 use crate::model::SceneSource;
 use crate::text::take_chars;
@@ -91,6 +92,68 @@ pub fn draw_scenes_table(frame: &mut Frame<'_>, app: &App, area: Rect) {
         Block::default()
             .borders(Borders::ALL)
             .title(format!(" Scenes ({}) ", app.views.scenes.len())),
+    )
+    .row_highlight_style(hl);
+    let mut state = TableState::default();
+    state.select(sel_row);
+    frame.render_stateful_widget(table, area, &mut state);
+}
+
+pub fn draw_modes(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let hl = highlight();
+    let selected = app.selected_mode().map(|m| m.config.id.clone());
+    let mut sel_row = None;
+    let rows: Vec<Row> = app
+        .views
+        .modes
+        .iter()
+        .filter_map(|&i| app.modes.get(i))
+        .enumerate()
+        .map(|(i, m)| {
+            let is_sel = selected.as_deref() == Some(m.config.id.as_str());
+            if is_sel {
+                sel_row = Some(i);
+            }
+            let on = app.mode_on(&m.config.id);
+            let (dot, dc) = if on {
+                ("●", Color::Green)
+            } else {
+                ("○", Color::DarkGray)
+            };
+            let kc = match m.config.kind.as_str() {
+                "solar" => Color::Yellow,
+                "manual" => Color::Cyan,
+                _ => Color::White,
+            };
+            let when = mode_schedule(&m.config, on, app.mode_attributes(&m.config.id));
+            let style = |c: Color| if is_sel { hl } else { Style::default().fg(c) };
+            Row::new(vec![
+                Cell::from(format!("  {dot}")).style(style(dc)),
+                Cell::from(m.config.name.clone()).style(style(Color::White)),
+                Cell::from(m.config.kind.clone()).style(style(kc)),
+                Cell::from(when).style(style(Color::Gray)),
+            ])
+        })
+        .collect();
+    let header = Row::new(
+        ["", "Mode", "Kind", "Next change"]
+            .iter()
+            .map(|h| Cell::from(*h).style(heading())),
+    );
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(4),
+            Constraint::Length(28),
+            Constraint::Length(8),
+            Constraint::Min(24),
+        ],
+    )
+    .header(header)
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(format!(" Modes ({}) ", app.views.modes.len())),
     )
     .row_highlight_style(hl);
     let mut state = TableState::default();

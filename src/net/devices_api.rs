@@ -1,8 +1,8 @@
 //! REST calls for device controls, history, removed devices, room
-//! membership and scenes. All paths are under `/api/v1`.
+//! membership, scenes and modes. All paths are under `/api/v1`.
 
 use super::http::{HomeCoreClient, check_status, parse_json, seg};
-use crate::model::{Area, Scene};
+use crate::model::{Area, ModeConfig, Scene};
 use crate::model_devices::{DeviceSchema, HistoryPoint, RemovedDevice};
 use anyhow::{Result, anyhow};
 use reqwest::{Method, StatusCode};
@@ -143,6 +143,16 @@ impl HomeCoreClient {
     pub async fn delete_scene(&self, id: &str) -> Result<()> {
         let path = format!("/scenes/{}", seg(id));
         self.send_empty(Method::DELETE, &path, None).await
+    }
+
+    // ── Modes ────────────────────────────────────────────────────────────
+
+    /// `PATCH /modes/{id}`: name, and for a solar mode its events and
+    /// offsets. Only the fields given change.
+    pub async fn update_mode(&self, id: &str, fields: Map<String, Value>) -> Result<ModeConfig> {
+        let path = format!("/modes/{}", seg(id));
+        self.send_json(Method::PATCH, &path, Some(Value::Object(fields)))
+            .await
     }
 }
 

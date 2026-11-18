@@ -1,6 +1,6 @@
 //! Modes: the house's states. Space switches a manual mode.
 
-use super::{Binding, DELETE, NEW, SPACE, Screen, ScreenId, moves};
+use super::{Binding, DELETE, ENTER, NEW, SPACE, Screen, ScreenId, moves};
 use crate::app::App;
 use crate::app::home::{HomeItem, ItemKind};
 use ratatui::{Frame, layout::Rect};
@@ -25,6 +25,7 @@ impl Screen for ModesScreen {
         if app.can("devices:write") {
             v.extend([
                 Binding::new(NEW, "n", "new mode", App::new_mode),
+                Binding::new(ENTER, "Enter", "edit", App::edit_selected_mode),
                 Binding::new(DELETE, "x", "delete", App::ask_delete_mode).more(),
             ]);
         }
@@ -32,7 +33,7 @@ impl Screen for ModesScreen {
     }
 
     fn draw(&self, frame: &mut Frame<'_>, app: &App, area: Rect) {
-        crate::ui::manage::draw_modes(frame, app, area);
+        crate::ui::scenes::draw_modes(frame, app, area);
     }
 
     fn searchable(&self, _app: &App) -> bool {

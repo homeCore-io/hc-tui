@@ -305,9 +305,20 @@ impl UserEditor {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModeEditField {
-    Id,
     Name,
     Kind,
+    OnEvent,
+    OnOffset,
+    OffEvent,
+    OffOffset,
+}
+
+/// The sun events a solar mode can follow, as core names them.
+pub const SUN_EVENTS: [&str; 5] = ["Sunrise", "Sunset", "SolarNoon", "CivilDawn", "CivilDusk"];
+
+/// A sun event in words: `"solar noon"`.
+pub fn sun_event_words(e: &str) -> String {
+    crate::text::normalize_label(e).to_lowercase()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -332,14 +343,133 @@ impl ModeKind {
     }
 }
 
+/// New mode, or a mode's name and sun times. The kind is chosen when the
+/// mode is made; core does not change it afterwards.
 #[derive(Debug, Clone)]
 pub struct ModeEditor {
-    pub id: String,
+    /// The mode as it was, when editing one.
+    pub editing: Option<crate::model::ModeConfig>,
     pub name: String,
     pub kind: ModeKind,
+    pub on_event: String,
+    pub on_offset: i32,
+    pub off_event: String,
+    pub off_offset: i32,
     pub field: ModeEditField,
 }
 
+impl ModeEditor {
+    pub fn create() -> Self {
+        Self {
+            editing: None,
+            name: String::new(),
+            kind: ModeKind::Manual,
+            on_event: "Sunrise".into(),
+            on_offset: 0,
+            off_event: "Sunset".into(),
+            off_offset: 0,
+            field: ModeEditField::Name,
+        }
+    }
+
+    pub fn edit(m: &crate::model::ModeConfig) -> Self {
+        Self {
+            editing: Some(m.clone()),
+            name: m.name.clone(),
+            kind: if m.kind == "solar" {
+                ModeKind::Solar
+            } else {
+                ModeKind::Manual
+            },
+            on_event: m.on_event.clone().unwrap_or_else(|| "Sunrise".into()),
+            on_offset: m.on_offset_minutes.unwrap_or(0),
+            off_event: m.off_event.clone().unwrap_or_else(|| "Sunset".into()),
+            off_offset: m.off_offset_minutes.unwrap_or(0),
+            field: ModeEditField::Name,
+        }
+    }
+
+    /// The fields Tab visits.
+    pub fn fields(&self) -> Vec<ModeEditField> {
+        use ModeEditField as F;
+        let mut v = vec![F::Name];
+        if self.editing.is_none() {
+            v.push(F::Kind);
+        }
+        if self.kind == ModeKind::Solar {
+            v.extend([F::OnEvent, F::OnOffset, F::OffEvent, F::OffOffset]);
+        }
+        v
+    }
+
+    fn step(&mut self, forward: bool) {
+        let f = self.fields();
+        let i = f.iter().position(|x| *x == self.field).unwrap_or(0);
+        let n = f.len();
+        self.field = f[if forward {
+            (i + 1) % n
+        } else {
+            (i + n - 1) % n
+        }];
+    }
+
+    /// ←/→ on a choice: kind, an event, an offset (5 minutes a step).
+    fn change(&mut self, dir: i32) {
+        let next_event = |e: &str| {
+            let i = SUN_EVENTS.iter().position(|x| *x == e).unwrap_or(0) as i32;
+            SUN_EVENTS[(i + dir).rem_euclid(SUN_EVENTS.len() as i32) as usize].to_string()
+        };
+        match self.field {
+            ModeEditField::Kind => self.kind = self.kind.next(),
+            ModeEditField::OnEvent => self.on_event = next_event(&self.on_event),
+            ModeEditField::OffEvent => self.off_event = next_event(&self.off_event),
+            ModeEditField::OnOffset => self.on_offset = (self.on_offset + dir * 5).clamp(-720, 720),
+            ModeEditField::OffOffset => {
+                self.off_offset = (self.off_offset + dir * 5).clamp(-720, 720)
+            }
+            ModeEditField::Name => {}
+        }
+    }
+
+    /// The new mode's id: `mode_` and its name in core's slug form.
+    pub fn new_id(&self) -> String {
+        format!("mode_{}", crate::app::rooms::slug(&self.name))
+    }
+
+    /// The `PATCH /modes/{id}` body: what changed (for a new solar mode,
+    /// its sun times). Empty when nothing did.
+    pub fn patch(&self) -> serde_json::Map<String, serde_json::Value> {
+        use serde_json::json;
+        let mut body = serde_json::Map::new();
+        let before = self.editing.as_ref();
+        let name = self.name.trim();
+        if let Some(b) = before
+            && name != b.name
+        {
+            body.insert("name".into(), json!(name));
+        }
+        if self.kind == ModeKind::Solar {
+            if before.and_then(|b| b.on_event.as_deref()) != Some(self.on_event.as_str()) {
+                body.insert("on_event".into(), json!(self.on_event));
+            }
+            if before.and_then(|b| b.off_event.as_deref()) != Some(self.off_event.as_str()) {
+                body.insert("off_event".into(), json!(self.off_event));
+            }
+            let was = |o: Option<i32>| o.unwrap_or(0);
+            if before.is_none_or(|b| was(b.on_offset_minutes) != self.on_offset)
+                && (before.is_some() || self.on_offset != 0)
+            {
+                body.insert("on_offset_minutes".into(), json!(self.on_offset));
+            }
+            if before.is_none_or(|b| was(b.off_offset_minutes) != self.off_offset)
+                && (before.is_some() || self.off_offset != 0)
+            {
+                body.insert("off_offset_minutes".into(), json!(self.off_offset));
+            }
+        }
+        body
+    }
+}
 // ── Matter commission editor ────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -516,24 +646,16 @@ impl App {
                 self.manage.mode_editor = None;
                 self.status = "Cancelled".to_string();
             }
-            KeyCode::Tab | KeyCode::BackTab => {
-                ed.field = match ed.field {
-                    ModeEditField::Id => ModeEditField::Name,
-                    ModeEditField::Name => ModeEditField::Kind,
-                    ModeEditField::Kind => ModeEditField::Id,
-                };
-            }
-            KeyCode::Char(' ') if ed.field == ModeEditField::Kind => ed.kind = ed.kind.next(),
+            KeyCode::Tab | KeyCode::Down => ed.step(true),
+            KeyCode::BackTab | KeyCode::Up => ed.step(false),
             KeyCode::Enter => self.save_mode_editor(),
-            _ => match ed.field {
-                ModeEditField::Id => {
-                    edit_text(&mut ed.id, key);
-                }
-                ModeEditField::Name => {
+            KeyCode::Left if ed.field != ModeEditField::Name => ed.change(-1),
+            KeyCode::Right | KeyCode::Char(' ') if ed.field != ModeEditField::Name => ed.change(1),
+            _ => {
+                if ed.field == ModeEditField::Name {
                     edit_text(&mut ed.name, key);
                 }
-                ModeEditField::Kind => {}
-            },
+            }
         }
     }
 
