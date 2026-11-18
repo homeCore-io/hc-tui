@@ -105,9 +105,6 @@ impl App {
                     self.areas_tab.marked.insert(id);
                 }
             }
-            KeyCode::Char('+') | KeyCode::Char('=') if !self.areas_tab.marked.is_empty() => {
-                self.add_marked_to_area();
-            }
             KeyCode::Char('-') if !self.areas_tab.marked.is_empty() => {
                 self.remove_marked_from_area();
             }
@@ -210,21 +207,6 @@ impl App {
                 app.start_sync();
             },
         );
-    }
-
-    fn add_marked_to_area(&mut self) {
-        let Some(area) = self.selected_area() else {
-            return;
-        };
-        let mut ids = area.device_ids.clone();
-        let mut added = 0;
-        for id in &self.areas_tab.marked {
-            if !ids.contains(id) {
-                ids.push(id.clone());
-                added += 1;
-            }
-        }
-        self.set_area_devices(ids, format!("Added {added} device(s) to area"));
     }
 
     fn remove_marked_from_area(&mut self) {

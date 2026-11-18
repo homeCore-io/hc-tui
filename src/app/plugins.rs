@@ -63,6 +63,9 @@ pub struct PluginsTab {
     pub detail: Option<PluginDetail>,
     pub streaming: Option<StreamingAction>,
     stream_task: Option<JoinHandle<()>>,
+    /// Bumped for every streaming run, so a late start reply from a run
+    /// that was closed is not attached to the next one.
+    run_seq: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -411,6 +414,8 @@ impl App {
         let label = action.display_label().to_string();
         self.close_streaming_action();
         self.plugins_tab.streaming = Some(StreamingAction::new(plugin_id.clone(), label));
+        self.plugins_tab.run_seq += 1;
+        let run = self.plugins_tab.run_seq;
         let c = self.client.clone();
         let pid = plugin_id.clone();
         self.spawn(
@@ -419,7 +424,7 @@ impl App {
                 let Some(s) = app.plugins_tab.streaming.as_mut() else {
                     return; // closed while starting
                 };
-                if s.plugin_id != plugin_id || s.request_id.is_some() {
+                if app.plugins_tab.run_seq != run || s.request_id.is_some() {
                     return;
                 }
                 let resp = match res {

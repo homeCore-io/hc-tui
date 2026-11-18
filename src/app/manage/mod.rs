@@ -133,19 +133,13 @@ impl App {
         self.resolve_group_selection();
     }
 
-    /// Events have no id; key rows by position and timestamp so the
-    /// cursor holds still while new events arrive at the top.
+    /// Events have no server id; rows are keyed by the local number each
+    /// got when added, so the cursor stays on an event as new ones arrive.
     pub(crate) fn event_row_ids(&self) -> Vec<String> {
-        let n = self.views.events.len();
         self.views
             .events
             .iter()
-            .enumerate()
-            .filter_map(|(pos, &i)| {
-                self.events
-                    .get(i)
-                    .map(|e| format!("{}|{}|{}", n - pos, e.timestamp, e.event_type))
-            })
+            .filter_map(|&i| self.events.get(i).map(|e| e.seq.to_string()))
             .collect()
     }
 

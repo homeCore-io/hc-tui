@@ -182,6 +182,18 @@ fn status_hints(app: &App) -> Vec<&'static str> {
         }
         return h;
     }
+    if app.devices_tab.search_open {
+        return vec!["type to search", "Enter apply", "Esc close"];
+    }
+    if app.rules_tab.filter_bar.is_some() {
+        return vec!["type filter", "Tab field", "Enter apply", "Esc cancel"];
+    }
+    if app.manage.logs.input_open {
+        return vec!["type filter", "Enter apply", "Esc cancel"];
+    }
+    if app.rules_tab.groups.is_some() {
+        return vec!["j/k move", "e enable", "d disable", "x delete", "Esc close"];
+    }
     if app.devices_tab.editor.is_some() {
         return vec!["Tab field", "Enter save", "Esc cancel"];
     }
@@ -239,15 +251,18 @@ fn status_hints(app: &App) -> Vec<&'static str> {
             }
         }
         Tab::Scenes => hints.push("a activate"),
-        Tab::Areas => hints.extend([
-            "n new area",
-            "Enter rename",
-            "◄/► pane",
-            "Spc select dev",
-            "+ add device",
-            "- remove device",
-            "d delete",
-        ]),
+        Tab::Areas => match app.areas_tab.pane {
+            crate::app::AreasPane::AreasList => {
+                hints.extend(["n new area", "Enter/► devices", "d delete area"])
+            }
+            crate::app::AreasPane::DeviceList => hints.extend([
+                "◄ areas",
+                "Enter rename area",
+                "Spc mark device",
+                "-/d remove marked",
+                "n new area",
+            ]),
+        },
         Tab::Plugins => {
             hints.push("Enter detail");
             if app.is_admin() {

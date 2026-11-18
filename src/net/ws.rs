@@ -17,6 +17,26 @@ use tokio_tungstenite::tungstenite::Message;
 
 const BACKOFF_START: Duration = Duration::from_secs(1);
 const BACKOFF_MAX: Duration = Duration::from_secs(30);
+/// A connection must stay up this long before the backoff resets, so a
+/// server that accepts and drops at once is not hammered.
+const STABLE_AFTER: Duration = Duration::from_secs(10);
+/// Core pings every 30s; this much silence means the link is dead.
+const READ_TIMEOUT: Duration = Duration::from_secs(75);
+
+/// Next frame, or `None` when the stream ended or went silent too long.
+async fn next_frame<S>(
+    read: &mut S,
+) -> Option<Result<Message, tokio_tungstenite::tungstenite::Error>>
+where
+    S: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
+{
+    match tokio::time::timeout(READ_TIMEOUT, read.next()).await {
+        Ok(v) => v,
+        Err(_) => Some(Err(tokio_tungstenite::tungstenite::Error::Io(
+            std::io::Error::new(std::io::ErrorKind::TimedOut, "no frames"),
+        ))),
+    }
+}
 
 #[derive(Debug)]
 pub enum WsMsg {
@@ -136,14 +156,14 @@ pub fn spawn_events_stream<T: From<WsMsg> + Send + 'static>(
             let url = with_token(&client.ws_url("/events/stream"), &token, &[]);
             let reason = match connect_async(url.as_str()).await {
                 Ok((stream, _)) => {
-                    backoff.reset();
+                    let connected_at = std::time::Instant::now();
                     if tx.send(WsMsg::Connected { attempt }).is_err() {
                         return;
                     }
                     attempt += 1;
                     let (_, mut read) = stream.split();
                     let mut reason = "connection closed".to_string();
-                    while let Some(msg) = read.next().await {
+                    while let Some(msg) = next_frame(&mut read).await {
                         match msg {
                             Ok(Message::Text(text)) => {
                                 if let Some(m) = classify_event_frame(&text)
@@ -164,6 +184,9 @@ pub fn spawn_events_stream<T: From<WsMsg> + Send + 'static>(
                                 break;
                             }
                         }
+                    }
+                    if connected_at.elapsed() >= STABLE_AFTER {
+                        backoff.reset();
                     }
                     reason
                 }
@@ -214,13 +237,13 @@ pub fn spawn_log_stream<T: From<LogMsg> + Send + 'static>(
             );
             let reason = match connect_async(url.as_str()).await {
                 Ok((stream, _)) => {
-                    backoff.reset();
+                    let connected_at = std::time::Instant::now();
                     if tx.send(LogMsg::Connected).is_err() {
                         return;
                     }
                     let (_, mut read) = stream.split();
                     let mut reason = "connection closed".to_string();
-                    while let Some(msg) = read.next().await {
+                    while let Some(msg) = next_frame(&mut read).await {
                         match msg {
                             Ok(Message::Text(text)) => {
                                 if let Ok(line) = serde_json::from_str::<LogLine>(&text)
@@ -236,6 +259,9 @@ pub fn spawn_log_stream<T: From<LogMsg> + Send + 'static>(
                                 break;
                             }
                         }
+                    }
+                    if connected_at.elapsed() >= STABLE_AFTER {
+                        backoff.reset();
                     }
                     reason
                 }

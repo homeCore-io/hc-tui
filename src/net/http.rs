@@ -29,6 +29,8 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 const BACKUP_TIMEOUT: Duration = Duration::from_secs(120);
 /// Refresh this many seconds before the access token expires.
 const REFRESH_MARGIN_SECS: i64 = 120;
+/// Wait this long after a failed early refresh before trying again.
+const REFRESH_RETRY_SECS: i64 = 30;
 
 /// The session expired and could not be refreshed.
 #[derive(Debug)]
@@ -59,6 +61,9 @@ pub struct Tokens {
     pub expires_at: Option<i64>,
     /// Bumped whenever the tokens change, so the app knows to save them.
     pub version: u64,
+    /// After a refresh fails for a reason other than a rejected token, no
+    /// early refresh is tried again before this unix second.
+    pub retry_refresh_after: Option<i64>,
 }
 
 impl std::fmt::Debug for Tokens {
@@ -68,6 +73,7 @@ impl std::fmt::Debug for Tokens {
             .field("refresh", &self.refresh.as_ref().map(|_| "<redacted>"))
             .field("expires_at", &self.expires_at)
             .field("version", &self.version)
+            .field("retry_refresh_after", &self.retry_refresh_after)
             .finish()
     }
 }
@@ -180,6 +186,7 @@ impl HomeCoreClient {
     pub fn needs_refresh(&self) -> bool {
         let t = self.lock();
         t.refresh.is_some()
+            && t.retry_refresh_after.is_none_or(|at| now_unix() >= at)
             && t.expires_at
                 .map(|exp| exp - now_unix() <= REFRESH_MARGIN_SECS)
                 .unwrap_or(false)
@@ -197,13 +204,19 @@ impl HomeCoreClient {
         let Some(refresh) = self.lock().refresh.clone() else {
             return Err(Unauthorized.into());
         };
-        let resp = self
+        let resp = match self
             .http
             .post(self.endpoint("/auth/refresh"))
             .json(&json!({ "refresh_token": refresh }))
             .send()
             .await
-            .context("refresh request failed")?;
+        {
+            Ok(r) => r,
+            Err(e) => {
+                self.lock().retry_refresh_after = Some(now_unix() + REFRESH_RETRY_SECS);
+                return Err(anyhow!("refresh request failed: {}", e.without_url()));
+            }
+        };
         if !resp.status().is_success() {
             // A rejected refresh token is final: forget it.
             if matches!(
@@ -213,11 +226,13 @@ impl HomeCoreClient {
                 self.lock().refresh = None;
                 return Err(Unauthorized.into());
             }
+            self.lock().retry_refresh_after = Some(now_unix() + REFRESH_RETRY_SECS);
             let status = resp.status();
             return Err(anyhow!("{status}: {}", error_message(resp).await));
         }
         let parsed: LoginResponse = resp.json().await.context("parsing refresh response")?;
         self.set_session_from(&parsed);
+        self.lock().retry_refresh_after = None;
         Ok(())
     }
 
@@ -338,9 +353,23 @@ impl HomeCoreClient {
     /// `POST /auth/change-password`. Core answers 204 and revokes every
     /// session, including this one.
     pub async fn change_password(&self, current_password: &str, new_password: &str) -> Result<()> {
+        // A 401 here means the current password was wrong, not that the
+        // session expired, so this request skips the refresh-and-retry.
         let body = json!({ "current_password": current_password, "new_password": new_password });
-        self.send_empty(Method::POST, "/auth/change-password", Some(body))
+        let rb = self
+            .http
+            .post(self.endpoint("/auth/change-password"))
+            .json(&body);
+        let resp = self
+            .authed(rb)?
+            .send()
             .await
+            .map_err(|e| anyhow!("change password failed: {}", e.without_url()))?;
+        if resp.status().is_success() {
+            return Ok(());
+        }
+        let status = resp.status();
+        Err(anyhow!("{status}: {}", error_message(resp).await))
     }
 
     // ── Devices ──────────────────────────────────────────────────────────
@@ -794,6 +823,7 @@ mod tests {
             refresh: Some("secret2".into()),
             expires_at: None,
             version: 1,
+            retry_refresh_after: None,
         };
         let s = format!("{t:?}");
         assert!(!s.contains("secret"));
@@ -808,5 +838,8 @@ mod tests {
         assert!(!c.needs_refresh());
         c.set_tokens("a".into(), None, Some(now_unix() + 30));
         assert!(!c.needs_refresh());
+        c.set_tokens("a".into(), Some("r".into()), Some(now_unix() + 30));
+        c.lock().retry_refresh_after = Some(now_unix() + 30);
+        assert!(!c.needs_refresh(), "a failed refresh backs off");
     }
 }

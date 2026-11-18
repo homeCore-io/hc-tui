@@ -694,6 +694,10 @@ pub struct EventEntry {
     pub custom: bool,
     #[serde(default)]
     pub event_detail: Option<String>,
+    /// Local, increasing number given when the row is added; the stable
+    /// id the Events panel selects by.
+    #[serde(skip)]
+    pub seq: u64,
 }
 
 // ── Audit ───────────────────────────────────────────────────────────────────

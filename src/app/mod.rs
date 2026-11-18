@@ -216,6 +216,8 @@ pub struct App {
     /// these are ever written back to the cache.
     fresh: HashSet<Section>,
     saved_session_version: u64,
+    /// Last number given to an event row.
+    event_seq: u64,
     /// Bumped on sign-out; results of requests made before that are
     /// dropped instead of applied.
     epoch: u64,
@@ -277,6 +279,7 @@ impl App {
             fresh: HashSet::new(),
             saved_session_version: 0,
             epoch: 0,
+            event_seq: 0,
             ws_connected: false,
             ws_task: None,
             devices: Vec::new(),
@@ -623,8 +626,9 @@ impl App {
             expires_at: tokens.expires_at,
         };
         let cache = self.cache.clone();
+        let generation = cache.session_generation();
         tokio::task::spawn_blocking(move || {
-            let _ = cache.save_session(&session);
+            let _ = cache.save_session_if(&session, generation);
         });
     }
 
@@ -669,6 +673,7 @@ impl App {
         }
         if let Some(v) = snap.events {
             self.events = v;
+            self.number_events();
         }
         if let Some(v) = snap.users {
             self.users = v;
@@ -719,6 +724,7 @@ impl App {
         }
         if let Ok(v) = report.events {
             self.events = events::entries_from_log(&v);
+            self.number_events();
             self.fresh.insert(Section::Events);
             fresh.events = Some(self.events.clone());
         }
@@ -760,6 +766,16 @@ impl App {
         }
     }
 
+    /// Number a freshly loaded event list (newest first) so the newest
+    /// gets the highest number.
+    fn number_events(&mut self) {
+        let n = self.events.len() as u64;
+        for (i, e) in self.events.iter_mut().enumerate() {
+            e.seq = self.event_seq + n - i as u64;
+        }
+        self.event_seq += n;
+    }
+
     pub fn set_system_status(&mut self, s: SystemStatus) {
         if let Some(u) = s.temperature_unit.as_deref() {
             self.temp_unit = TempUnit::parse(u);
@@ -778,8 +794,9 @@ impl App {
         };
         let username = user.username.clone();
         let cache = self.cache.clone();
+        let seq = cache.next_snapshot_seq();
         tokio::task::spawn_blocking(move || {
-            let _ = cache.save_sections(&username, &snap);
+            let _ = cache.save_sections_seq(&username, &snap, seq);
         });
     }
 

@@ -81,8 +81,9 @@ Directories the TUI creates are 0700 and files 0600.
 - Media Players: `Space`/`t` play-stop, `p` play/pause, `x` stop, `n` next,
   `b` previous, `+`/`-` volume, `m` mute, `Enter` edit
 - Scenes: `a` or `Enter` activate
-- Areas: `◄/►` pane, `n` new, `Enter` open / rename, `Space` mark device,
-  `+`/`-` add/remove marked devices, `d` delete area
+- Areas: `◄/►` pane, `n` new, `Enter` open the area (left) or rename it
+  (right), `Space` mark a device, `-`/`d` remove marked devices (right),
+  `d` delete the area (left)
 - Rules: `Enter` detail, `e`/`d` enable/disable (marked rules when any),
   `Space` mark, `c` clone, `x` delete, `h` history, `f` filter, `s` stale
   only, `g` groups

@@ -95,6 +95,7 @@ pub fn entry_from_event(event: &Value) -> EventEntry {
         rule_name,
         custom,
         event_detail: summarize(event),
+        seq: 0,
     }
 }
 
@@ -144,6 +145,9 @@ impl App {
                     if !ts.is_empty() {
                         d.last_seen = ts.clone();
                     }
+                    if d.is_scene() {
+                        self.rebuild_scenes();
+                    }
                 }
             }
             "device_availability_changed" => {
@@ -163,6 +167,9 @@ impl App {
                     && let Some(d) = self.devices.iter_mut().find(|d| d.device_id == id)
                 {
                     d.name = name.to_string();
+                    if d.is_scene() {
+                        self.rebuild_scenes();
+                    }
                 }
             }
             "device_added" | "device_metadata_changed" => {
@@ -240,7 +247,10 @@ impl App {
             _ => {}
         }
 
-        self.events.insert(0, entry_from_event(&event));
+        let mut entry = entry_from_event(&event);
+        self.event_seq += 1;
+        entry.seq = self.event_seq;
+        self.events.insert(0, entry);
         self.events.truncate(MAX_EVENTS);
     }
 
@@ -422,6 +432,34 @@ mod tests {
         );
         a.apply_event(json!({"type": "mode_changed", "mode_id": "mode_night", "mode_name": "Night", "on": true}));
         assert_eq!(a.modes[0].state.as_ref().unwrap().attributes["on"], true);
+    }
+
+    #[test]
+    fn scene_device_state_reaches_the_scenes_tab() {
+        let mut a = signed_in(Role::Admin);
+        let mut sc = device("sc", "Evening");
+        sc.device_type = Some("scene".into());
+        a.devices.push(sc);
+        a.rebuild_scenes();
+        assert_eq!(a.scenes[0].active, None);
+        a.apply_event(json!({
+            "type": "device_state_changed", "device_id": "sc",
+            "current": {"active": true}, "changed": ["active"]
+        }));
+        assert_eq!(a.scenes[0].active, Some(true));
+    }
+
+    #[test]
+    fn event_rows_keep_their_ids_as_new_ones_arrive() {
+        let mut a = signed_in(Role::Admin);
+        for i in 0..250 {
+            a.apply_event(json!({"type": "rule_fired", "rule_name": format!("r{i}")}));
+        }
+        a.refresh_views();
+        let before = a.event_row_ids()[5].clone();
+        a.apply_event(json!({"type": "rule_fired", "rule_name": "new"}));
+        a.refresh_views();
+        assert_eq!(a.event_row_ids()[6], before);
     }
 
     #[test]

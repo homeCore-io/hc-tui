@@ -14,6 +14,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 // ── Private file helpers ────────────────────────────────────────────────────
 
@@ -123,11 +124,33 @@ impl CacheSnapshot {
 #[derive(Clone, Debug)]
 pub struct CacheStore {
     root: PathBuf,
+    /// Bumped by every session clear; a save queued before it is dropped.
+    session_gen: Arc<Mutex<u64>>,
+    /// Newest snapshot sequence written; an older one arriving late is
+    /// dropped so writes land in order.
+    snapshot_seq: Arc<Mutex<std::collections::HashMap<PathBuf, u64>>>,
+    /// Hands out snapshot sequence numbers in call order.
+    next_seq: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl CacheStore {
     pub fn new(root: PathBuf) -> Self {
-        Self { root }
+        Self {
+            root,
+            session_gen: Arc::new(Mutex::new(0)),
+            snapshot_seq: Arc::new(Mutex::new(Default::default())),
+            next_seq: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+        }
+    }
+
+    /// The sequence number for a snapshot about to be written.
+    pub fn next_snapshot_seq(&self) -> u64 {
+        self.next_seq
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub fn session_generation(&self) -> u64 {
+        *self.session_gen.lock().unwrap_or_else(|p| p.into_inner())
     }
 
     #[cfg(test)]
@@ -141,27 +164,44 @@ impl CacheStore {
 
     /// Write every section that is `Some`. Sections that are `None` (the
     /// call failed or was not made) keep whatever file is already there.
+    #[cfg(test)]
     pub fn save_sections(&self, username: &str, snap: &CacheSnapshot) -> Result<()> {
+        let seq = self.next_snapshot_seq();
+        self.save_sections_seq(username, snap, seq)
+    }
+
+    /// Write the sections of `snap`, except any file that a snapshot with
+    /// a higher `seq` already wrote. Writers are serialized, so files land
+    /// in the order the snapshots were taken.
+    pub fn save_sections_seq(&self, username: &str, snap: &CacheSnapshot, seq: u64) -> Result<()> {
+        let mut written = self.snapshot_seq.lock().unwrap_or_else(|p| p.into_inner());
         let dir = self.user_dir(username);
         ensure_private_dir(&dir)
             .with_context(|| format!("creating cache directory {}", dir.display()))?;
-        fn put<T: Serialize>(dir: &Path, name: &str, v: &Option<T>) -> Result<()> {
-            if let Some(v) = v {
-                let bytes = serde_json::to_vec_pretty(v)?;
-                let path = dir.join(name);
-                write_private(&path, &bytes)
-                    .with_context(|| format!("writing cache file {}", path.display()))?;
+        let mut put = |name: &str, v: Option<Vec<u8>>| -> Result<()> {
+            let Some(bytes) = v else { return Ok(()) };
+            let path = dir.join(name);
+            if written.get(&path).is_some_and(|last| *last > seq) {
+                return Ok(());
             }
+            write_private(&path, &bytes)
+                .with_context(|| format!("writing cache file {}", path.display()))?;
+            written.insert(path, seq);
             Ok(())
+        };
+        fn ser<T: Serialize>(v: &Option<T>) -> Result<Option<Vec<u8>>> {
+            v.as_ref()
+                .map(|v| serde_json::to_vec_pretty(v).map_err(Into::into))
+                .transpose()
         }
-        put(&dir, "devices.json", &snap.devices)?;
-        put(&dir, "native_scenes.json", &snap.scenes)?;
-        put(&dir, "areas.json", &snap.areas)?;
-        put(&dir, "rules.json", &snap.rules)?;
-        put(&dir, "events.json", &snap.events)?;
-        put(&dir, "users.json", &snap.users)?;
-        put(&dir, "plugins.json", &snap.plugins)?;
-        put(&dir, "modes.json", &snap.modes)?;
+        put("devices.json", ser(&snap.devices)?)?;
+        put("native_scenes.json", ser(&snap.scenes)?)?;
+        put("areas.json", ser(&snap.areas)?)?;
+        put("rules.json", ser(&snap.rules)?)?;
+        put("events.json", ser(&snap.events)?)?;
+        put("users.json", ser(&snap.users)?)?;
+        put("plugins.json", ser(&snap.plugins)?)?;
+        put("modes.json", ser(&snap.modes)?)?;
         Ok(())
     }
 
@@ -185,6 +225,15 @@ impl CacheStore {
         }
     }
 
+    /// Save the session unless it was cleared since `generation` was read.
+    pub fn save_session_if(&self, session: &SavedSession, generation: u64) -> Result<()> {
+        let g = self.session_gen.lock().unwrap_or_else(|p| p.into_inner());
+        if *g != generation {
+            return Ok(());
+        }
+        self.save_session(session)
+    }
+
     pub fn save_session(&self, session: &SavedSession) -> Result<()> {
         let bytes = serde_json::to_vec_pretty(session)?;
         let path = self.root.join("session.json");
@@ -197,6 +246,8 @@ impl CacheStore {
     }
 
     pub fn clear_session(&self) -> Result<()> {
+        let mut g = self.session_gen.lock().unwrap_or_else(|p| p.into_inner());
+        *g += 1;
         let path = self.root.join("session.json");
         if path.exists() {
             std::fs::remove_file(&path)?;
@@ -205,16 +256,18 @@ impl CacheStore {
     }
 }
 
+/// A file-name-safe form of `name` that never maps two names to one:
+/// letters, digits, `-` and `_` stay, every other byte becomes `%XX`.
 fn sanitize_component(name: &str) -> String {
-    name.chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
-                ch
-            } else {
-                '_'
-            }
-        })
-        .collect()
+    let mut out = String::with_capacity(name.len());
+    for b in name.bytes() {
+        if b.is_ascii_alphanumeric() || b == b'-' || b == b'_' {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -324,6 +377,45 @@ mod tests {
         assert!(got.iter().all(|b| *b == got[0]), "one writer's bytes only");
         assert_eq!(got.len(), 1000 * (got[0] - b'a' + 1) as usize);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn user_dirs_never_collide() {
+        assert_ne!(sanitize_component("a.b"), sanitize_component("a_b"));
+        assert_eq!(sanitize_component("admin"), "admin");
+    }
+
+    #[test]
+    fn a_cleared_session_is_not_rewritten_by_a_late_save() {
+        let store = CacheStore::new(temp_dir("gen"));
+        let s = SavedSession {
+            username: "me".into(),
+            token: "t".into(),
+            refresh_token: None,
+            expires_at: None,
+        };
+        let gen_before = store.session_generation();
+        store.clear_session().unwrap();
+        store.save_session_if(&s, gen_before).unwrap();
+        assert!(store.load_session().is_none());
+        store
+            .save_session_if(&s, store.session_generation())
+            .unwrap();
+        assert!(store.load_session().is_some());
+        let _ = std::fs::remove_dir_all(store.root());
+    }
+
+    #[test]
+    fn older_snapshots_do_not_land_after_newer_ones() {
+        let store = CacheStore::new(temp_dir("seq"));
+        let snap = |n: usize| CacheSnapshot {
+            rules: Some((0..n).map(|i| rule(&i.to_string())).collect()),
+            ..Default::default()
+        };
+        store.save_sections_seq("me", &snap(2), 2).unwrap();
+        store.save_sections_seq("me", &snap(1), 1).unwrap();
+        assert_eq!(store.load_snapshot("me").rules.unwrap().len(), 2);
+        let _ = std::fs::remove_dir_all(store.root());
     }
 
     #[test]
