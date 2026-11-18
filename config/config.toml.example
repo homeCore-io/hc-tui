@@ -1,22 +1,24 @@
 # homeCore TUI configuration
-# Copy this file to config/config.toml and fill in your values.
-# config/config.toml is gitignored — it may contain credentials.
+# Copy this file to ~/.config/hc-tui/config.toml (or $XDG_CONFIG_HOME/hc-tui)
+# and fill in your values. ./config/config.toml is still read when it is
+# the only config. It may contain credentials: keep it private.
 
 [server]
 # homeCore API base URL (without /api/v1)
 base_url = "http://127.0.0.1:8080"
 
 [cache]
-# Directory for local state snapshots and session token
-dir = "./cache"
+# Directory for local state snapshots and the saved session.
+# Defaults to ~/.cache/hc-tui (or $XDG_CACHE_HOME/hc-tui).
+# dir = "./cache"
 
 [session]
-# Save the JWT to disk after login and reuse it on the next startup.
-# While the token is valid the login screen is skipped entirely.
+# Save the session after login and reuse it on the next startup, refreshing
+# it as needed. While it is valid the login screen is skipped.
 # Set to false to require credentials on every startup.
 persist_token = true
 
-# Optional: log in automatically when the saved token is missing or expired.
+# Optional: log in automatically when there is no usable saved session.
 # Remove this section to show the login screen instead.
 # [auto_login]
 # username = "admin"

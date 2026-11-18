@@ -12,93 +12,114 @@ It is built with:
 
 ## What It Supports
 
-- Login using homeCore JWT auth (`/api/v1/auth/login`)
-- Role-aware UI:
-  - `user` / `read_only`: devices, scenes, areas, automations, events
-  - `admin`: all of the above + users + plugins
-- Device control:
-  - Toggle selected device `on` state
-  - Toggle selected media players between play and stop, with pause fallback
-  - Dedicated `Media Players` sub-tab with generic transport, volume, mute, progress, and metadata
-  - View and edit device `canonical_name` alongside name and area
-- Scene control:
-  - Activate selected scene
-- Data views:
-  - Devices
-  - Scenes
-  - Areas
-  - Automations
-  - Events
-  - Users (admin)
-  - Plugins (admin)
-  - Manage > Matter (admin)
-    - Commission
-    - List commissioned nodes
-    - Reinterview selected node
-    - Remove selected node
-- Live updates:
-  - Connects to `/api/v1/events/stream?token=...` via WebSocket
-  - Applies device state/availability/name changes in real time
-  - Device search matches display names, raw `device_id`, and `canonical_name`
+- Login with homeCore auth (`/api/v1/auth/login`). The session (access
+  token, refresh token and expiry) is saved and refreshed before it
+  expires; when it can no longer be refreshed the TUI returns to the
+  login screen. `L` logs out (`/api/v1/auth/logout`).
+- Role-aware UI. The Plugins tab shows for roles with `plugins:read`
+  (admin, observer, device operator, rule editor); actions that need the
+  admin role stay admin-only.
+- Device control: on/off, brightness (`brightness_pct`), locks, and a
+  Media Players sub-tab with generic transport, volume, mute, progress
+  and metadata.
+- Device editing: name (a person's rename; empty restores the plugin's
+  name), room and canonical name. Only changed fields are sent.
+- Scenes: homeCore scenes and scene devices (`device_type: "scene"`).
+- Areas, rules (detail view with RON and fire history, groups, bulk
+  enable/disable), plugins (overview, actions, streaming actions,
+  recent events), and Manage: modes, Matter, system status, users, logs,
+  events, audit and backup.
+- Temperatures are shown in the unit set on homeCore
+  (`/system/status` `temperature_unit`); values on the bus are °C.
+- Live updates over `/api/v1/events/stream`: devices, rooms, scenes,
+  rules, modes and plugin status update in place. The stream reconnects
+  with backoff (1s to 30s) and resyncs after a reconnect or a `lagged`
+  notice.
+- Every destructive action asks for `y` first.
 
 ## Run
 
 ```bash
-cargo run -- --base-url http://127.0.0.1:8080 --cache-dir ./cache
+cargo run -- --base-url http://127.0.0.1:8080
 ```
 
 `--base-url` should point to the homeCore server root (without `/api/v1`).
-`--cache-dir` stores local JSON cache snapshots per user.
+
+Files:
+- Config: `--config`, else `$XDG_CONFIG_HOME/hc-tui/config.toml`
+  (`~/.config/hc-tui/config.toml`), else `./config/config.toml` when only
+  that exists. See `config/config.toml.example`.
+- Cache: `--cache-dir`, else `[cache] dir` from the config, else
+  `$XDG_CACHE_HOME/hc-tui` (`~/.cache/hc-tui`).
+- Backups and exports go to `~/.homecore/exports`; imports are read from
+  `~/.homecore/imports`.
+
+Directories the TUI creates are 0700 and files 0600.
 
 ## Caching Behavior
 
-- On login, the TUI loads cached state/config first (if present), then syncs from homeCore.
-- Manual refresh (`r`) pulls fresh data and updates cache files.
-- Device/scene actions sync and re-cache after completion.
-- There is no background auto-refresh loop while navigating selections.
-- Real-time device status comes from WebSocket events. If the stream drops, the TUI auto-reconnects.
-- The terminal redraw path is event-driven during normal use, so idle screens should not continuously repaint or burn CPU. The login screen still animates while an authentication/sync is in progress.
-- The live log WebSocket is opened only when the `Manage > Logs` panel is actually used.
+- After sign-in the TUI shows cached data at once and syncs in the
+  background. A spinner in the status bar shows work in flight.
+- Every call of a sync runs at once and succeeds or fails on its own.
+  Failures are named in the status bar, and only data from calls that
+  succeeded is written to the cache, so a failed call never replaces
+  good cached data.
+- `r` syncs again. Live changes come from the WebSocket.
+- The log WebSocket is open only while Manage > Logs is on screen.
 
 ## Key Bindings
 
-- Login screen:
-  - `Tab` switch field
-  - `Enter` submit login
-  - `Esc` quit
+- Everywhere: `Ctrl+C` quits.
+- Login screen: `Tab` switch field, `Enter` sign in, `Esc` quit.
 - Main UI:
-  - `Tab` / `Shift+Tab` switch tabs
-  - `j` / `k` or `Down` / `Up` move selection
-  - `r` refresh data
-  - `q` quit
-  - `t` toggle selected device (Devices tab)
-    - switches/lights: on/off
-    - media players: play/stop, or pause when stop is unsupported
-  - `p` play/pause, `x` stop, `n` next, `b` previous, `+`/`-` volume, `m` mute (Devices > Media Players)
-  - `e` edit selected device metadata including canonical name (Devices tab, admin)
-  - `a` activate selected scene (Scenes tab)
-
-- Manage > Matter (admin):
-  - `c` open commission form (pairing code, optional name/room/discriminator/passcode)
-  - `r` refresh node inventory
-  - `i` request reinterview for selected node
-  - `d` request removal for selected node
+  - `Tab` / `Shift+Tab` or `1`-`9` switch tabs
+  - `j` / `k` or `Down` / `Up` move
+  - `r` refresh, `q` quit, `T` local/UTC time, `L` log out
+- Devices: `◄/►` All / Media Players, `Space`/`t` toggle, `+`/`-`
+  brightness, `l`/`u` lock/unlock, `v` grouped/flat, `f` filter, `s` sort,
+  `/` search, `Enter` edit, `d` delete
+- Media Players: `Space`/`t` play-stop, `p` play/pause, `x` stop, `n` next,
+  `b` previous, `+`/`-` volume, `m` mute, `Enter` edit
+- Scenes: `a` or `Enter` activate
+- Areas: `◄/►` pane, `n` new, `Enter` open / rename, `Space` mark device,
+  `+`/`-` add/remove marked devices, `d` delete area
+- Rules: `Enter` detail, `e`/`d` enable/disable (marked rules when any),
+  `Space` mark, `c` clone, `x` delete, `h` history, `f` filter, `s` stale
+  only, `g` groups
+- Plugins: `Enter` detail (`1`-`3` or `◄/►` panels, `Enter` run action),
+  `d` uninstall (admin)
+- Manage: `◄/►` panel, `g` create a helper
+  - Modes: `n` new, `d` delete
+  - Matter: `c` commission, `i` reinterview, `d` remove
+  - Users: `n` new, `Enter` change role, `p` change your password, `d`
+    delete
+  - Logs: `p`/`Space` pause, `e`/`w`/`i`/`d` level, `/` filter, `c` clear
+  - Events: `f` cycle event type filter
+  - Audit: `n`/`p` page, `Enter` detail
+  - Backup: `Enter` run
 
 ## homeCore API Integration
 
-This client targets the existing endpoints in `homeCore`:
-- `POST /api/v1/auth/login`
-- `GET /api/v1/auth/me`
-- `GET /api/v1/devices`
-- `PATCH /api/v1/devices/{id}/state`
-- `GET /api/v1/scenes`
-- `POST /api/v1/scenes/{id}/activate`
-- `GET /api/v1/areas`
-- `GET /api/v1/automations`
-- `GET /api/v1/events?limit=...`
-- `GET /api/v1/auth/users` (admin)
-- `GET /api/v1/plugins` (admin)
-- `POST /api/v1/plugins/matter/commission` (admin)
-- `GET /api/v1/plugins/matter/nodes` (admin)
-- `POST /api/v1/plugins/matter/reinterview` (admin)
-- `DELETE /api/v1/plugins/matter/nodes/{id}` (admin)
+This client uses:
+- `POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout`,
+  `GET /auth/me`, `POST /auth/change-password`
+- `GET /devices`, `PATCH /devices/{id}`, `PATCH /devices/{id}/state`,
+  `DELETE /devices/{id}`
+- `GET /scenes`, `POST /scenes/{id}/activate`, `/scenes/export|import`
+- `GET|POST /areas`, `PATCH|DELETE /areas/{id}`, `PUT /areas/{id}/devices`
+- `GET /automations` and `/automations/{id}` (`PATCH`, `DELETE`,
+  `/clone`, `/history`, `/ron`), `PATCH /automations`,
+  `/automations/groups`, `/automations/export|import`
+- `GET /events`, `GET /events/stream` (WebSocket), `GET /logs/stream`
+  (WebSocket, admin)
+- `GET /system/status`, `POST /system/backup`, `GET /audit`
+- `GET|POST /modes`, `DELETE /modes/{id}`, `POST /glue`
+- `GET|POST /auth/users`, `DELETE /auth/users/{id}`,
+  `PATCH /auth/users/{id}/role` (admin)
+- `GET /plugins`, `DELETE /plugins/{id}`, `GET /plugins/{id}/capabilities`,
+  `POST /plugins/{id}/command`, `GET /plugins/{id}/command/{rid}/stream`
+  (SSE)
+- `GET /plugins/matter/nodes`, `POST /plugins/matter/commission`,
+  `POST /plugins/matter/reinterview`, `DELETE /plugins/matter/nodes/{id}`
+
+All paths are under `/api/v1`.
