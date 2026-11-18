@@ -273,13 +273,8 @@ pub fn modal_hints(app: &App) -> Option<Vec<&'static str>> {
             "Esc cancel",
         ]);
     }
-    if app.manage.glue_creator.is_some() {
-        return Some(vec![
-            "Tab field",
-            "Space type",
-            "Enter create",
-            "Esc cancel",
-        ]);
+    if let Some(h) = super::helpers::modal_hints(app).or_else(|| super::rules::modal_hints(app)) {
+        return Some(h);
     }
     if app.manage.mode_editor.is_some() {
         return Some(vec![

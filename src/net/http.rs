@@ -291,12 +291,12 @@ impl HomeCoreClient {
         Ok(retry)
     }
 
-    async fn get_json<T: for<'a> Deserialize<'a>>(&self, path: &str) -> Result<T> {
+    pub(crate) async fn get_json<T: for<'a> Deserialize<'a>>(&self, path: &str) -> Result<T> {
         let resp = self.request(Method::GET, path, None).await?;
         parse_json(path, resp).await
     }
 
-    async fn send_json<T: for<'a> Deserialize<'a>>(
+    pub(crate) async fn send_json<T: for<'a> Deserialize<'a>>(
         &self,
         method: Method,
         path: &str,
@@ -306,7 +306,12 @@ impl HomeCoreClient {
         parse_json(path, resp).await
     }
 
-    async fn send_empty(&self, method: Method, path: &str, body: Option<Value>) -> Result<()> {
+    pub(crate) async fn send_empty(
+        &self,
+        method: Method,
+        path: &str,
+        body: Option<Value>,
+    ) -> Result<()> {
         let resp = self.request(method, path, body.as_ref()).await?;
         check_status(resp).await.map(|_| ())
     }

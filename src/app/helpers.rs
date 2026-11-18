@@ -1,10 +1,10 @@
-//! Helpers (homeCore's own devices: switches, timers, counters...),
-//! Alerts, and the one main action every device-like thing has, shared
-//! by Home, Devices, Helpers and Modes.
+//! Helpers (homeCore's own devices: switches, timers, counters...) and
+//! the one main action every device-like thing has, shared by Home,
+//! Devices, Helpers and Modes.
 
 use super::App;
 use super::home::{is_helper, is_mode_device};
-use crate::model::Alert;
+
 use crate::screens::ScreenId;
 use crate::text::matches_query;
 use serde_json::{Value, json};
@@ -29,18 +29,6 @@ pub fn helper_action(d: &crate::model::DeviceState) -> Option<(Value, &'static s
         "select" => (json!({ "action": "next" }), "next option"),
         _ => return None,
     })
-}
-
-/// The footer words for a helper's Space.
-pub fn helper_action_hint(device_type: &str) -> &'static str {
-    match device_type {
-        "switch" => "Space toggle",
-        "timer" => "Space start or pause",
-        "counter" | "number" => "Space up one",
-        "button" => "Space press",
-        "select" => "Space next option",
-        _ => "-",
-    }
 }
 
 impl App {
@@ -88,10 +76,6 @@ impl App {
         if let Some(id) = self.selected_helper().map(|d| d.device_id.clone()) {
             self.device_main_action(&id);
         }
-    }
-
-    pub fn open_helper_creator(&mut self) {
-        self.manage.glue_creator = Some(super::editors::GlueCreator::default());
     }
 
     // ── One main action ──────────────────────────────────────────────────
@@ -156,54 +140,6 @@ impl App {
             format!("{name} {word}"),
         );
     }
-
-    // ── Alerts ───────────────────────────────────────────────────────────
-
-    /// Open alerts: the sidebar badge.
-    pub fn open_alerts(&self) -> usize {
-        self.alerts.iter().filter(|a| a.is_open()).count()
-    }
-
-    pub(crate) fn compute_alert_view(&mut self) {
-        let q = self.query(ScreenId::Alerts).to_string();
-        let mut idx: Vec<usize> = (0..self.alerts.len())
-            .filter(|&i| matches_query(&q, &[&self.alerts[i].message]))
-            .collect();
-        // Open first, then newest.
-        idx.sort_by(|&a, &b| {
-            let (x, y) = (&self.alerts[a], &self.alerts[b]);
-            y.is_open()
-                .cmp(&x.is_open())
-                .then(y.raised_at.cmp(&x.raised_at))
-        });
-        self.views.alerts = idx;
-    }
-
-    pub(crate) fn alert_view_ids(&self) -> Vec<String> {
-        self.views
-            .alerts
-            .iter()
-            .filter_map(|&i| self.alerts.get(i))
-            .map(|a| a.id.clone())
-            .collect()
-    }
-
-    pub fn visible_alerts(&self) -> impl Iterator<Item = &Alert> {
-        self.views.alerts.iter().filter_map(|&i| self.alerts.get(i))
-    }
-
-    pub fn move_alert(&mut self, delta: isize) {
-        let ids = self.alert_view_ids();
-        self.alerts_sel.move_by(delta, &ids);
-    }
-
-    /// A live `alert_raised` or `alert_acknowledged`.
-    pub(crate) fn upsert_alert(&mut self, alert: Alert) {
-        match self.alerts.iter_mut().find(|a| a.id == alert.id) {
-            Some(a) => *a = alert,
-            None => self.alerts.push(alert),
-        }
-    }
 }
 
 #[cfg(test)]
@@ -241,18 +177,5 @@ mod tests {
         );
         assert_eq!(a("button", json!({})), Some(json!({"action": "press"})));
         assert_eq!(a("text", json!({})), None);
-    }
-
-    #[test]
-    fn open_alerts_skip_acknowledged_ones() {
-        let mut a = signed_in(crate::model::Role::Admin);
-        a.alerts = vec![
-            serde_json::from_value(json!({"id": "1", "message": "Door open"})).unwrap(),
-            serde_json::from_value(
-                json!({"id": "2", "message": "Low", "acknowledged": {"by": "x"}}),
-            )
-            .unwrap(),
-        ];
-        assert_eq!(a.open_alerts(), 1);
     }
 }

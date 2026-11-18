@@ -215,7 +215,9 @@ impl App {
                         None => self.rules.push(rule),
                     }
                 }
+                self.on_rule_event("rule_changed", &event);
             }
+            "rule_fired" => self.on_rule_event("rule_fired", &event),
             "rule_removed" => {
                 if let Some(id) = s(&event, "rule_id") {
                     self.rules.retain(|r| r.id != id);

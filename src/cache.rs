@@ -294,6 +294,8 @@ mod tests {
             error: None,
             trigger: None,
             triggers: vec![],
+            conditions: vec![],
+            actions: vec![],
         }
     }
 

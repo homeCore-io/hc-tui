@@ -8,12 +8,6 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::collections::HashSet;
 
 #[derive(Debug)]
-pub struct HistoryPane {
-    pub rule_id: String,
-    pub items: Load<Vec<RuleFiring>>,
-}
-
-#[derive(Debug)]
 pub struct RuleDetail {
     pub rule_id: String,
     pub ron: Load<String>,
@@ -36,9 +30,11 @@ pub struct RulesTab {
     /// Rules marked with Space for bulk enable/disable.
     pub marked: HashSet<String>,
     pub sel: ListSel,
-    pub history: Option<HistoryPane>,
     pub detail: Option<RuleDetail>,
     pub groups: Option<GroupsOverlay>,
+    /// Runs, paused ones, missing devices, groups, a dry run and the
+    /// device picker: see `automations.rs`.
+    pub extra: super::automations::AutomationsExtra,
 }
 
 /// Whether `rule` passes the tag / trigger / stale filters. The trigger
@@ -47,7 +43,7 @@ pub fn rule_matches(tab: &RulesTab, rule: &Rule, query: &str) -> bool {
     if !crate::text::matches_query(query, &[&rule.name, &rule.tags.join(" ")]) {
         return false;
     }
-    if tab.filter_stale && rule.error.is_none() {
+    if tab.filter_stale && !tab.extra.needs_fixing(rule) {
         return false;
     }
     if !tab.filter_tag.is_empty() && !rule.tags.iter().any(|t| t.contains(&tab.filter_tag)) {
@@ -68,6 +64,7 @@ pub fn rule_matches(tab: &RulesTab, rule: &Rule, query: &str) -> bool {
 
 impl App {
     pub(crate) fn compute_rule_view(&mut self) {
+        self.compute_missing();
         let q = self
             .query(crate::screens::ScreenId::Automations)
             .to_string();
@@ -128,12 +125,8 @@ impl App {
         };
     }
 
-    /// Esc on the list: close Recent runs, then clear the marks.
+    /// Esc on the list: clear the marks.
     pub fn rules_back(&mut self) -> bool {
-        if self.rules_tab.history.is_some() {
-            self.rules_tab.history = None;
-            return true;
-        }
         if self.bulk() {
             self.rules_tab.marked.clear();
             self.status = "Marks cleared".to_string();
@@ -309,33 +302,6 @@ impl App {
                 app.rules_tab.marked.remove(&id);
                 app.status = format!("Deleted {name}");
                 app.save_cache(&[Section::Rules]);
-            },
-        );
-    }
-
-    // ── Recent runs pane ─────────────────────────────────────────────────
-
-    pub fn open_recent_runs(&mut self) {
-        let Some(id) = self.selected_rule().map(|r| r.id.clone()) else {
-            return;
-        };
-        self.rules_tab.history = Some(HistoryPane {
-            rule_id: id.clone(),
-            items: Load::Loading,
-        });
-        let c = self.client.clone();
-        let want = id.clone();
-        self.spawn(
-            async move { c.get_rule_history(&want).await },
-            move |app, res| {
-                if let Some(h) = app.rules_tab.history.as_mut()
-                    && h.rule_id == id
-                {
-                    h.items = match res {
-                        Ok(v) => Load::Ready(newest_first(v)),
-                        Err(e) => Load::Failed(e.to_string()),
-                    };
-                }
             },
         );
     }

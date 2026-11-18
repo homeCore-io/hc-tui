@@ -46,12 +46,27 @@ It is built with:
 - Scenes: homeCore scenes and scene devices (`device_type: "scene"`).
 - Modes: Space turns a manual mode on or off; solar modes follow the
   sun.
-- Helpers: homeCore's own switches, timers, counters and the rest, with
-  Space for each type's main action and `n` to make one.
-- Alerts: the open and acknowledged alerts from `GET /alerts`, kept live
-  from the event stream.
-- Automations: detail view with RON and Recent runs, groups, marking
-  several to switch at once.
+- Helpers: every kind of helper core has (switch, timer, counter,
+  number, select, text, button, date and time, group, threshold,
+  schedule) with its state and its keys. Running timers count down
+  live. `n` makes one (a kind, then that kind's settings), `Enter`
+  changes its name and settings (`PATCH /glue/{id}` sends only what
+  changed), `x` deletes it and names the automations that use it.
+- Alerts: Open, Acknowledged, Rules and Ignored. The selected alert
+  shows where it came from (its alert rule and where that rule tells,
+  or the plugin) and what can be done: acknowledge, press its button,
+  ignore its device. Alert rules can be turned on or off and deleted;
+  making them is left to the app. Kept live from the event stream,
+  with the open count on the sidebar.
+- Automations: what starts each one in words (`sunset -15m`,
+  `Garage Door open 10m`, `time 17:00`), its last run and group, a mark
+  for one another rule paused (‖) and for one that needs fixing (!,
+  naming the missing device). The selected one shows When / If / Then
+  and its last 20 runs with how each went. Run now, a dry run at a time
+  (nothing is sent), resume a paused one, send a missing device's place
+  to another device, the RON read only, groups, marking several to
+  switch at once. Automations are still written in the app or as RON
+  files.
 - Plugins: overview, actions, streaming actions and recent events. When
   the Matter plugin is installed, a Matter tab commissions, reinterviews
   and removes nodes.
@@ -139,12 +154,25 @@ Screens:
   next, `b` previous, `+`/`-` volume, `m` mute, `Enter` edit, `x` remove.
 - Scenes: `Space` (or `a`) activate.
 - Modes: `Space` mode on/off, `n` new, `x` delete.
-- Helpers: `Space` main action, `n` new helper.
+- Helpers: `Space` the kind's main action (toggle, start or pause,
+  up one, press, next choice), `n` new helper, `Enter` edit, `x`
+  delete. A timer adds `0` cancel; a counter `+` up, `-` down, `0`
+  reset; a number `←`/`→` a step and `s` set to; a select `←`/`→` the
+  previous or next choice; text and date and time `s` set. In the
+  editor: `Tab` field, `Space` or `←`/`→` change a choice, `Enter`
+  save, `Esc` cancel.
 - Automations: `Space` on/off (the marked ones when any are marked),
-  `Enter` detail, `h` Recent runs, `m` mark, `c` copy, `x` delete, `g`
-  groups (`+`/`-` on and off, `x` delete), `f` filter, `s` only those
-  that need fixing. In the detail: `j`/`k` scroll, `r` refresh, `Esc`
+  `R` run now (asks first), `t` test at a time (`22:30`,
+  `2026-11-18T07:00`, or nothing for now; a dry run), `u` resume one
+  another rule paused, `F` send a missing device's place to another
+  device (type to search, `Tab` the next missing one), `Enter` the RON,
+  `m` mark, `c` copy, `x` delete, `g` groups (`+`/`-` on and off, `x`
+  delete), `f` filter, `s` only those that need fixing. In the RON:
+  `j`/`k` scroll, `r` refresh, `R`, `t`, `u` and `F` as above, `Esc`
   back.
+- Alerts: `←`/`→` Open, Acknowledged, Rules, Ignored. On an alert: `a`
+  acknowledge, `p` run its action, `i` ignore its device. Rules:
+  `Space` on/off, `x` delete. Ignored: `x` show them again.
 - Plugins: `Enter` detail (`←/→` panels, `Enter` runs an action), `x`
   uninstall (admin), `←/→` Matter when installed (`c` commission, `i`
   reinterview, `x` remove a node).
@@ -182,10 +210,16 @@ This client uses:
 - `GET /scenes`, `POST /scenes/{id}/activate`, `/scenes/export|import`
 - `GET|POST /areas`, `PATCH|DELETE /areas/{id}`, `POST /areas/{id}/on`,
   `POST /areas/{id}/off`
-- `GET /alerts`
+- `GET /alerts`, `POST /alerts/{id}/acknowledge`,
+  `POST /alerts/{id}/press`, `GET /alert-rules`,
+  `PUT|DELETE /alert-rules/{id}` (`?automations=disable`),
+  `GET|POST /alert-ignores`, `DELETE /alert-ignores/{id}`
 - `GET /automations` and `/automations/{id}` (`PATCH`, `DELETE`,
-  `/clone`, `/history`, `/ron`), `PATCH /automations`,
-  `/automations/groups`, `/automations/export|import`
+  `/clone`, `/history`, `/ron`, `POST /run`, `POST /test?at=`,
+  `DELETE /pause`), `PATCH /automations`, `/automations/groups`,
+  `/automations/export|import`, `GET /automations/paused`,
+  `GET /automations/stale-refs`, `POST /automations/repoint`,
+  `GET /devices/removed` (names of devices a rule still names)
 - `GET /events`, `GET /events/stream` (WebSocket), `GET /logs/stream`
   (WebSocket, admin)
 - `GET /system/status`, `POST /system/backup`, `GET /audit`
@@ -198,8 +232,9 @@ This client uses:
 - `GET /auth/roles`, `GET|POST /auth/api-keys`,
   `DELETE /auth/api-keys/{id}`, `POST /auth/api-keys/{id}/rotate`,
   `GET /auth/sessions`, `DELETE /auth/sessions/{id}`
-- `GET|POST /modes`, `DELETE /modes/{id}`, `POST /glue`; manual modes
-  and helpers are switched with `PATCH /devices/{id}/state`
+- `GET|POST /modes`, `DELETE /modes/{id}`, `POST /glue`,
+  `PATCH|DELETE /glue/{id}`; manual modes and helpers are switched with
+  `PATCH /devices/{id}/state` (`{"action": ...}` for a helper)
 - `GET|POST /auth/users`, `DELETE /auth/users/{id}`,
   `PATCH /auth/users/{id}/role`, `PATCH /auth/users/{id}/password`,
   `DELETE /auth/users/{id}/pin` (admin)
