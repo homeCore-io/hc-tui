@@ -45,12 +45,13 @@ pub fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     {
         ensure_private_dir(parent)?;
     }
-    let tmp = path.with_extension(format!(
-        "{}tmp",
-        path.extension()
-            .map(|e| format!("{}.", e.to_string_lossy()))
-            .unwrap_or_default()
-    ));
+    // A unique temporary name, so two writers of the same file never
+    // share one.
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let mut tmp_name = path.file_name().unwrap_or_default().to_os_string();
+    tmp_name.push(format!(".{}.{n}.tmp", std::process::id()));
+    let tmp = path.with_file_name(tmp_name);
     {
         let mut opts = std::fs::OpenOptions::new();
         opts.write(true).create(true).truncate(true);
@@ -154,7 +155,7 @@ impl CacheStore {
             Ok(())
         }
         put(&dir, "devices.json", &snap.devices)?;
-        put(&dir, "scenes.json", &snap.scenes)?;
+        put(&dir, "native_scenes.json", &snap.scenes)?;
         put(&dir, "areas.json", &snap.areas)?;
         put(&dir, "rules.json", &snap.rules)?;
         put(&dir, "events.json", &snap.events)?;
@@ -174,7 +175,7 @@ impl CacheStore {
         }
         CacheSnapshot {
             devices: get(&dir, "devices.json"),
-            scenes: get(&dir, "scenes.json"),
+            scenes: get(&dir, "native_scenes.json"),
             areas: get(&dir, "areas.json"),
             rules: get(&dir, "rules.json"),
             events: get(&dir, "events.json"),
@@ -301,6 +302,28 @@ mod tests {
         assert_eq!(mode(&store.root().join("me")), 0o700);
         assert_eq!(mode(&store.root().join("me").join("rules.json")), 0o600);
         let _ = std::fs::remove_dir_all(store.root());
+    }
+
+    #[test]
+    fn concurrent_writes_never_mix() {
+        let dir = temp_dir("race");
+        let path = dir.join("f.json");
+        let handles: Vec<_> = (0..8)
+            .map(|i| {
+                let path = path.clone();
+                std::thread::spawn(move || {
+                    let body = vec![b'a' + i as u8; 1000 * (i + 1)];
+                    write_private(&path, &body).unwrap();
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+        let got = std::fs::read(&path).unwrap();
+        assert!(got.iter().all(|b| *b == got[0]), "one writer's bytes only");
+        assert_eq!(got.len(), 1000 * (got[0] - b'a' + 1) as usize);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
