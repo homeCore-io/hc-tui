@@ -6,7 +6,7 @@
 //! is left untouched.
 
 use crate::model::{
-    Area, DeviceState, ModeRecord, PluginRecord, Rule, Scene, SystemStatus, UserInfo,
+    Alert, Area, DeviceState, ModeRecord, PluginRecord, Rule, Scene, SystemStatus, UserInfo,
 };
 use crate::net::HomeCoreClient;
 use anyhow::Result;
@@ -32,6 +32,7 @@ pub struct SyncReport {
     pub events: Part<Vec<Value>>,
     pub modes: Part<Vec<ModeRecord>>,
     pub status: Part<SystemStatus>,
+    pub alerts: Part<Vec<Alert>>,
     /// `None` when the plan skipped the call.
     pub users: Option<Part<Vec<UserInfo>>>,
     pub plugins: Option<Part<Vec<PluginRecord>>>,
@@ -58,6 +59,7 @@ impl SyncReport {
         check("events", self.events.as_ref().err());
         check("modes", self.modes.as_ref().err());
         check("status", self.status.as_ref().err());
+        check("alerts", self.alerts.as_ref().err());
         check("users", self.users.as_ref().and_then(|r| r.as_ref().err()));
         check(
             "plugins",
@@ -75,7 +77,7 @@ impl SyncReport {
 }
 
 pub async fn run_sync(client: HomeCoreClient, plan: SyncPlan) -> SyncReport {
-    let (me, devices, scenes, areas, rules, events, modes, status, users, plugins) = tokio::join!(
+    let (me, devices, scenes, areas, rules, events, modes, status, alerts, users, plugins) = tokio::join!(
         client.me(),
         client.list_devices(),
         client.list_scenes(),
@@ -84,6 +86,7 @@ pub async fn run_sync(client: HomeCoreClient, plan: SyncPlan) -> SyncReport {
         client.list_events(50),
         client.list_modes(),
         client.get_system_status(),
+        client.list_alerts(),
         async {
             if plan.users {
                 Some(client.list_users().await)
@@ -108,6 +111,7 @@ pub async fn run_sync(client: HomeCoreClient, plan: SyncPlan) -> SyncReport {
         events: part(events),
         modes: part(modes),
         status: part(status),
+        alerts: part(alerts),
         users: users.map(part),
         plugins: plugins.map(part),
     }

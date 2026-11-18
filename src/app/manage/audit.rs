@@ -87,11 +87,11 @@ impl App {
                 a.expanded = if a.expanded == cur { None } else { cur };
             }
             // Only a full page can have a next page.
-            KeyCode::Char('n') if a.entries.len() >= a.limit as usize => {
+            KeyCode::Char(']') if a.entries.len() >= a.limit as usize => {
                 a.offset = a.offset.saturating_add(a.limit);
                 self.refresh_audit();
             }
-            KeyCode::Char('p') if a.offset > 0 => {
+            KeyCode::Char('[') if a.offset > 0 => {
                 a.offset = a.offset.saturating_sub(a.limit);
                 self.refresh_audit();
             }

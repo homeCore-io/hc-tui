@@ -6,39 +6,42 @@
 //! applied to the app on the main loop. The event loop in `main.rs`
 //! selects over terminal input, that channel and a tick timer.
 
-pub mod areas;
 pub mod devices;
 pub mod editors;
 pub mod events;
+pub mod helpers;
+pub mod home;
 pub mod manage;
 pub mod media;
 pub mod plugins;
+pub mod rooms;
 pub mod rules;
 pub mod selection;
 
 use crate::cache::{CacheSnapshot, CacheStore, SavedSession};
 use crate::config::AutoLoginConfig;
 use crate::model::{
-    Area, DeviceState, EventEntry, MatterNode, ModeRecord, PluginRecord, Rule, Scene, SystemStatus,
-    TempUnit, UserInfo, merge_scenes,
+    Alert, Area, DeviceState, EventEntry, MatterNode, ModeRecord, PluginRecord, Rule, Scene,
+    SystemStatus, TempUnit, UserInfo, merge_scenes,
 };
 use crate::net::sse::StreamMsg;
 use crate::net::ws::{LogMsg, WsMsg};
 use crate::net::{self, HomeCoreClient};
+use crate::screens::{self, ScreenId};
 use crate::sync::{SyncPlan, SyncReport};
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
 use zeroize::Zeroize;
 
-pub use areas::{AreasPane, AreasTab};
 pub use devices::{DeviceSubPanel, DeviceViewMode, DevicesTab};
 pub use editors::Confirm;
-pub use manage::{AdminSubPanel, ManageTab};
-pub use plugins::{PluginDetailPanel, PluginsTab, StreamingAction, StreamingStage};
+pub use manage::ManageTab;
+pub use plugins::{PluginDetailPanel, PluginsSub, PluginsTab, StreamingAction, StreamingStage};
+pub use rooms::RoomsTab;
 pub use rules::RulesTab;
 pub use selection::ListSel;
 
@@ -139,27 +142,13 @@ impl LoginState {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Tab {
-    Devices,
-    Scenes,
-    Areas,
-    Rules,
-    Plugins,
-    Manage,
-}
-
-impl Tab {
-    pub fn title(self) -> &'static str {
-        match self {
-            Self::Devices => "Devices",
-            Self::Scenes => "Scenes",
-            Self::Areas => "Areas",
-            Self::Rules => "Rules",
-            Self::Plugins => "Plugins",
-            Self::Manage => "Manage",
-        }
-    }
+/// The `/` search bar. What was typed is kept per screen in
+/// [`App::queries`] and filters that screen's list as you type.
+#[derive(Debug, Default)]
+pub struct SearchBar {
+    pub open: bool,
+    /// The query before `/` was pressed, for Esc.
+    pub before: String,
 }
 
 /// Cached data sections, for deciding what may be written to disk.
@@ -186,7 +175,13 @@ pub struct Views {
     pub media: Vec<usize>,
     pub rules: Vec<usize>,
     pub events: Vec<usize>,
-    pub area_devices: Vec<usize>,
+    pub rooms: Vec<usize>,
+    pub scenes: Vec<usize>,
+    pub modes: Vec<usize>,
+    pub helpers: Vec<usize>,
+    pub alerts: Vec<usize>,
+    pub plugins: Vec<usize>,
+    pub users: Vec<usize>,
 }
 
 pub struct App {
@@ -201,8 +196,18 @@ pub struct App {
     pub status: String,
     pub error: Option<String>,
     pub should_quit: bool,
-    pub tab: usize,
+    /// The screen on view.
+    pub screen: ScreenId,
+    /// Where Esc goes from a screen opened from Home or Rooms.
+    pub return_to: Option<ScreenId>,
+    /// The `?` key list.
+    pub help_open: bool,
+    pub search: SearchBar,
+    /// Each screen's `/` search text.
+    pub queries: HashMap<ScreenId, String>,
     pub time_utc: bool,
+    /// Where Home files live: `~/.config/hc-tui/home`.
+    pub home_dir: std::path::PathBuf,
 
     /// Requests in flight. Drives the spinner.
     pub pending: usize,
@@ -238,15 +243,19 @@ pub struct App {
     pub plugins: Vec<PluginRecord>,
     pub modes: Vec<ModeRecord>,
     pub matter_nodes: Vec<MatterNode>,
+    pub alerts: Vec<Alert>,
     pub system_status: Option<SystemStatus>,
     pub temp_unit: TempUnit,
 
     pub views: Views,
 
-    // Per-tab state.
+    // Per-screen state.
+    pub home: home::HomeState,
     pub devices_tab: DevicesTab,
     pub scenes_sel: ListSel,
-    pub areas_tab: AreasTab,
+    pub rooms: RoomsTab,
+    pub helpers_sel: ListSel,
+    pub alerts_sel: ListSel,
     pub rules_tab: RulesTab,
     pub plugins_tab: PluginsTab,
     pub manage: ManageTab,
@@ -269,8 +278,13 @@ impl App {
             status: "Enter credentials and press Enter".to_string(),
             error: None,
             should_quit: false,
-            tab: 0,
+            screen: ScreenId::Home,
+            return_to: None,
+            help_open: false,
+            search: SearchBar::default(),
+            queries: HashMap::new(),
             time_utc: false,
+            home_dir: crate::config::default_config_dir().join("home"),
             pending: 0,
             tick: 0,
             syncing: false,
@@ -292,12 +306,16 @@ impl App {
             plugins: Vec::new(),
             modes: Vec::new(),
             matter_nodes: Vec::new(),
+            alerts: Vec::new(),
             system_status: None,
             temp_unit: TempUnit::default(),
             views: Views::default(),
+            home: home::HomeState::default(),
             devices_tab: DevicesTab::default(),
             scenes_sel: ListSel::default(),
-            areas_tab: AreasTab::default(),
+            rooms: RoomsTab::default(),
+            helpers_sel: ListSel::default(),
+            alerts_sel: ListSel::default(),
             rules_tab: RulesTab::default(),
             plugins_tab: PluginsTab::default(),
             manage: ManageTab::default(),
@@ -386,7 +404,12 @@ impl App {
             || self.login.in_progress
             || self.syncing
             || self.plugins_tab.streaming.is_some()
-            || (self.authenticated && self.active_tab() == Tab::Devices && self.any_timer_running())
+            || (self.authenticated
+                && matches!(
+                    self.screen,
+                    ScreenId::Devices | ScreenId::Home | ScreenId::Helpers
+                )
+                && self.any_timer_running())
     }
 
     pub fn spinner(&self) -> &'static str {
@@ -414,18 +437,14 @@ impl App {
             .unwrap_or(false)
     }
 
-    pub fn tabs(&self) -> Vec<Tab> {
-        let mut tabs = vec![Tab::Devices, Tab::Scenes, Tab::Areas, Tab::Rules];
-        if self.can("plugins:read") {
-            tabs.push(Tab::Plugins);
-        }
-        tabs.push(Tab::Manage);
-        tabs
+    /// The screens this user can open, in sidebar order.
+    pub fn screens(&self) -> Vec<ScreenId> {
+        screens::visible_screens(self.current_user.as_ref())
     }
 
-    pub fn active_tab(&self) -> Tab {
-        let tabs = self.tabs();
-        tabs[self.tab.min(tabs.len().saturating_sub(1))]
+    /// The `/` text of `screen`.
+    pub fn query(&self, screen: ScreenId) -> &str {
+        self.queries.get(&screen).map(String::as_str).unwrap_or("")
     }
 
     fn sync_plan(&self) -> SyncPlan {
@@ -518,6 +537,8 @@ impl App {
         self.current_user = Some(user);
         self.saved_session_version = 0;
         self.persist_session_if_changed();
+        self.screen = ScreenId::Home;
+        self.load_home();
 
         let cached = self.cache.load_snapshot(&username);
         let had_cache = !cached.is_empty();
@@ -573,15 +594,23 @@ impl App {
         self.plugins.clear();
         self.modes.clear();
         self.matter_nodes.clear();
+        self.alerts.clear();
         self.system_status = None;
         self.views = Views::default();
+        self.home = home::HomeState::default();
         self.devices_tab = DevicesTab::default();
         self.scenes_sel = ListSel::default();
-        self.areas_tab = AreasTab::default();
+        self.rooms = RoomsTab::default();
+        self.helpers_sel = ListSel::default();
+        self.alerts_sel = ListSel::default();
         self.rules_tab = RulesTab::default();
         self.plugins_tab = PluginsTab::default();
         self.manage = ManageTab::default();
-        self.tab = 0;
+        self.screen = ScreenId::Home;
+        self.return_to = None;
+        self.help_open = false;
+        self.search = SearchBar::default();
+        self.queries.clear();
         self.status = "Enter credentials and press Enter".to_string();
     }
 
@@ -736,6 +765,9 @@ impl App {
         if let Ok(s) = report.status {
             self.set_system_status(s);
         }
+        if let Ok(v) = report.alerts {
+            self.alerts = v;
+        }
         if let Some(Ok(v)) = report.users {
             self.users = v;
             self.fresh.insert(Section::Users);
@@ -755,7 +787,7 @@ impl App {
             .collect();
         if errors.is_empty() {
             self.status = format!(
-                "Synced {} devices, {} rules, {} scenes",
+                "Synced {} devices, {} automations, {} scenes",
                 self.devices.len(),
                 self.rules.len(),
                 self.scenes.len()
@@ -875,7 +907,10 @@ impl App {
         self.compute_device_views();
         self.compute_rule_view();
         self.compute_event_view();
-        self.compute_area_views();
+        self.compute_room_view();
+        self.compute_helper_view();
+        self.compute_alert_view();
+        self.compute_simple_views();
         self.resolve_selections();
     }
 
@@ -885,27 +920,87 @@ impl App {
         self.update_log_stream();
     }
 
+    /// Scenes, modes, plugins and people: the `/` search only.
+    fn compute_simple_views(&mut self) {
+        use crate::text::matches_query;
+        let q = self.query(ScreenId::Scenes).to_string();
+        self.views.scenes = (0..self.scenes.len())
+            .filter(|&i| {
+                let s = &self.scenes[i];
+                matches_query(&q, &[&s.name, s.room.as_deref().unwrap_or("")])
+            })
+            .collect();
+        let q = self.query(ScreenId::Modes).to_string();
+        self.views.modes = (0..self.modes.len())
+            .filter(|&i| {
+                let m = &self.modes[i].config;
+                matches_query(&q, &[&m.name, &m.id, &m.kind])
+            })
+            .collect();
+        let q = self.query(ScreenId::Plugins).to_string();
+        self.views.plugins = (0..self.plugins.len())
+            .filter(|&i| matches_query(&q, &[&self.plugins[i].plugin_id]))
+            .collect();
+        let q = self.query(ScreenId::People).to_string();
+        self.views.users = (0..self.users.len())
+            .filter(|&i| {
+                let u = &self.users[i];
+                matches_query(&q, &[&u.username, u.role.label()])
+            })
+            .collect();
+    }
+
+    fn view_ids<T>(view: &[usize], items: &[T], id: impl Fn(&T) -> &str) -> Vec<String> {
+        view.iter()
+            .filter_map(|&i| items.get(i))
+            .map(|x| id(x).to_string())
+            .collect()
+    }
+
+    pub fn scene_view_ids(&self) -> Vec<String> {
+        Self::view_ids(&self.views.scenes, &self.scenes, |s| &s.id)
+    }
+
+    pub fn mode_view_ids(&self) -> Vec<String> {
+        Self::view_ids(&self.views.modes, &self.modes, |m| &m.config.id)
+    }
+
+    pub fn plugin_view_ids(&self) -> Vec<String> {
+        Self::view_ids(&self.views.plugins, &self.plugins, |p| &p.plugin_id)
+    }
+
+    pub fn user_view_ids(&self) -> Vec<String> {
+        Self::view_ids(&self.views.users, &self.users, |u| &u.id)
+    }
+
     fn resolve_selections(&mut self) {
         let ids = self.device_view_ids();
         self.devices_tab.sel.resolve(&ids);
         let ids = self.media_view_ids();
         self.devices_tab.media_sel.resolve(&ids);
-        let ids: Vec<&str> = self.scenes.iter().map(|s| s.id.as_str()).collect();
+        let ids = self.scene_view_ids();
         self.scenes_sel.resolve(&ids);
-        let ids: Vec<&str> = self.areas.iter().map(|a| a.id.as_str()).collect();
-        self.areas_tab.list_sel.resolve(&ids);
-        let ids = self.area_device_ids();
-        self.areas_tab.devices_sel.resolve(&ids);
+        let ids = self.room_view_ids();
+        self.rooms.sel.resolve(&ids);
+        let ids = self.helper_view_ids();
+        self.helpers_sel.resolve(&ids);
+        let ids = self.alert_view_ids();
+        self.alerts_sel.resolve(&ids);
         let ids = self.rule_view_ids();
         self.rules_tab.sel.resolve(&ids);
-        let ids: Vec<&str> = self.plugins.iter().map(|p| p.plugin_id.as_str()).collect();
+        let ids = self.plugin_view_ids();
         self.plugins_tab.sel.resolve(&ids);
         self.resolve_plugin_detail_selection();
         self.resolve_manage_selections();
+        self.resolve_home_selection();
+        self.resolve_picker_selection();
     }
 
     // ── Keys ─────────────────────────────────────────────────────────────
 
+    /// Every key goes through here. Modal layers that take typing come
+    /// first; then the screen's key table; then the digits and the keys
+    /// that work everywhere.
     pub fn on_key(&mut self, key: KeyEvent) {
         if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
             self.should_quit = true;
@@ -920,23 +1015,32 @@ impl App {
             self.on_key_confirm(key);
             return;
         }
+        if self.help_open {
+            if matches!(
+                key.code,
+                KeyCode::Esc | KeyCode::Char('?') | KeyCode::Char('q') | KeyCode::Enter
+            ) {
+                self.help_open = false;
+            }
+            return;
+        }
         if self.plugins_tab.streaming.is_some() {
             self.on_key_streaming(key);
-            return;
-        }
-        if self.rules_tab.detail.is_some() {
-            self.on_key_rule_detail(key);
-            return;
-        }
-        if self.plugins_tab.detail.is_some() && self.active_tab() == Tab::Plugins {
-            self.on_key_plugin_detail(key);
             return;
         }
         if self.on_key_editors(key) {
             return;
         }
-        if self.devices_tab.search_open {
-            self.on_key_device_search(key);
+        if self.home.picker.is_some() {
+            self.on_key_picker(key);
+            return;
+        }
+        if self.home.heading.is_some() {
+            self.on_key_heading(key);
+            return;
+        }
+        if self.search.open {
+            self.on_key_search(key);
             return;
         }
         if self.rules_tab.filter_bar.is_some() {
@@ -947,15 +1051,27 @@ impl App {
             self.on_key_log_filter_input(key);
             return;
         }
-        if self.rules_tab.groups.is_some() {
-            self.on_key_groups(key);
+
+        let screen = screens::screen(self.screen);
+        if let Some(b) = screen.bindings(self).into_iter().find(|b| b.matches(&key)) {
+            (b.run)(self);
             return;
         }
-        if self.active_tab() == Tab::Areas && !is_global_key(key) {
-            self.on_key_areas(key);
+        if let KeyCode::Char(c) = key.code
+            && !key.modifiers.contains(KeyModifiers::CONTROL)
+            && let Some(id) = ScreenId::from_hotkey(c)
+        {
+            if self.screens().contains(&id) {
+                self.switch_screen(id);
+            }
             return;
         }
-        self.on_key_global(key);
+        if let Some(b) = screens::global_bindings(self)
+            .into_iter()
+            .find(|b| b.matches(&key))
+        {
+            (b.run)(self);
+        }
     }
 
     fn on_key_login(&mut self, key: KeyEvent) {
@@ -990,85 +1106,132 @@ impl App {
         }
     }
 
-    fn switch_tab(&mut self, idx: usize) {
-        let count = self.tabs().len();
-        if count == 0 {
+    /// Show `id` (when this user may) and load what it needs.
+    pub fn switch_screen(&mut self, id: ScreenId) {
+        if !self.screens().contains(&id) {
             return;
         }
-        self.tab = idx % count;
-        self.areas_tab.pane = AreasPane::AreasList;
-        self.areas_tab.marked.clear();
-        if self.active_tab() == Tab::Manage {
-            self.on_enter_manage_panel();
+        if self.screen != id {
+            self.return_to = None;
+        }
+        self.screen = id;
+        screens::screen(id).on_enter(self);
+    }
+
+    /// Tab and Shift+Tab: the next or previous screen in the sidebar.
+    pub fn step_screen(&mut self, delta: isize) {
+        let list = self.screens();
+        let n = list.len() as isize;
+        if n == 0 {
+            return;
+        }
+        let i = list.iter().position(|s| *s == self.screen).unwrap_or(0) as isize;
+        let next = list[((i + delta) % n + n) as usize % n as usize];
+        self.switch_screen(next);
+    }
+
+    pub fn toggle_help(&mut self) {
+        self.help_open = !self.help_open;
+    }
+
+    pub fn toggle_utc(&mut self) {
+        self.time_utc = !self.time_utc;
+        self.status = if self.time_utc {
+            "Times in UTC".to_string()
+        } else {
+            "Times in local time".to_string()
+        };
+    }
+
+    /// Esc with nothing open: the screen's own back, else the screen
+    /// this one was opened from.
+    pub fn go_back(&mut self) {
+        if screens::screen(self.screen).back(self) {
+            return;
+        }
+        if !self.query(self.screen).is_empty() {
+            self.queries.remove(&self.screen);
+            self.status = "Search cleared".to_string();
+            return;
+        }
+        if let Some(to) = self.return_to.take() {
+            if self.screen == ScreenId::Devices {
+                self.devices_tab.room = None;
+            }
+            self.switch_screen(to);
         }
     }
 
-    fn on_key_global(&mut self, key: KeyEvent) {
-        let tab = self.active_tab();
+    /// `*`: pin or unpin the selected item of the screen on Home.
+    pub fn pin_selected(&mut self) {
+        match screens::screen(self.screen).pin_target(self) {
+            Some(item) => self.pin_item(item),
+            None => self.status = "Nothing here to pin".to_string(),
+        }
+    }
+
+    // ── Search ───────────────────────────────────────────────────────────
+
+    /// `/`: search the current screen's list as you type.
+    pub fn open_search(&mut self) {
+        self.search.open = true;
+        self.search.before = self.query(self.screen).to_string();
+    }
+
+    fn on_key_search(&mut self, key: KeyEvent) {
+        let screen = self.screen;
         match key.code {
-            KeyCode::Char('q') => self.should_quit = true,
-            KeyCode::Char('T') => {
-                self.time_utc = !self.time_utc;
-                self.status = if self.time_utc {
-                    "Timestamps: UTC".to_string()
-                } else {
-                    "Timestamps: Local".to_string()
-                };
+            KeyCode::Esc => {
+                self.search.open = false;
+                self.queries.remove(&screen);
             }
-            KeyCode::Char('L') => self.logout(),
-            KeyCode::Tab => self.switch_tab(self.tab + 1),
-            KeyCode::BackTab => {
-                let count = self.tabs().len();
-                self.switch_tab(self.tab + count - 1);
+            KeyCode::Enter => self.search.open = false,
+            KeyCode::Down | KeyCode::Up => {
+                // Keep the text; move in the list.
+                self.search.open = false;
+                self.on_key(key);
             }
-            KeyCode::Char(c @ '1'..='9') => {
-                let idx = c as usize - '1' as usize;
-                if idx < self.tabs().len() {
-                    self.switch_tab(idx);
+            _ => {
+                let q = self.queries.entry(screen).or_default();
+                editors::edit_text(q, key);
+                if q.is_empty() {
+                    self.queries.remove(&screen);
                 }
             }
-            KeyCode::Char('r') if tab == Tab::Manage => self.refresh_manage_panel(),
-            KeyCode::Char('r') => {
-                self.status = "Refreshing...".to_string();
-                self.start_sync();
-            }
-            _ => match tab {
-                Tab::Devices => self.on_key_devices(key),
-                Tab::Scenes => self.on_key_scenes(key),
-                Tab::Areas => {}
-                Tab::Rules => self.on_key_rules(key),
-                Tab::Plugins => self.on_key_plugins(key),
-                Tab::Manage => self.on_key_manage(key),
-            },
         }
     }
 
-    fn on_key_scenes(&mut self, key: KeyEvent) {
-        let ids: Vec<String> = self.scenes.iter().map(|s| s.id.clone()).collect();
-        match key.code {
-            KeyCode::Down | KeyCode::Char('j') => self.scenes_sel.move_by(1, &ids),
-            KeyCode::Up | KeyCode::Char('k') => self.scenes_sel.move_by(-1, &ids),
-            KeyCode::Char('a') | KeyCode::Enter => self.activate_selected_scene(),
-            _ => {}
-        }
+    // ── Scenes ───────────────────────────────────────────────────────────
+
+    pub fn visible_scenes(&self) -> impl Iterator<Item = &Scene> {
+        self.views.scenes.iter().filter_map(|&i| self.scenes.get(i))
     }
 
     pub fn selected_scene(&self) -> Option<&Scene> {
-        match self.scenes_sel.id() {
-            Some(id) => self.scenes.iter().find(|s| s.id == id),
-            None => self.scenes.get(self.scenes_sel.index()),
+        let id = self.scenes_sel.id()?;
+        self.visible_scenes().find(|s| s.id == id)
+    }
+
+    pub fn move_scene(&mut self, delta: isize) {
+        let ids = self.scene_view_ids();
+        self.scenes_sel.move_by(delta, &ids);
+    }
+
+    pub fn activate_selected_scene(&mut self) {
+        if let Some(id) = self.selected_scene().map(|s| s.id.clone()) {
+            self.activate_scene_id(&id);
         }
     }
 
     /// Activate a native scene through `/scenes/{id}/activate`, a scene
     /// device with `{"action":"activate"}`.
-    fn activate_selected_scene(&mut self) {
-        let Some(scene) = self.selected_scene().cloned() else {
+    pub fn activate_scene_id(&mut self, id: &str) {
+        let Some(scene) = self.scenes.iter().find(|s| s.id == id).cloned() else {
             return;
         };
         let c = self.client.clone();
         let name = scene.name.clone();
-        self.status = format!("Activating '{name}'...");
+        self.status = format!("Activating {name}...");
         self.spawn_ok(
             "activate scene",
             async move {
@@ -1079,7 +1242,7 @@ impl App {
                     }
                 }
             },
-            move |app, ()| app.status = format!("Activated scene '{name}'"),
+            move |app, ()| app.status = format!("Activated {name}"),
         );
     }
 
@@ -1122,20 +1285,6 @@ impl App {
     }
 }
 
-/// Keys that work the same on every tab, even the Areas two-pane view.
-fn is_global_key(key: KeyEvent) -> bool {
-    matches!(
-        key.code,
-        KeyCode::Tab
-            | KeyCode::BackTab
-            | KeyCode::Char('1'..='9')
-            | KeyCode::Char('q')
-            | KeyCode::Char('r')
-            | KeyCode::Char('T')
-            | KeyCode::Char('L')
-    )
-}
-
 /// Format a timestamp string for display. Respects the `utc` flag.
 pub fn format_timestamp_utc(ts: &str, utc: bool) -> String {
     use chrono::{DateTime, Local, Utc};
@@ -1158,7 +1307,12 @@ pub(crate) mod test_support {
 
     pub fn app_with_rx() -> (App, UnboundedReceiver<AsyncMsg>) {
         let dir = std::env::temp_dir().join(format!("hc-tui-app-test-{}", std::process::id()));
-        App::new("http://127.0.0.1:9".to_string(), CacheStore::new(dir))
+        let (mut app, rx) = App::new(
+            "http://127.0.0.1:9".to_string(),
+            CacheStore::new(dir.clone()),
+        );
+        app.home_dir = dir.join("home");
+        (app, rx)
     }
 
     pub fn app() -> App {
@@ -1193,6 +1347,46 @@ pub(crate) mod test_support {
     pub fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
     }
+
+    /// How many states [`enter_state`] knows per screen.
+    pub const SCREEN_STATES: usize = 4;
+
+    /// Put screen `id` into its `n`th state (a sub-tab, a detail view),
+    /// so tests can walk every key table. Unknown states are the plain
+    /// list.
+    pub fn enter_state(a: &mut App, id: ScreenId, n: usize) {
+        a.devices_tab.sub = DeviceSubPanel::All;
+        a.rules_tab.detail = None;
+        a.rules_tab.groups = None;
+        a.rules_tab.history = None;
+        a.plugins_tab.detail = None;
+        a.plugins_tab.sub = PluginsSub::Installed;
+        a.devices_tab.room = None;
+        match (id, n) {
+            (ScreenId::Devices, 1) => a.devices_tab.sub = DeviceSubPanel::MediaPlayers,
+            (ScreenId::Devices, 2) => a.devices_tab.room = Some("r".into()),
+            (ScreenId::Automations, 1) => {
+                a.rules_tab.detail = Some(rules::RuleDetail {
+                    rule_id: "r".into(),
+                    ron: Load::Idle,
+                    history: Load::Idle,
+                    scroll: 0,
+                })
+            }
+            (ScreenId::Automations, 2) => a.rules_tab.groups = Some(Default::default()),
+            (ScreenId::Automations, 3) => {
+                a.rules_tab.history = Some(rules::HistoryPane {
+                    rule_id: "r".into(),
+                    items: Load::Idle,
+                })
+            }
+            (ScreenId::Plugins, 1) => a.plugins_tab.sub = PluginsSub::Matter,
+            (ScreenId::Plugins, 2) => {
+                a.plugins_tab.detail = Some(plugins::PluginDetail::new("p".into()))
+            }
+            _ => {}
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1202,21 +1396,60 @@ mod tests {
     use crate::model::Role;
 
     #[test]
-    fn plugins_tab_follows_plugins_read() {
-        // `user` has no plugins:read in core's role table; observer does.
-        let a = signed_in(Role::User);
-        assert!(!a.tabs().contains(&Tab::Plugins));
-        let a = signed_in(Role::Observer);
-        assert!(a.tabs().contains(&Tab::Plugins));
-        let a = signed_in(Role::Admin);
-        assert!(a.tabs().contains(&Tab::Plugins));
+    fn digits_jump_only_to_screens_the_user_can_open() {
+        let mut a = signed_in(Role::User);
+        a.on_key(key(KeyCode::Char('9')));
+        assert_eq!(a.screen, ScreenId::Home, "users have no Plugins");
+        a.on_key(key(KeyCode::Char('7')));
+        assert_eq!(a.screen, ScreenId::Automations);
+        a.on_key(key(KeyCode::Tab));
+        assert_eq!(a.screen, ScreenId::Alerts);
+        a.on_key(key(KeyCode::BackTab));
+        a.on_key(key(KeyCode::BackTab));
+        assert_eq!(a.screen, ScreenId::Helpers);
     }
 
     #[test]
-    fn server_scopes_win_over_the_role_table() {
-        let mut a = signed_in(Role::User);
-        a.current_user.as_mut().unwrap().scopes = Some(vec!["plugins:read".into()]);
-        assert!(a.tabs().contains(&Tab::Plugins));
+    fn help_opens_and_closes() {
+        let mut a = signed_in(Role::Admin);
+        a.on_key(key(KeyCode::Char('?')));
+        assert!(a.help_open);
+        a.on_key(key(KeyCode::Char('3')));
+        assert_eq!(a.screen, ScreenId::Home, "keys do nothing under ?");
+        a.on_key(key(KeyCode::Esc));
+        assert!(!a.help_open);
+    }
+
+    #[test]
+    fn search_filters_as_you_type_and_esc_clears() {
+        let mut a = signed_in(Role::Admin);
+        a.devices = vec![device("a", "Alpha"), device("b", "Bravo")];
+        a.screen = ScreenId::Devices;
+        a.devices_tab.view_mode = DeviceViewMode::Flat;
+        a.on_key(key(KeyCode::Char('/')));
+        a.on_key(key(KeyCode::Char('b')));
+        a.refresh_views();
+        assert_eq!(a.device_view_ids(), vec!["b"]);
+        a.on_key(key(KeyCode::Enter));
+        assert!(!a.search.open);
+        a.on_key(key(KeyCode::Esc));
+        a.refresh_views();
+        assert_eq!(a.device_view_ids().len(), 2);
+    }
+
+    #[test]
+    fn star_pins_from_a_list() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _g = rt.enter();
+        let mut a = signed_in(Role::Admin);
+        a.devices = vec![device("a", "Alpha")];
+        a.screen = ScreenId::Devices;
+        a.refresh_views();
+        a.on_key(key(KeyCode::Char('*')));
+        let item = home::HomeItem::new(home::ItemKind::Device, "a");
+        assert!(a.home.layout.contains(&item));
+        a.on_key(key(KeyCode::Char('*')));
+        assert!(!a.home.layout.contains(&item));
     }
 
     #[tokio::test]
@@ -1300,6 +1533,7 @@ mod tests {
             events: Ok(vec![]),
             modes: Ok(vec![]),
             status: Err("x".into()),
+            alerts: Ok(vec![]),
             users: None,
             plugins: None,
         };

@@ -1,9 +1,9 @@
 //! Manage tab and its sub-panels.
 
 use super::widgets::{format_uptime, highlight, short_ts, status_detail_row};
+use crate::app::App;
 use crate::app::manage::backup::BackupAction;
 use crate::app::manage::logs::LogLevelFilter;
-use crate::app::{AdminSubPanel, App};
 use crate::config::{exports_dir, imports_dir};
 use crate::model::{AuditResult, Role};
 use crate::text::take_chars;
@@ -14,39 +14,6 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Tabs, Wrap},
 };
-
-pub fn draw_manage_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
-    let layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(0)])
-        .split(area);
-    let tabs = Tabs::new(
-        AdminSubPanel::ALL
-            .iter()
-            .map(|p| Line::from(p.title()))
-            .collect::<Vec<_>>(),
-    )
-    .select(app.manage.sub.index())
-    .block(Block::default().borders(Borders::ALL).title("Manage"))
-    .style(Style::default().fg(Color::Gray))
-    .highlight_style(
-        Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD),
-    );
-    frame.render_widget(tabs, layout[0]);
-    let body = layout[1];
-    match app.manage.sub {
-        AdminSubPanel::Modes => draw_modes(frame, app, body),
-        AdminSubPanel::Matter => draw_matter(frame, app, body),
-        AdminSubPanel::Status => draw_status(frame, app, body),
-        AdminSubPanel::Users => draw_users(frame, app, body),
-        AdminSubPanel::Logs => draw_logs(frame, app, body),
-        AdminSubPanel::Events => draw_events(frame, app, body),
-        AdminSubPanel::Audit => draw_audit(frame, app, body),
-        AdminSubPanel::Backup => draw_backup(frame, app, body),
-    }
-}
 
 fn selectable_list<'a>(items: Vec<ListItem<'a>>, title: String) -> List<'a> {
     List::new(items)
@@ -63,17 +30,14 @@ fn render_list(frame: &mut Frame<'_>, list: List<'_>, len: usize, index: usize, 
     frame.render_stateful_widget(list, area, &mut state);
 }
 
-fn draw_modes(frame: &mut Frame<'_>, app: &App, area: Rect) {
+pub fn draw_modes(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let items: Vec<ListItem> = app
+        .views
         .modes
         .iter()
+        .filter_map(|&i| app.modes.get(i))
         .map(|m| {
-            let on = m
-                .state
-                .as_ref()
-                .and_then(|s| s.attributes.get("on"))
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
+            let on = app.mode_on(&m.config.id);
             let (dot, dc) = if on {
                 ("●", Color::Green)
             } else {
@@ -87,12 +51,12 @@ fn draw_modes(frame: &mut Frame<'_>, app: &App, area: Rect) {
             ListItem::new(Line::from(vec![
                 Span::styled(format!("  {dot} "), Style::default().fg(dc)),
                 Span::styled(
-                    format!("{:<28}", take_chars(&m.config.id, 28)),
+                    format!("{:<24}", take_chars(&m.config.name, 24)),
                     Style::default().fg(Color::White),
                 ),
                 Span::styled(format!("  {:<8}", m.config.kind), Style::default().fg(kc)),
                 Span::styled(
-                    format!("  {}", m.config.name),
+                    format!("  {}", m.config.id),
                     Style::default().fg(Color::DarkGray),
                 ),
             ]))
@@ -101,14 +65,14 @@ fn draw_modes(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let n = items.len();
     render_list(
         frame,
-        selectable_list(items, "Modes".into()),
+        selectable_list(items, format!("Modes ({n})")),
         n,
         app.manage.modes_sel.index(),
         area,
     );
 }
 
-fn draw_matter(frame: &mut Frame<'_>, app: &App, area: Rect) {
+pub fn draw_matter(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let m = &app.manage.matter;
     let layout = Layout::default()
         .direction(Direction::Vertical)
@@ -137,7 +101,7 @@ fn draw_matter(frame: &mut Frame<'_>, app: &App, area: Rect) {
             ]))
         })
         .collect();
-    let mut title = format!("Matter Nodes ({})", app.matter_nodes.len());
+    let mut title = format!("Matter nodes ({})", app.matter_nodes.len());
     if m.pending {
         title.push_str(" [pending]");
     }
@@ -175,20 +139,20 @@ fn draw_matter(frame: &mut Frame<'_>, app: &App, area: Rect) {
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title("Matter Activity"),
+                    .title("Matter activity"),
             )
             .wrap(Wrap { trim: true }),
         layout[1],
     );
 }
 
-fn draw_status(frame: &mut Frame<'_>, app: &App, area: Rect) {
+pub fn draw_status(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(if app.manage.status.loading {
-            "System Status [loading...]"
+            "System (loading)"
         } else {
-            "System Status"
+            "System"
         });
     let Some(s) = app.system_status.as_ref() else {
         let msg = match &app.manage.status.error {
@@ -235,9 +199,9 @@ fn draw_status(frame: &mut Frame<'_>, app: &App, area: Rect) {
             ),
         ),
         Line::from(""),
-        section("Rules"),
+        section("Automations"),
         Line::from(""),
-        status_detail_row("Total rules", &s.rules_total.to_string()),
+        status_detail_row("Total", &s.rules_total.to_string()),
         status_detail_row("Enabled", &s.rules_enabled.to_string()),
     ];
     if s.rules_total > 0 {
@@ -268,11 +232,13 @@ fn draw_status(frame: &mut Frame<'_>, app: &App, area: Rect) {
     frame.render_widget(Paragraph::new(right).wrap(Wrap { trim: false }), cols[1]);
 }
 
-fn draw_users(frame: &mut Frame<'_>, app: &App, area: Rect) {
+pub fn draw_users(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let me = app.current_user.as_ref().map(|u| u.id.as_str());
     let items: Vec<ListItem> = app
+        .views
         .users
         .iter()
+        .filter_map(|&i| app.users.get(i))
         .map(|u| {
             let rc = match u.role {
                 Role::Admin => Color::Yellow,
@@ -294,7 +260,7 @@ fn draw_users(frame: &mut Frame<'_>, app: &App, area: Rect) {
                     format!("  {:<22}", take_chars(&format!("{}{tag}", u.username), 22)),
                     Style::default().fg(Color::White),
                 ),
-                Span::styled(format!("{:<18}", u.role.as_str()), Style::default().fg(rc)),
+                Span::styled(format!("{:<18}", u.role.label()), Style::default().fg(rc)),
                 Span::styled(
                     take_chars(&u.created_at, 10),
                     Style::default().fg(Color::DarkGray),
@@ -304,9 +270,9 @@ fn draw_users(frame: &mut Frame<'_>, app: &App, area: Rect) {
         .collect();
     let n = items.len();
     let title = if app.is_admin() {
-        "Users".to_string()
+        format!("People ({n})")
     } else {
-        "Users (admin only; p changes your password)".to_string()
+        "People (admin only; p changes your password)".to_string()
     };
     render_list(
         frame,
@@ -317,7 +283,7 @@ fn draw_users(frame: &mut Frame<'_>, app: &App, area: Rect) {
     );
 }
 
-fn draw_logs(frame: &mut Frame<'_>, app: &App, area: Rect) {
+pub fn draw_logs(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let logs = &app.manage.logs;
     let layout = Layout::default()
         .direction(Direction::Vertical)
@@ -427,7 +393,7 @@ fn draw_logs(frame: &mut Frame<'_>, app: &App, area: Rect) {
     );
 }
 
-fn draw_events(frame: &mut Frame<'_>, app: &App, area: Rect) {
+pub fn draw_events(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let items: Vec<ListItem> = app
         .visible_events()
         .map(|e| {
@@ -484,7 +450,7 @@ fn draw_events(frame: &mut Frame<'_>, app: &App, area: Rect) {
     );
 }
 
-fn draw_audit(frame: &mut Frame<'_>, app: &App, area: Rect) {
+pub fn draw_audit(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let a = &app.manage.audit;
     let expanded = app.expanded_audit();
     let constraints = if expanded.is_some() {
@@ -611,7 +577,7 @@ fn draw_audit(frame: &mut Frame<'_>, app: &App, area: Rect) {
     );
 }
 
-fn draw_backup(frame: &mut Frame<'_>, app: &App, area: Rect) {
+pub fn draw_backup(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let b = &app.manage.backup;
     let layout = Layout::default()
         .direction(Direction::Vertical)
@@ -625,7 +591,11 @@ fn draw_backup(frame: &mut Frame<'_>, app: &App, area: Rect) {
         .iter()
         .map(|a| ListItem::new(format!("  {}", a.label())))
         .collect();
-    let title = if b.busy { "Backup [busy]" } else { "Backup" };
+    let title = if b.busy {
+        "Data & backups (busy)"
+    } else {
+        "Data & backups"
+    };
     render_list(
         frame,
         selectable_list(items, title.into()),

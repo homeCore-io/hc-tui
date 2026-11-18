@@ -1,4 +1,4 @@
-//! Rules tab: list, fire-history pane and the read-only detail view.
+//! Automations: list, Recent runs pane and the read-only detail view.
 
 use super::widgets::{heading, highlight};
 use crate::app::{App, Load, format_timestamp_utc};
@@ -105,7 +105,7 @@ fn draw_history_pane(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let list = List::new(firing_items(&h.items, take.max(1), app.time_utc)).block(
         Block::default()
             .borders(Borders::ALL)
-            .title(format!("Fire History: {name}")),
+            .title(format!("Recent runs: {name}")),
     );
     frame.render_widget(list, area);
 }
@@ -160,12 +160,12 @@ fn draw_rule_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
             lines
         }
         None => vec![Line::from(Span::styled(
-            "rule no longer in list",
+            "no longer in homeCore",
             Style::default().fg(Color::Yellow),
         ))],
     };
     frame.render_widget(
-        Paragraph::new(header).block(Block::default().borders(Borders::ALL).title(" Rule ")),
+        Paragraph::new(header).block(Block::default().borders(Borders::ALL).title(" Automation ")),
         layout[0],
     );
 
@@ -195,8 +195,8 @@ fn draw_rule_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
 
     let take = (layout[2].height.saturating_sub(2) as usize).max(1);
     let title = match d.history.ready() {
-        Some(h) => format!(" Fire history ({}) ", h.len()),
-        None => " Fire history ".to_string(),
+        Some(h) => format!(" Recent runs ({}) ", h.len()),
+        None => " Recent runs ".to_string(),
     };
     frame.render_widget(
         List::new(firing_items(&d.history, take, app.time_utc))
@@ -210,12 +210,12 @@ fn draw_rules_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let total = app.rules.len();
     let shown = app.views.rules.len();
     let marked = tab.marked.len();
-    let title = if tab.filter_active() {
-        format!("Rules [{shown}/{total}]")
+    let title = if shown != total {
+        format!(" Automations ({shown} of {total}) ")
     } else if marked > 0 {
-        format!("Rules [{total}] ({marked} selected)")
+        format!(" Automations ({total}, {marked} marked) ")
     } else {
-        format!("Rules [{total}]")
+        format!(" Automations ({total}) ")
     };
 
     let hl = highlight();
@@ -290,9 +290,9 @@ fn draw_rules_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
     if rows.is_empty() {
         frame.render_widget(
             Paragraph::new(if total == 0 {
-                "No rules."
+                "No automations."
             } else {
-                "No rules match the filter."
+                "No automations match."
             })
             .block(Block::default().borders(Borders::ALL).title(title))
             .alignment(Alignment::Center),

@@ -3,8 +3,8 @@
 use super::editors::{Confirm, ConfirmAction, DeviceEditor};
 use super::{App, ListSel, Section};
 use crate::model::DeviceState;
+use crate::screens::ScreenId;
 use crate::text::normalize_label;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use serde_json::{Value, json};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -36,7 +36,7 @@ impl DeviceFilterMode {
             Self::All => "all",
             Self::Online => "online",
             Self::Offline => "offline",
-            Self::LowBattery => "low_battery",
+            Self::LowBattery => "low battery",
         }
     }
 
@@ -62,8 +62,8 @@ impl DeviceSortMode {
     pub fn title(self) -> &'static str {
         match self {
             Self::Name => "name",
-            Self::Status => "status",
-            Self::LastSeen => "last_seen",
+            Self::Status => "state",
+            Self::LastSeen => "last seen",
         }
     }
 
@@ -82,8 +82,8 @@ pub struct DevicesTab {
     pub view_mode: DeviceViewMode,
     pub filter: DeviceFilterMode,
     pub sort: DeviceSortMode,
-    pub search_query: String,
-    pub search_open: bool,
+    /// Only this room's devices (an area id), from Rooms' Enter.
+    pub room: Option<String>,
     pub sel: ListSel,
     pub media_sel: ListSel,
     pub editor: Option<DeviceEditor>,
@@ -192,7 +192,16 @@ impl App {
     }
 
     fn device_matches_search(&self, device: &DeviceState) -> bool {
-        let q = self.devices_tab.search_query.trim().to_lowercase();
+        if let Some(room) = self.devices_tab.room.as_deref()
+            && !self
+                .areas
+                .iter()
+                .find(|a| a.id == room)
+                .is_some_and(|a| super::rooms::in_room(a, device))
+        {
+            return false;
+        }
+        let q = self.query(ScreenId::Devices).trim().to_lowercase();
         if q.is_empty() {
             return true;
         }
@@ -207,7 +216,7 @@ impl App {
             || has(device.device_type())
     }
 
-    pub(super) fn compute_device_views(&mut self) {
+    pub(crate) fn compute_device_views(&mut self) {
         let mut idx: Vec<usize> = (0..self.devices.len())
             .filter(|&i| {
                 let d = &self.devices[i];
@@ -266,7 +275,7 @@ impl App {
         }
     }
 
-    pub(super) fn device_view_ids(&self) -> Vec<String> {
+    pub(crate) fn device_view_ids(&self) -> Vec<String> {
         self.views
             .devices
             .iter()
@@ -275,7 +284,7 @@ impl App {
             .collect()
     }
 
-    pub(super) fn media_view_ids(&self) -> Vec<String> {
+    pub(crate) fn media_view_ids(&self) -> Vec<String> {
         self.views
             .media
             .iter()
@@ -388,69 +397,42 @@ impl App {
 
     // ── Keys ─────────────────────────────────────────────────────────────
 
-    pub(super) fn on_key_devices(&mut self, key: KeyEvent) {
-        let media = self.devices_tab.sub == DeviceSubPanel::MediaPlayers;
-        match key.code {
-            KeyCode::Left | KeyCode::Right => {
-                self.devices_tab.sub = if media {
-                    DeviceSubPanel::All
-                } else {
-                    DeviceSubPanel::MediaPlayers
-                };
-            }
-            KeyCode::Down | KeyCode::Char('j') => self.move_device_cursor(1),
-            KeyCode::Up | KeyCode::Char('k') => self.move_device_cursor(-1),
-            KeyCode::PageDown => self.move_device_cursor(10),
-            KeyCode::PageUp => self.move_device_cursor(-10),
-            KeyCode::Enter => self.open_device_editor(),
-            KeyCode::Char('d') if !media => self.ask_delete_device(),
-            KeyCode::Char(' ') => self.toggle_lock_or_switch(),
-            KeyCode::Char('t') => self.toggle_selected_device(),
-            KeyCode::Char('v') => {
-                self.devices_tab.view_mode = match self.devices_tab.view_mode {
-                    DeviceViewMode::Grouped => DeviceViewMode::Flat,
-                    DeviceViewMode::Flat => DeviceViewMode::Grouped,
-                };
-            }
-            KeyCode::Char('+') | KeyCode::Char('=') => {
-                if media {
-                    self.media_adjust_volume(5);
-                } else {
-                    self.adjust_brightness(1);
-                }
-            }
-            KeyCode::Char('-') => {
-                if media {
-                    self.media_adjust_volume(-5);
-                } else {
-                    self.adjust_brightness(-1);
-                }
-            }
-            KeyCode::Char('l') => self.lock_device(true),
-            KeyCode::Char('u') => self.lock_device(false),
-            KeyCode::Char('p') if media => self.media_play_pause(),
-            KeyCode::Char('n') if media => self.media_simple("next", "Next"),
-            KeyCode::Char('b') if media => self.media_simple("previous", "Previous"),
-            KeyCode::Char('x') if media => self.media_stop(),
-            KeyCode::Char('m') if media => self.media_toggle_mute(),
-            KeyCode::Char('f') if !media => {
-                self.devices_tab.filter = self.devices_tab.filter.next();
-                self.devices_tab.sel.reset();
-                self.status = format!("Device filter: {}", self.devices_tab.filter.title());
-            }
-            KeyCode::Char('s') if !media => {
-                self.devices_tab.sort = self.devices_tab.sort.next();
-                self.status = format!("Device sort: {}", self.devices_tab.sort.title());
-            }
-            KeyCode::Char('/') if !media => {
-                self.devices_tab.search_open = true;
-                self.status = format!("Device search: {}", self.devices_tab.search_query);
-            }
-            _ => {}
+    pub fn devices_switch_sub(&mut self) {
+        self.devices_tab.sub = match self.devices_tab.sub {
+            DeviceSubPanel::All => DeviceSubPanel::MediaPlayers,
+            DeviceSubPanel::MediaPlayers => DeviceSubPanel::All,
+        };
+    }
+
+    pub fn devices_toggle_view(&mut self) {
+        self.devices_tab.view_mode = match self.devices_tab.view_mode {
+            DeviceViewMode::Grouped => DeviceViewMode::Flat,
+            DeviceViewMode::Flat => DeviceViewMode::Grouped,
+        };
+    }
+
+    pub fn devices_next_filter(&mut self) {
+        self.devices_tab.filter = self.devices_tab.filter.next();
+        self.devices_tab.sel.reset();
+        self.status = format!("Showing {} devices", self.devices_tab.filter.title());
+    }
+
+    pub fn devices_next_sort(&mut self) {
+        self.devices_tab.sort = self.devices_tab.sort.next();
+        self.status = format!("Sorted by {}", self.devices_tab.sort.title());
+    }
+
+    /// `+` / `-`: brightness on the list, volume on media players.
+    pub fn devices_adjust(&mut self, up: bool) {
+        match (self.devices_tab.sub, up) {
+            (DeviceSubPanel::MediaPlayers, true) => self.media_adjust_volume(5),
+            (DeviceSubPanel::MediaPlayers, false) => self.media_adjust_volume(-5),
+            (DeviceSubPanel::All, true) => self.adjust_brightness(1),
+            (DeviceSubPanel::All, false) => self.adjust_brightness(-1),
         }
     }
 
-    fn move_device_cursor(&mut self, delta: isize) {
+    pub fn move_device_cursor(&mut self, delta: isize) {
         match self.devices_tab.sub {
             DeviceSubPanel::All => {
                 let ids = self.device_view_ids();
@@ -463,29 +445,10 @@ impl App {
         }
     }
 
-    pub(super) fn on_key_device_search(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Esc => {
-                self.devices_tab.search_open = false;
-                self.status = "Device search canceled".to_string();
-            }
-            KeyCode::Enter => {
-                self.devices_tab.search_open = false;
-                self.devices_tab.sel.reset();
-                let q = self.devices_tab.search_query.trim();
-                self.status = if q.is_empty() {
-                    "Device search cleared".to_string()
-                } else {
-                    format!("Device search: {q}")
-                };
-            }
-            KeyCode::Backspace => {
-                self.devices_tab.search_query.pop();
-            }
-            KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.devices_tab.search_query.push(ch);
-            }
-            _ => {}
+    /// Space on Devices: the selected device's main action.
+    pub fn selected_device_main_action(&mut self) {
+        if let Some(id) = self.selected_device().map(|d| d.device_id.clone()) {
+            self.device_main_action(&id);
         }
     }
 
@@ -493,7 +456,7 @@ impl App {
 
     /// Send `body` to the device's state endpoint, reporting `done` on
     /// success.
-    pub(super) fn command_device(&mut self, device_id: String, body: Value, done: String) {
+    pub(crate) fn command_device(&mut self, device_id: String, body: Value, done: String) {
         let c = self.client.clone();
         self.spawn_ok(
             "command",
@@ -507,7 +470,7 @@ impl App {
             .map(|d| (d.device_id.clone(), d.display_name().to_string()))
     }
 
-    fn toggle_selected_device(&mut self) {
+    pub fn toggle_selected_device(&mut self) {
         let Some(device) = self.selected_device() else {
             return;
         };
@@ -523,24 +486,6 @@ impl App {
         let (id, name) = (device.device_id.clone(), device.display_name().to_string());
         let label = if on { "Off" } else { "On" };
         self.command_device(id, json!({ "on": !on }), format!("{name} → {label}"));
-    }
-
-    /// Space: play/stop for media, lock toggle for locks, else on/off.
-    fn toggle_lock_or_switch(&mut self) {
-        let Some(device) = self.selected_device() else {
-            return;
-        };
-        if let Some(locked) = device_lock_state(device) {
-            let (id, name) = (device.device_id.clone(), device.display_name().to_string());
-            let label = if locked { "Unlocked" } else { "Locked" };
-            self.command_device(
-                id,
-                json!({ "locked": !locked }),
-                format!("{name} → {label}"),
-            );
-        } else {
-            self.toggle_selected_device();
-        }
     }
 
     fn adjust_brightness(&mut self, direction: i64) {
@@ -564,7 +509,7 @@ impl App {
         );
     }
 
-    fn lock_device(&mut self, locked: bool) {
+    pub fn lock_device(&mut self, locked: bool) {
         let Some((id, name)) = self.selected_device_parts() else {
             return;
         };
@@ -574,7 +519,7 @@ impl App {
 
     // ── Editor ───────────────────────────────────────────────────────────
 
-    fn open_device_editor(&mut self) {
+    pub fn open_device_editor(&mut self) {
         let Some(d) = self.selected_device() else {
             return;
         };
@@ -586,7 +531,7 @@ impl App {
         ));
     }
 
-    pub(super) fn save_device_editor(&mut self) {
+    pub(crate) fn save_device_editor(&mut self) {
         let Some(ed) = self.devices_tab.editor.clone() else {
             return;
         };
@@ -624,21 +569,23 @@ impl App {
 
     // ── Delete ───────────────────────────────────────────────────────────
 
-    fn ask_delete_device(&mut self) {
-        let Some((id, name)) = self.selected_device_parts() else {
+    pub fn ask_delete_device(&mut self) {
+        let Some(d) = self.selected_device() else {
             return;
         };
+        let (id, name) = (d.device_id.clone(), d.display_name().to_string());
+        let plugin = d.plugin_id.trim_start_matches("plugin.").to_string();
         self.ask(
             Confirm::new(
-                "Delete device",
-                format!("Delete device \"{name}\"?"),
+                "Remove device?",
+                format!("{name} ({plugin}) will be removed from homeCore."),
                 ConfirmAction::DeleteDevice { id: id.clone() },
             )
             .with_detail(format!("ID: {id}")),
         );
     }
 
-    pub(super) fn delete_device(&mut self, id: String) {
+    pub(crate) fn delete_device(&mut self, id: String) {
         let c = self.client.clone();
         let target = id.clone();
         self.spawn_ok(
@@ -659,6 +606,7 @@ mod tests {
     use super::super::test_support::*;
     use super::*;
     use crate::model::Role;
+    use crossterm::event::KeyCode;
 
     fn with_attrs(id: &str, name: &str, attrs: Value) -> DeviceState {
         let mut d = device(id, name);
@@ -669,6 +617,7 @@ mod tests {
     #[test]
     fn selection_survives_a_resort() {
         let mut a = signed_in(Role::Admin);
+        a.screen = ScreenId::Devices;
         a.devices_tab.view_mode = DeviceViewMode::Flat;
         a.devices = vec![
             device("a", "Alpha"),
@@ -741,7 +690,8 @@ mod tests {
         let mut a = signed_in(Role::Admin);
         a.devices = vec![device("a", "Alpha")];
         a.refresh_views();
-        a.on_key(key(KeyCode::Char('d')));
+        a.screen = ScreenId::Devices;
+        a.on_key(key(KeyCode::Char('x')));
         assert!(matches!(
             a.confirm.as_ref().map(|c| &c.action),
             Some(ConfirmAction::DeleteDevice { id }) if id == "a"

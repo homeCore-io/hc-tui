@@ -1,7 +1,8 @@
-//! Plugins tab: the list and the per-plugin detail screen.
+//! Plugins: the installed list, the Matter tab and the per-plugin
+//! detail view.
 
 use super::widgets::{highlight, short_ts, status_detail_row};
-use crate::app::{App, Load, PluginDetailPanel};
+use crate::app::{App, Load, PluginDetailPanel, PluginsSub};
 use crate::model::{PluginRecord, RequiresRole};
 use crate::text::take_chars;
 use ratatui::{
@@ -17,9 +18,41 @@ pub fn draw_plugins_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
         draw_plugin_detail(frame, app, area);
         return;
     }
+    let area = if app.has_matter() {
+        let layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Min(0)])
+            .split(area);
+        let idx = match app.plugins_tab.sub {
+            PluginsSub::Installed => 0,
+            PluginsSub::Matter => 1,
+        };
+        let tabs = Tabs::new(vec![
+            Line::from(format!("Installed ({})", app.plugins.len())),
+            Line::from("Matter"),
+        ])
+        .select(idx)
+        .block(Block::default().borders(Borders::ALL).title(" Plugins "))
+        .style(Style::default().fg(Color::Gray))
+        .highlight_style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        );
+        frame.render_widget(tabs, layout[0]);
+        if app.plugins_tab.sub == PluginsSub::Matter {
+            super::manage::draw_matter(frame, app, layout[1]);
+            return;
+        }
+        layout[1]
+    } else {
+        area
+    };
     let items: Vec<ListItem> = app
+        .views
         .plugins
         .iter()
+        .filter_map(|&i| app.plugins.get(i))
         .map(|p| {
             let (dot, color) = status_dot(p);
             let version = p.version.as_deref().unwrap_or("-");
@@ -51,12 +84,12 @@ pub fn draw_plugins_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(format!("Plugins [{}]", app.plugins.len())),
+                .title(format!(" Installed ({}) ", app.views.plugins.len())),
         )
         .highlight_style(highlight())
         .highlight_symbol(">> ");
     let mut state = ListState::default();
-    if !app.plugins.is_empty() {
+    if !app.views.plugins.is_empty() {
         state.select(Some(app.plugins_tab.sel.index()));
     }
     frame.render_stateful_widget(list, area, &mut state);

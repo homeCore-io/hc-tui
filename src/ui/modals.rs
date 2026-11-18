@@ -36,6 +36,9 @@ pub fn draw_overlays(frame: &mut Frame<'_>, app: &App) {
     if app.manage.logs.input_open {
         draw_log_filter_input(frame, app);
     }
+    super::home::draw_picker(frame, app);
+    super::home::draw_heading_editor(frame, app);
+    super::help::draw_help(frame, app);
     // The question goes over everything.
     draw_confirm(frame, app);
 }
@@ -108,7 +111,7 @@ fn draw_confirm(frame: &mut Frame<'_>, app: &App) {
         );
     }
     frame.render_widget(
-        Paragraph::new("Y confirm  |  N/Esc cancel")
+        Paragraph::new("No (n or Esc)     y  Yes")
             .style(Style::default().fg(Color::Yellow))
             .alignment(Alignment::Center),
         layout[2],
@@ -146,13 +149,13 @@ fn draw_device_editor(frame: &mut Frame<'_>, app: &App) {
 }
 
 fn draw_area_editor(frame: &mut Frame<'_>, app: &App) {
-    let Some(ed) = &app.areas_tab.editor else {
+    let Some(ed) = &app.rooms.editor else {
         return;
     };
     let title = if ed.id.is_none() {
-        "New Area"
+        "New room"
     } else {
-        "Rename Area"
+        "Rename room"
     };
     let inner = modal(frame, 60, 30, title);
     let r = rows(inner, 1);
@@ -171,7 +174,7 @@ fn draw_user_editor(frame: &mut Frame<'_>, app: &App) {
     };
     let inner = modal(frame, 64, 60, title);
     let f = |x: UserEditField| ed.field == x;
-    let role = format!("{}  (Space to cycle)", ed.role.as_str());
+    let role = format!("{}  (Space for the next)", ed.role.label());
     match ed.mode {
         UserEditMode::Create => {
             let r = rows(inner, 4);
@@ -408,7 +411,7 @@ fn draw_groups(frame: &mut Frame<'_>, app: &App) {
     frame.render_widget(Clear, popup);
     let outer = Block::default()
         .borders(Borders::ALL)
-        .title("Rule Groups")
+        .title("Automation groups")
         .border_style(Style::default().fg(Color::Cyan));
     let inner = outer.inner(popup);
     frame.render_widget(outer, popup);
@@ -429,7 +432,7 @@ fn draw_groups(frame: &mut Frame<'_>, app: &App) {
                                 .add_modifier(Modifier::BOLD),
                         ),
                         Span::styled(
-                            format!("{} rule(s)", grp.rule_ids.len()),
+                            format!("{} automation(s)", grp.rule_ids.len()),
                             Style::default().fg(Color::DarkGray),
                         ),
                     ]))
@@ -457,7 +460,7 @@ fn draw_groups(frame: &mut Frame<'_>, app: &App) {
         }
     }
     frame.render_widget(
-        Paragraph::new("e enable  |  d disable  |  x delete  |  Esc close")
+        Paragraph::new("+ on  |  - off  |  x delete  |  Esc close")
             .style(Style::default().fg(Color::DarkGray))
             .alignment(Alignment::Center),
         layout[1],

@@ -185,7 +185,7 @@ impl App {
             }
             "room_changed" => {
                 if let Some(area) = parse::<Area>(event.get("room")) {
-                    super::areas::upsert_area(&mut self.areas, area);
+                    super::rooms::upsert_area(&mut self.areas, area);
                 }
             }
             "room_removed" => {
@@ -243,7 +243,17 @@ impl App {
                     p.status = status.to_string();
                 }
             }
-            // Alerts, custom events and everything else are recorded only.
+            "alert_raised" | "alert_acknowledged" => {
+                if let Some(alert) = parse::<crate::model::Alert>(event.get("alert")) {
+                    self.upsert_alert(alert);
+                }
+            }
+            "alert_cleared" => {
+                if let Some(id) = s(&event, "alert_id") {
+                    self.alerts.retain(|a| a.id != id);
+                }
+            }
+            // Custom events and everything else are recorded only.
             _ => {}
         }
 
@@ -275,7 +285,7 @@ impl App {
 
     // ── Events panel ─────────────────────────────────────────────────────
 
-    pub(super) fn compute_event_view(&mut self) {
+    pub(crate) fn compute_event_view(&mut self) {
         let filter = self.manage.events.type_filter.clone();
         self.views.events = (0..self.events.len())
             .filter(|&i| {
@@ -305,7 +315,7 @@ impl App {
     }
 
     /// `f` on the Events panel: All, then each type present, then All.
-    pub(super) fn cycle_event_filter(&mut self) {
+    pub(crate) fn cycle_event_filter(&mut self) {
         let types = self.event_types();
         let next = match &self.manage.events.type_filter {
             None => types.first().cloned(),

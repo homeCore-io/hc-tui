@@ -1,4 +1,4 @@
-//! Manage › Matter: commissioned nodes from `GET /plugins/matter/nodes`.
+//! Plugins › Matter: commissioned nodes from `GET /plugins/matter/nodes`.
 
 use crate::app::editors::{Confirm, ConfirmAction, MatterCommissionEditor};
 use crate::app::{App, ListSel};
@@ -61,7 +61,7 @@ impl App {
                 self.manage.matter.editor = Some(MatterCommissionEditor::default());
             }
             KeyCode::Enter | KeyCode::Char('i') => self.reinterview_selected_node(),
-            KeyCode::Char('d') => {
+            KeyCode::Char('x') | KeyCode::Delete => {
                 if let Some(n) = self.selected_matter_node() {
                     let node_id = n.node_id.clone();
                     let count = n.device_count;

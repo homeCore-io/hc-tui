@@ -1,43 +1,48 @@
-//! Manage › Modes.
+//! Modes: the list, creating and deleting, and switching manual modes.
 
 use crate::app::editors::{Confirm, ConfirmAction, ModeEditField, ModeEditor, ModeKind};
 use crate::app::{App, Section};
 use crate::model::{ModeConfig, ModeRecord};
-use crossterm::event::{KeyCode, KeyEvent};
 
 impl App {
     pub fn selected_mode(&self) -> Option<&ModeRecord> {
-        match self.manage.modes_sel.id() {
-            Some(id) => self.modes.iter().find(|m| m.config.id == id),
-            None => self.modes.get(self.manage.modes_sel.index()),
+        let id = self.manage.modes_sel.id()?;
+        self.views
+            .modes
+            .iter()
+            .filter_map(|&i| self.modes.get(i))
+            .find(|m| m.config.id == id)
+    }
+
+    pub fn move_mode(&mut self, delta: isize) {
+        let ids = self.mode_view_ids();
+        self.manage.modes_sel.move_by(delta, &ids);
+    }
+
+    pub fn toggle_selected_mode(&mut self) {
+        if let Some(id) = self.selected_mode().map(|m| m.config.id.clone()) {
+            self.toggle_mode(&id);
         }
     }
 
-    pub(crate) fn on_key_modes(&mut self, key: KeyEvent) {
-        let ids: Vec<String> = self.modes.iter().map(|m| m.config.id.clone()).collect();
-        match key.code {
-            KeyCode::Down | KeyCode::Char('j') => self.manage.modes_sel.move_by(1, &ids),
-            KeyCode::Up | KeyCode::Char('k') => self.manage.modes_sel.move_by(-1, &ids),
-            KeyCode::Enter | KeyCode::Char('n') => {
-                self.manage.mode_editor = Some(ModeEditor {
-                    id: String::new(),
-                    name: String::new(),
-                    kind: ModeKind::Solar,
-                    field: ModeEditField::Id,
-                });
-            }
-            KeyCode::Char('d') => {
-                if let Some(m) = self.selected_mode() {
-                    let id = m.config.id.clone();
-                    let name = m.config.name.clone();
-                    self.ask(Confirm::new(
-                        "Delete mode",
-                        format!("Delete mode \"{name}\" ({id})?"),
-                        ConfirmAction::DeleteMode { id },
-                    ));
-                }
-            }
-            _ => {}
+    pub fn new_mode(&mut self) {
+        self.manage.mode_editor = Some(ModeEditor {
+            id: String::new(),
+            name: String::new(),
+            kind: ModeKind::Solar,
+            field: ModeEditField::Id,
+        });
+    }
+
+    pub fn ask_delete_mode(&mut self) {
+        if let Some(m) = self.selected_mode() {
+            let id = m.config.id.clone();
+            let name = m.config.name.clone();
+            self.ask(Confirm::new(
+                "Delete mode?",
+                format!("{name} ({id}) will be deleted from homeCore."),
+                ConfirmAction::DeleteMode { id },
+            ));
         }
     }
 

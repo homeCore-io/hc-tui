@@ -258,7 +258,7 @@ impl CacheStore {
 
 /// A file-name-safe form of `name` that never maps two names to one:
 /// letters, digits, `-` and `_` stay, every other byte becomes `%XX`.
-fn sanitize_component(name: &str) -> String {
+pub fn sanitize_component(name: &str) -> String {
     let mut out = String::with_capacity(name.len());
     for b in name.bytes() {
         if b.is_ascii_alphanumeric() || b == b'-' || b == b'_' {
@@ -315,6 +315,7 @@ mod tests {
                 name: "Kitchen".into(),
                 slug: "kitchen".into(),
                 device_ids: vec![],
+                aliases: vec![],
             }]),
             ..Default::default()
         };

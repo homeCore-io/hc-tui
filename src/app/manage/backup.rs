@@ -40,11 +40,11 @@ impl BackupAction {
 
     pub fn label(self) -> String {
         match self {
-            Self::BackupZip => "Download system backup (.zip)".into(),
-            Self::ExportRules => "Export all rules to JSON".into(),
+            Self::BackupZip => "Download a backup of homeCore (.zip)".into(),
+            Self::ExportRules => "Export all automations to JSON".into(),
             Self::ExportScenes => "Export all scenes to JSON".into(),
             Self::ImportRules => format!(
-                "Import rules from {}",
+                "Import automations from {}",
                 imports_dir().join("rules.json").display()
             ),
             Self::ImportScenes => format!(
@@ -102,16 +102,16 @@ impl App {
                 match action {
                     BackupAction::ImportRules => self.ask(
                         Confirm::new(
-                            "Import rules",
-                            "Import rules into homeCore?",
+                            "Import automations?",
+                            "Automations from the file will be added to homeCore.",
                             ConfirmAction::ImportRules,
                         )
                         .with_detail(action.label()),
                     ),
                     BackupAction::ImportScenes => self.ask(
                         Confirm::new(
-                            "Import scenes",
-                            "Import scenes into homeCore?",
+                            "Import scenes?",
+                            "Scenes from the file will be added to homeCore.",
                             ConfirmAction::ImportScenes,
                         )
                         .with_detail(action.label()),

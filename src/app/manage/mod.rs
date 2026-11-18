@@ -1,5 +1,6 @@
-//! Manage tab: modes, Matter, system status, users, logs, events, audit
-//! and backup sub-panels.
+//! State for the Settings screens (People, Data & backups, Logs,
+//! Events, Audit, System) plus Modes and Plugins › Matter, which grew
+//! up here.
 
 pub mod audit;
 pub mod backup;
@@ -11,60 +12,6 @@ pub mod users;
 
 use super::editors::{GlueCreator, ModeEditor, UserEditor};
 use super::{App, ListSel};
-use crossterm::event::{KeyCode, KeyEvent};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum AdminSubPanel {
-    #[default]
-    Modes,
-    Matter,
-    Status,
-    Users,
-    Logs,
-    Events,
-    Audit,
-    Backup,
-}
-
-impl AdminSubPanel {
-    pub const ALL: [AdminSubPanel; 8] = [
-        AdminSubPanel::Modes,
-        AdminSubPanel::Matter,
-        AdminSubPanel::Status,
-        AdminSubPanel::Users,
-        AdminSubPanel::Logs,
-        AdminSubPanel::Events,
-        AdminSubPanel::Audit,
-        AdminSubPanel::Backup,
-    ];
-
-    pub fn title(self) -> &'static str {
-        match self {
-            Self::Modes => "Modes",
-            Self::Matter => "Matter",
-            Self::Status => "Status",
-            Self::Users => "Users",
-            Self::Logs => "Logs",
-            Self::Events => "Events",
-            Self::Audit => "Audit",
-            Self::Backup => "Backup",
-        }
-    }
-
-    pub fn index(self) -> usize {
-        Self::ALL.iter().position(|p| *p == self).unwrap_or(0)
-    }
-
-    fn step(self, forward: bool) -> Self {
-        let n = Self::ALL.len();
-        let i = self.index();
-        Self::ALL[if forward {
-            (i + 1) % n
-        } else {
-            (i + n - 1) % n
-        }]
-    }
-}
 
 #[derive(Debug, Default)]
 pub struct EventsPanel {
@@ -75,7 +22,6 @@ pub struct EventsPanel {
 
 #[derive(Debug, Default)]
 pub struct ManageTab {
-    pub sub: AdminSubPanel,
     pub modes_sel: ListSel,
     pub mode_editor: Option<ModeEditor>,
     pub users_sel: ListSel,
@@ -90,33 +36,10 @@ pub struct ManageTab {
 }
 
 impl App {
-    /// Load whatever the newly shown panel needs.
-    pub(crate) fn on_enter_manage_panel(&mut self) {
-        match self.manage.sub {
-            AdminSubPanel::Matter => self.refresh_matter_nodes(),
-            AdminSubPanel::Status => self.refresh_system_status(),
-            AdminSubPanel::Audit => self.refresh_audit(),
-            _ => {}
-        }
-    }
-
-    /// `r` on the Manage tab.
-    pub(crate) fn refresh_manage_panel(&mut self) {
-        match self.manage.sub {
-            AdminSubPanel::Matter => self.refresh_matter_nodes(),
-            AdminSubPanel::Status => self.refresh_system_status(),
-            AdminSubPanel::Audit => self.refresh_audit(),
-            _ => {
-                self.status = "Refreshing...".to_string();
-                self.start_sync();
-            }
-        }
-    }
-
     pub(crate) fn resolve_manage_selections(&mut self) {
-        let ids: Vec<String> = self.modes.iter().map(|m| m.config.id.clone()).collect();
+        let ids = self.mode_view_ids();
         self.manage.modes_sel.resolve(&ids);
-        let ids: Vec<String> = self.users.iter().map(|u| u.id.clone()).collect();
+        let ids = self.user_view_ids();
         self.manage.users_sel.resolve(&ids);
         let ids: Vec<String> = self
             .matter_nodes
@@ -143,39 +66,9 @@ impl App {
             .collect()
     }
 
-    pub(crate) fn on_key_manage(&mut self, key: KeyEvent) {
-        let sub = self.manage.sub;
-        match key.code {
-            KeyCode::Left | KeyCode::Right => {
-                self.manage.sub = sub.step(key.code == KeyCode::Right);
-                self.on_enter_manage_panel();
-                return;
-            }
-            KeyCode::Char('g') | KeyCode::Char('G') => {
-                self.manage.glue_creator = Some(GlueCreator::default());
-                self.status = "Open helper creator".to_string();
-                return;
-            }
-            _ => {}
-        }
-        match sub {
-            AdminSubPanel::Modes => self.on_key_modes(key),
-            AdminSubPanel::Matter => self.on_key_matter(key),
-            AdminSubPanel::Status => {}
-            AdminSubPanel::Users => self.on_key_users(key),
-            AdminSubPanel::Logs => self.on_key_logs(key),
-            AdminSubPanel::Events => {
-                let ids = self.event_row_ids();
-                match key.code {
-                    KeyCode::Down | KeyCode::Char('j') => self.manage.events.sel.move_by(1, &ids),
-                    KeyCode::Up | KeyCode::Char('k') => self.manage.events.sel.move_by(-1, &ids),
-                    KeyCode::Char('f') => self.cycle_event_filter(),
-                    _ => {}
-                }
-            }
-            AdminSubPanel::Audit => self.on_key_audit(key),
-            AdminSubPanel::Backup => self.on_key_backup(key),
-        }
+    pub fn move_event(&mut self, delta: isize) {
+        let ids = self.event_row_ids();
+        self.manage.events.sel.move_by(delta, &ids);
     }
 
     pub(crate) fn save_glue_creator(&mut self) {

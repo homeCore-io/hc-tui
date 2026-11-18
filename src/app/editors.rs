@@ -537,10 +537,10 @@ pub struct RuleFilterBar {
 impl App {
     /// Route a key to whichever editor is open. Returns false when none
     /// is.
-    pub(super) fn on_key_editors(&mut self, key: KeyEvent) -> bool {
+    pub(crate) fn on_key_editors(&mut self, key: KeyEvent) -> bool {
         if self.devices_tab.editor.is_some() {
             self.on_key_device_editor(key);
-        } else if self.areas_tab.editor.is_some() {
+        } else if self.rooms.editor.is_some() {
             self.on_key_area_editor(key);
         } else if self.manage.user_editor.is_some() {
             self.on_key_user_editor(key);
@@ -593,12 +593,12 @@ impl App {
     }
 
     fn on_key_area_editor(&mut self, key: KeyEvent) {
-        let Some(ed) = self.areas_tab.editor.as_mut() else {
+        let Some(ed) = self.rooms.editor.as_mut() else {
             return;
         };
         match key.code {
             KeyCode::Esc => {
-                self.areas_tab.editor = None;
+                self.rooms.editor = None;
                 self.status = "Area edit canceled".to_string();
             }
             KeyCode::Enter => self.save_area_editor(),

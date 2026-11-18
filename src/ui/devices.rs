@@ -1,4 +1,4 @@
-//! Devices (all and media players), Scenes and Areas tabs.
+//! Devices (all and media players) and Scenes.
 
 use super::widgets::{
     clean_name, clean_plugin_id, detail_row, format_duration_ms, highlight, make_bar, status_color,
@@ -8,7 +8,7 @@ use crate::app::devices::{
     is_timer, timer_remaining_secs, timer_state,
 };
 use crate::app::media::media_player_model;
-use crate::app::{App, AreasPane, DeviceSubPanel, DeviceViewMode, format_timestamp_utc};
+use crate::app::{App, DeviceSubPanel, DeviceViewMode, format_timestamp_utc};
 use crate::model::{DeviceState, SceneSource};
 use crate::text::{normalize_label, take_chars};
 use ratatui::{
@@ -32,7 +32,7 @@ pub fn draw_devices_tab(frame: &mut Frame<'_>, app: &App, area: Rect) {
         DeviceSubPanel::All => 0,
         DeviceSubPanel::MediaPlayers => 1,
     };
-    let tabs = Tabs::new(vec![Line::from("All"), Line::from("Media Players")])
+    let tabs = Tabs::new(vec![Line::from("All"), Line::from("Media players")])
         .select(idx)
         .block(Block::default().borders(Borders::ALL).title("Devices"))
         .style(Style::default().fg(Color::Gray))
@@ -90,22 +90,21 @@ fn draw_device_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
     }
 
     let mode = if tab.view_mode == DeviceViewMode::Grouped {
-        "Grouped"
+        "grouped"
     } else {
-        "Flat"
+        "flat"
     };
-    let search = match tab.search_query.trim() {
-        "" => "-".to_string(),
-        q if tab.search_open => format!("{q}_"),
-        q => q.to_string(),
-    };
-    let syncing = if app.syncing { " [syncing...]" } else { "" };
+    let room = tab
+        .room
+        .as_deref()
+        .and_then(|id| app.areas.iter().find(|a| a.id == id))
+        .map(|a| format!(" in {}", a.name))
+        .unwrap_or_default();
     let title = format!(
-        "Devices ({mode}) [{}] f:{} s:{} q:{}{syncing}",
+        " {} devices{room} · {} · sort: {} · view: {mode} ",
         app.views.devices.len(),
         tab.filter.title(),
         tab.sort.title(),
-        search,
     );
     let list = List::new(items).block(Block::default().borders(Borders::ALL).title(title));
     let mut state = ListState::default();
@@ -828,15 +827,14 @@ fn draw_media_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
 pub fn draw_scenes_table(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let hl = highlight();
     let header = Row::new(
-        ["  Scene", "Source", "Area / Room", "Status"]
+        ["  Scene", "From", "Room", "State"]
             .iter()
             .map(|h| Cell::from(*h).style(super::widgets::heading())),
     );
     let selected = app.selected_scene().map(|s| s.id.clone());
     let mut sel_row = None;
     let rows: Vec<Row> = app
-        .scenes
-        .iter()
+        .visible_scenes()
         .enumerate()
         .map(|(i, s)| {
             let is_sel = selected.as_deref() == Some(s.id.as_str());
@@ -850,8 +848,8 @@ pub fn draw_scenes_table(frame: &mut Frame<'_>, app: &App, area: Rect) {
             };
             let room = s.room.clone().unwrap_or_else(|| "-".to_string());
             let (st, color) = match s.active {
-                Some(true) => ("● Active", Color::Green),
-                Some(false) => ("○ Inactive", Color::DarkGray),
+                Some(true) => ("● active", Color::Green),
+                Some(false) => ("○ off", Color::DarkGray),
                 None => ("-", Color::DarkGray),
             };
             if is_sel {
@@ -884,134 +882,10 @@ pub fn draw_scenes_table(frame: &mut Frame<'_>, app: &App, area: Rect) {
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .title(format!("Scenes [{}]", app.scenes.len())),
+            .title(format!(" Scenes ({}) ", app.views.scenes.len())),
     )
     .row_highlight_style(hl);
     let mut state = TableState::default();
     state.select(sel_row);
     frame.render_stateful_widget(table, area, &mut state);
-}
-
-// ── Areas ───────────────────────────────────────────────────────────────────
-
-pub fn draw_areas_pane(frame: &mut Frame<'_>, app: &App, area: Rect) {
-    let panes = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
-        .split(area);
-    draw_areas_list(frame, app, panes[0]);
-    draw_area_devices(frame, app, panes[1]);
-}
-
-fn pane_border(focused: bool) -> Style {
-    if focused {
-        Style::default().fg(Color::Cyan)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    }
-}
-
-fn draw_areas_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
-    let focused = app.areas_tab.pane == AreasPane::AreasList;
-    let items: Vec<ListItem> = app
-        .areas
-        .iter()
-        .map(|a| {
-            let n = a.device_ids.len();
-            let label = if n == 1 { "device" } else { "devices" };
-            ListItem::new(Line::from(vec![
-                Span::styled(
-                    format!("  {:<24}", take_chars(&a.name, 24)),
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    format!("[{n} {label}]"),
-                    Style::default().fg(Color::DarkGray),
-                ),
-            ]))
-        })
-        .collect();
-    let mut list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Areas")
-                .border_style(pane_border(focused)),
-        )
-        .highlight_symbol(">> ");
-    if focused {
-        list = list.highlight_style(highlight());
-    }
-    let mut state = ListState::default();
-    if !app.areas.is_empty() {
-        state.select(Some(app.areas_tab.list_sel.index()));
-    }
-    frame.render_stateful_widget(list, area, &mut state);
-}
-
-fn draw_area_devices(frame: &mut Frame<'_>, app: &App, area: Rect) {
-    let focused = app.areas_tab.pane == AreasPane::DeviceList;
-    let Some(sel) = app.selected_area() else {
-        frame.render_widget(
-            Paragraph::new("← Select an area to view devices")
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title("Select an area")
-                        .border_style(pane_border(focused)),
-                )
-                .style(Style::default().fg(Color::DarkGray)),
-            area,
-        );
-        return;
-    };
-    let items: Vec<ListItem> = app
-        .views
-        .area_devices
-        .iter()
-        .filter_map(|&i| app.devices.get(i))
-        .map(|d| {
-            let mark = if app.areas_tab.marked.contains(&d.device_id) {
-                "[✓]"
-            } else {
-                "[ ]"
-            };
-            let (dot, c) = if d.available {
-                ("●", Color::Green)
-            } else {
-                ("○", Color::Red)
-            };
-            ListItem::new(Line::from(vec![
-                Span::styled(format!("{mark} "), Style::default().fg(Color::Yellow)),
-                Span::styled(format!("{dot} "), Style::default().fg(c)),
-                Span::styled(
-                    format!("{:<20}", take_chars(d.display_name(), 20)),
-                    Style::default().fg(Color::White),
-                ),
-                Span::styled(
-                    format!(" [{}]", app.device_status(d)),
-                    Style::default().fg(Color::Gray),
-                ),
-            ]))
-        })
-        .collect();
-    let n = items.len();
-    let mut list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(format!("Devices in \"{}\"", sel.name))
-                .border_style(pane_border(focused)),
-        )
-        .highlight_symbol(">> ");
-    if focused {
-        list = list.highlight_style(highlight());
-    }
-    let mut state = ListState::default();
-    if focused && n > 0 {
-        state.select(Some(app.areas_tab.devices_sel.index().min(n - 1)));
-    }
-    frame.render_stateful_widget(list, area, &mut state);
 }

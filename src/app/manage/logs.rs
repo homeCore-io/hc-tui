@@ -4,8 +4,8 @@
 //! closes the stream, and changing the level reconnects with the new
 //! level.
 
+use crate::app::App;
 use crate::app::editors::edit_text;
-use crate::app::{AdminSubPanel, App, Tab};
 use crate::model::LogLine;
 use crate::net::ws::{LogMsg, LogParams};
 use crossterm::event::{KeyCode, KeyEvent};
@@ -79,10 +79,7 @@ impl LogsPanel {
 
 impl App {
     fn wants_log_stream(&self) -> bool {
-        self.authenticated
-            && self.is_admin()
-            && self.active_tab() == Tab::Manage
-            && self.manage.sub == AdminSubPanel::Logs
+        self.authenticated && self.is_admin() && self.screen == crate::screens::ScreenId::Logs
     }
 
     /// Open, reopen or close the log stream to match what is on screen.
@@ -236,8 +233,7 @@ mod tests {
         let mut a = signed_in(Role::Admin);
         a.update_log_stream();
         assert!(!a.manage.logs.is_streaming());
-        a.tab = a.tabs().iter().position(|t| *t == Tab::Manage).unwrap();
-        a.manage.sub = AdminSubPanel::Logs;
+        a.screen = crate::screens::ScreenId::Logs;
         a.update_log_stream();
         assert!(a.manage.logs.is_streaming());
         // Changing level reconnects with the new parameter.
@@ -248,7 +244,7 @@ mod tests {
             Some("warn")
         );
         // Leaving the panel closes it.
-        a.manage.sub = AdminSubPanel::Users;
+        a.screen = crate::screens::ScreenId::People;
         a.update_log_stream();
         assert!(!a.manage.logs.is_streaming());
     }

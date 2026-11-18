@@ -1,4 +1,5 @@
-//! Manage › Users, and changing your own password.
+//! People: who can sign in, their roles, and changing your own
+//! password.
 
 use crate::app::editors::{Confirm, ConfirmAction, UserEditField, UserEditMode, UserEditor};
 use crate::app::{App, FocusField, Section};
@@ -10,14 +11,16 @@ const MIN_PASSWORD_CHARS: usize = 8;
 
 impl App {
     pub fn selected_user(&self) -> Option<&UserInfo> {
-        match self.manage.users_sel.id() {
-            Some(id) => self.users.iter().find(|u| u.id == id),
-            None => self.users.get(self.manage.users_sel.index()),
-        }
+        let id = self.manage.users_sel.id()?;
+        self.views
+            .users
+            .iter()
+            .filter_map(|&i| self.users.get(i))
+            .find(|u| u.id == id)
     }
 
     pub(crate) fn on_key_users(&mut self, key: KeyEvent) {
-        let ids: Vec<String> = self.users.iter().map(|u| u.id.clone()).collect();
+        let ids = self.user_view_ids();
         match key.code {
             KeyCode::Down | KeyCode::Char('j') => self.manage.users_sel.move_by(1, &ids),
             KeyCode::Up | KeyCode::Char('k') => self.manage.users_sel.move_by(-1, &ids),
@@ -28,7 +31,7 @@ impl App {
                 }
             }
             KeyCode::Char('p') => self.open_change_password(),
-            KeyCode::Char('d') => self.ask_delete_user(),
+            KeyCode::Char('x') | KeyCode::Delete => self.ask_delete_user(),
             _ => {}
         }
     }

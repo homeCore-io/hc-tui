@@ -59,6 +59,20 @@ impl Role {
         }
     }
 
+    /// The role in words, as the app names it: `"Household member"`.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Role::Admin => "Admin",
+            Role::User => "User",
+            Role::ReadOnly => "Read only",
+            Role::Observer => "Observer",
+            Role::DeviceOperator => "Device operator",
+            Role::RuleEditor => "Rule editor",
+            Role::ServiceOperator => "Service operator",
+            Role::HouseholdMember => "Household member",
+        }
+    }
+
     /// Whether the role carries `scope`, per core's role table in
     /// `hc-auth/src/user.rs`. Used when the server did not send the
     /// user's scopes (login responses do not; `/auth/me` does).
@@ -185,6 +199,10 @@ pub struct DeviceState {
     pub area_override: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_device_id: Option<String>,
+    /// A person's hint for how to show the device (`"light"` for a
+    /// switch that runs a light).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ui_hint: Option<String>,
     #[serde(default)]
     pub available: bool,
     #[serde(default)]
@@ -289,6 +307,41 @@ pub struct Area {
     pub slug: String,
     #[serde(default)]
     pub device_ids: Vec<String>,
+    /// Other slugs the room answers to.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
+}
+
+// ── Alerts ──────────────────────────────────────────────────────────────────
+
+/// One active alert from `GET /alerts` (core's `hc_types::alert::Alert`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Alert {
+    pub id: String,
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub device_id: String,
+    #[serde(default)]
+    pub message: String,
+    #[serde(default)]
+    pub reason: String,
+    #[serde(default)]
+    pub severity: String,
+    #[serde(default)]
+    pub raised_at: String,
+    /// Present once someone has seen it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acknowledged: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin_id: Option<String>,
+}
+
+impl Alert {
+    /// Open: nobody has acknowledged it yet.
+    pub fn is_open(&self) -> bool {
+        self.acknowledged.as_ref().is_none_or(Value::is_null)
+    }
 }
 
 // ── Rules ───────────────────────────────────────────────────────────────────

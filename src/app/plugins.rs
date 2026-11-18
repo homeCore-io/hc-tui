@@ -46,6 +46,15 @@ impl PluginDetailPanel {
     }
 }
 
+/// The Plugins screen's tabs. Matter shows only when the Matter plugin
+/// is installed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PluginsSub {
+    #[default]
+    Installed,
+    Matter,
+}
+
 #[derive(Debug)]
 pub struct PluginDetail {
     pub plugin_id: String,
@@ -57,8 +66,22 @@ pub struct PluginDetail {
     pub action_status: String,
 }
 
+impl PluginDetail {
+    pub fn new(plugin_id: String) -> Self {
+        Self {
+            plugin_id,
+            panel: PluginDetailPanel::Overview,
+            caps: Load::Idle,
+            action_sel: ListSel::default(),
+            action_busy: false,
+            action_status: String::new(),
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct PluginsTab {
+    pub sub: PluginsSub,
     pub sel: ListSel,
     pub detail: Option<PluginDetail>,
     pub streaming: Option<StreamingAction>,
@@ -219,7 +242,7 @@ impl App {
         }
     }
 
-    pub(super) fn resolve_plugin_detail_selection(&mut self) {
+    pub(crate) fn resolve_plugin_detail_selection(&mut self) {
         if let Some(d) = self.plugins_tab.detail.as_mut() {
             let ids: Vec<String> = d
                 .caps
@@ -230,30 +253,42 @@ impl App {
         }
     }
 
-    pub(super) fn on_key_plugins(&mut self, key: KeyEvent) {
-        let ids: Vec<String> = self.plugins.iter().map(|p| p.plugin_id.clone()).collect();
-        match key.code {
-            KeyCode::Down | KeyCode::Char('j') => self.plugins_tab.sel.move_by(1, &ids),
-            KeyCode::Up | KeyCode::Char('k') => self.plugins_tab.sel.move_by(-1, &ids),
-            KeyCode::Enter => self.open_plugin_detail(),
-            KeyCode::Char('d') => self.ask_uninstall_plugin(),
-            _ => {}
+    /// Whether the Matter plugin is installed, which brings its tab.
+    pub fn has_matter(&self) -> bool {
+        // Core proxies Matter through the plugin's controller device.
+        self.device_by_id("matter_controller").is_some()
+            || self
+                .plugins
+                .iter()
+                .any(|p| p.plugin_id.trim_start_matches("plugin.") == "matter")
+    }
+
+    pub fn move_plugin(&mut self, delta: isize) {
+        let ids = self.plugin_view_ids();
+        self.plugins_tab.sel.move_by(delta, &ids);
+    }
+
+    /// ←/→ between Installed and Matter.
+    pub fn plugins_switch_sub(&mut self) {
+        if !self.has_matter() {
+            self.plugins_tab.sub = PluginsSub::Installed;
+            return;
+        }
+        self.plugins_tab.sub = match self.plugins_tab.sub {
+            PluginsSub::Installed => PluginsSub::Matter,
+            PluginsSub::Matter => PluginsSub::Installed,
+        };
+        if self.plugins_tab.sub == PluginsSub::Matter {
+            self.refresh_matter_nodes();
         }
     }
 
-    fn open_plugin_detail(&mut self) {
+    pub fn open_plugin_detail(&mut self) {
         let Some(id) = self.selected_plugin().map(|p| p.plugin_id.clone()) else {
             return;
         };
         self.status = format!("Opened plugin detail: {id}");
-        self.plugins_tab.detail = Some(PluginDetail {
-            plugin_id: id,
-            panel: PluginDetailPanel::Overview,
-            caps: Load::Idle,
-            action_sel: ListSel::default(),
-            action_busy: false,
-            action_status: String::new(),
-        });
+        self.plugins_tab.detail = Some(PluginDetail::new(id));
     }
 
     fn set_detail_panel(&mut self, panel: PluginDetailPanel) {
@@ -266,42 +301,39 @@ impl App {
         }
     }
 
-    pub(super) fn on_key_plugin_detail(&mut self, key: KeyEvent) {
+    pub fn close_plugin_detail(&mut self) {
+        self.plugins_tab.detail = None;
+    }
+
+    /// ←/→ in the detail view.
+    pub fn step_detail_panel(&mut self, forward: bool) {
+        if let Some(panel) = self.plugins_tab.detail.as_ref().map(|d| d.panel) {
+            self.set_detail_panel(panel.step(forward));
+        }
+    }
+
+    pub fn refresh_plugin_detail(&mut self) {
+        self.start_sync();
+        if self
+            .plugins_tab
+            .detail
+            .as_ref()
+            .is_some_and(|d| d.panel == PluginDetailPanel::Actions)
+        {
+            self.load_capabilities();
+        }
+    }
+
+    pub fn move_plugin_action(&mut self, delta: isize) {
         let Some(d) = self.plugins_tab.detail.as_mut() else {
             return;
         };
-        let panel = d.panel;
         let ids: Vec<String> = d
             .caps
             .ready()
             .map(|c| c.actions.iter().map(|a| a.id.clone()).collect())
             .unwrap_or_default();
-        match key.code {
-            KeyCode::Esc => {
-                self.plugins_tab.detail = None;
-                self.status = "Closed plugin detail".to_string();
-            }
-            KeyCode::Char('1') => self.set_detail_panel(PluginDetailPanel::Overview),
-            KeyCode::Char('2') => self.set_detail_panel(PluginDetailPanel::Actions),
-            KeyCode::Char('3') => self.set_detail_panel(PluginDetailPanel::Diagnostics),
-            KeyCode::Left | KeyCode::BackTab => self.set_detail_panel(panel.step(false)),
-            KeyCode::Right | KeyCode::Tab => self.set_detail_panel(panel.step(true)),
-            KeyCode::Char('r') => {
-                self.start_sync();
-                if panel == PluginDetailPanel::Actions {
-                    self.load_capabilities();
-                }
-            }
-            KeyCode::Char('q') => self.should_quit = true,
-            KeyCode::Up | KeyCode::Char('k') if panel == PluginDetailPanel::Actions => {
-                d.action_sel.move_by(-1, &ids)
-            }
-            KeyCode::Down | KeyCode::Char('j') if panel == PluginDetailPanel::Actions => {
-                d.action_sel.move_by(1, &ids)
-            }
-            KeyCode::Enter if panel == PluginDetailPanel::Actions => self.run_selected_action(),
-            _ => {}
-        }
+        d.action_sel.move_by(delta, &ids);
     }
 
     fn load_capabilities(&mut self) {
@@ -339,7 +371,7 @@ impl App {
 
     /// Enter on an action: check the role, ask first when it is marked
     /// `danger`, then run it.
-    fn run_selected_action(&mut self) {
+    pub fn run_selected_action(&mut self) {
         let Some(d) = self.plugins_tab.detail.as_ref() else {
             return;
         };
@@ -381,7 +413,7 @@ impl App {
         self.run_plugin_action(plugin_id, action);
     }
 
-    pub(super) fn run_plugin_action(&mut self, plugin_id: String, action: Action) {
+    pub(crate) fn run_plugin_action(&mut self, plugin_id: String, action: Action) {
         if action.stream {
             self.start_streaming_action(plugin_id, action);
             return;
@@ -463,7 +495,7 @@ impl App {
         self.plugins_tab.streaming = None;
     }
 
-    pub(super) fn on_stream_msg(&mut self, msg: StreamMsg) {
+    pub(crate) fn on_stream_msg(&mut self, msg: StreamMsg) {
         let Some(s) = self.plugins_tab.streaming.as_mut() else {
             return;
         };
@@ -486,7 +518,7 @@ impl App {
         }
     }
 
-    pub(super) fn on_key_streaming(&mut self, key: KeyEvent) {
+    pub(crate) fn on_key_streaming(&mut self, key: KeyEvent) {
         let Some(s) = self.plugins_tab.streaming.as_mut() else {
             return;
         };
@@ -561,7 +593,7 @@ impl App {
         );
     }
 
-    fn ask_uninstall_plugin(&mut self) {
+    pub fn ask_uninstall_plugin(&mut self) {
         if !self.is_admin() {
             self.error = Some("uninstalling a plugin needs the admin role".to_string());
             return;
@@ -573,7 +605,7 @@ impl App {
         let n = p.device_count;
         self.ask(
             Confirm::new(
-                "Uninstall plugin",
+                "Uninstall plugin?",
                 format!("Uninstall {plugin_id}?"),
                 ConfirmAction::UninstallPlugin { plugin_id },
             )
@@ -583,7 +615,7 @@ impl App {
         );
     }
 
-    pub(super) fn uninstall_plugin(&mut self, plugin_id: String) {
+    pub(crate) fn uninstall_plugin(&mut self, plugin_id: String) {
         let c = self.client.clone();
         let target = plugin_id.clone();
         self.spawn_ok(
@@ -656,18 +688,14 @@ mod tests {
             "id": "factory_reset", "label": "Factory reset", "danger": true
         }))
         .unwrap();
-        a.plugins_tab.detail = Some(PluginDetail {
+        let mut d = PluginDetail::new("plugin.x".into());
+        d.panel = PluginDetailPanel::Actions;
+        d.caps = Load::Ready(Capabilities {
+            spec: "1".into(),
             plugin_id: "plugin.x".into(),
-            panel: PluginDetailPanel::Actions,
-            caps: Load::Ready(Capabilities {
-                spec: "1".into(),
-                plugin_id: "plugin.x".into(),
-                actions: vec![action],
-            }),
-            action_sel: ListSel::default(),
-            action_busy: false,
-            action_status: String::new(),
+            actions: vec![action],
         });
+        a.plugins_tab.detail = Some(d);
         a.refresh_views();
         a.run_selected_action();
         assert!(matches!(

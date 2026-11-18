@@ -161,7 +161,7 @@ impl App {
         );
     }
 
-    pub(super) fn media_play_stop(&mut self) {
+    pub(crate) fn media_play_stop(&mut self) {
         let Some(device) = self.selected_device() else {
             return;
         };
@@ -176,7 +176,7 @@ impl App {
         }
     }
 
-    pub(super) fn media_play_pause(&mut self) {
+    pub(crate) fn media_play_pause(&mut self) {
         let Some((id, name, m)) = self.selected_media() else {
             return;
         };
@@ -188,7 +188,7 @@ impl App {
         }
     }
 
-    pub(super) fn media_stop(&mut self) {
+    pub(crate) fn media_stop(&mut self) {
         let Some((id, name, m)) = self.selected_media() else {
             return;
         };
@@ -199,7 +199,7 @@ impl App {
         }
     }
 
-    pub(super) fn media_simple(&mut self, action: &'static str, label: &'static str) {
+    pub(crate) fn media_simple(&mut self, action: &'static str, label: &'static str) {
         let Some((id, name, m)) = self.selected_media() else {
             return;
         };
@@ -213,7 +213,7 @@ impl App {
         }
     }
 
-    pub(super) fn media_toggle_mute(&mut self) {
+    pub(crate) fn media_toggle_mute(&mut self) {
         let Some((id, name, m)) = self.selected_media() else {
             return;
         };
@@ -229,7 +229,7 @@ impl App {
         );
     }
 
-    pub(super) fn media_adjust_volume(&mut self, delta: i64) {
+    pub(crate) fn media_adjust_volume(&mut self, delta: i64) {
         let Some((id, name, m)) = self.selected_media() else {
             return;
         };

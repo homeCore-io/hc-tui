@@ -31,6 +31,13 @@ pub fn truncate(s: &str, max: usize) -> String {
     out
 }
 
+/// Whether any of `fields` contains `query`, ignoring case. An empty
+/// query matches everything. Used by every list's `/` search.
+pub fn matches_query(query: &str, fields: &[&str]) -> bool {
+    let q = query.trim().to_lowercase();
+    q.is_empty() || fields.iter().any(|f| f.to_lowercase().contains(&q))
+}
+
 /// Turn `snake_case`, `camelCase` or `kebab` words into "Title Case".
 pub fn normalize_label(value: &str) -> String {
     let mut spaced = String::with_capacity(value.len() + 4);

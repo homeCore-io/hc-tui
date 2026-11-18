@@ -2,13 +2,17 @@
 //! rebuilt for this frame; nothing here mutates state or touches the
 //! network.
 
-mod devices;
+pub mod devices;
+pub mod help;
+pub mod home;
 mod layout;
+pub mod lists;
 mod login;
-mod manage;
+pub mod manage;
 mod modals;
-mod plugins;
-mod rules;
+pub mod plugins;
+pub mod rooms;
+pub mod rules;
 mod widgets;
 
 use crate::app::App;
@@ -27,8 +31,8 @@ pub fn draw(frame: &mut Frame<'_>, app: &App) {
 mod render_tests {
     use super::*;
     use crate::app::test_support::*;
-    use crate::app::{AdminSubPanel, Tab};
     use crate::model::Role;
+    use crate::screens::ScreenId;
     use ratatui::{Terminal, backend::TestBackend};
     use serde_json::json;
 
@@ -83,25 +87,41 @@ mod render_tests {
     fn the_main_ui_draws_its_tabs_when_authenticated() {
         let mut a = signed_in(Role::User);
         let screen = render(&mut a, 120, 40);
-        for tab in [Tab::Devices, Tab::Scenes, Tab::Areas, Tab::Rules] {
-            assert!(screen.contains(tab.title()), "{screen}");
+        for id in [
+            ScreenId::Home,
+            ScreenId::Rooms,
+            ScreenId::Devices,
+            ScreenId::Scenes,
+            ScreenId::Automations,
+            ScreenId::System,
+        ] {
+            assert!(screen.contains(id.title()), "{screen}");
         }
+        assert!(screen.contains("Home is empty"), "{screen}");
     }
 
     #[test]
     fn every_tab_and_panel_renders_at_odd_sizes() {
         for role in [Role::Admin, Role::User, Role::Observer] {
             let mut a = populated(role);
-            let tabs = a.tabs();
-            for (i, _) in tabs.iter().enumerate() {
-                a.tab = i;
-                for sub in AdminSubPanel::ALL {
-                    a.manage.sub = sub;
+            for id in a.screens() {
+                a.screen = id;
+                for state in 0..crate::app::test_support::SCREEN_STATES {
+                    crate::app::test_support::enter_state(&mut a, id, state);
                     for (w, h) in [(20u16, 5u16), (40, 10), (200, 60), (80, 3), (120, 40)] {
                         let _ = render(&mut a, w, h);
                     }
                 }
             }
+            // Every overlay too.
+            a.help_open = true;
+            let _ = render(&mut a, 30, 8);
+            a.help_open = false;
+            a.open_home_picker();
+            for (w, h) in [(20u16, 5u16), (100, 30)] {
+                let _ = render(&mut a, w, h);
+            }
+            a.home.picker = None;
         }
     }
 
@@ -110,6 +130,7 @@ mod render_tests {
         let mut a = populated(Role::Admin);
         a.devices[0].name_override = Some("Kitchen Lamp".into());
         a.temp_unit = crate::model::TempUnit::Fahrenheit;
+        a.screen = ScreenId::Devices;
         let screen = render(&mut a, 160, 40);
         assert!(screen.contains("Kitchen Lamp"), "{screen}");
         assert!(screen.contains("°F"), "{screen}");

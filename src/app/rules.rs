@@ -41,15 +41,12 @@ pub struct RulesTab {
     pub groups: Option<GroupsOverlay>,
 }
 
-impl RulesTab {
-    pub fn filter_active(&self) -> bool {
-        self.filter_stale || !self.filter_tag.is_empty() || !self.filter_trigger.is_empty()
-    }
-}
-
 /// Whether `rule` passes the tag / trigger / stale filters. The trigger
 /// filter is a case-insensitive substring of any trigger's variant name.
-pub fn rule_matches(tab: &RulesTab, rule: &Rule) -> bool {
+pub fn rule_matches(tab: &RulesTab, rule: &Rule, query: &str) -> bool {
+    if !crate::text::matches_query(query, &[&rule.name, &rule.tags.join(" ")]) {
+        return false;
+    }
     if tab.filter_stale && rule.error.is_none() {
         return false;
     }
@@ -70,13 +67,16 @@ pub fn rule_matches(tab: &RulesTab, rule: &Rule) -> bool {
 }
 
 impl App {
-    pub(super) fn compute_rule_view(&mut self) {
+    pub(crate) fn compute_rule_view(&mut self) {
+        let q = self
+            .query(crate::screens::ScreenId::Automations)
+            .to_string();
         self.views.rules = (0..self.rules.len())
-            .filter(|&i| rule_matches(&self.rules_tab, &self.rules[i]))
+            .filter(|&i| rule_matches(&self.rules_tab, &self.rules[i], &q))
             .collect();
     }
 
-    pub(super) fn rule_view_ids(&self) -> Vec<String> {
+    pub(crate) fn rule_view_ids(&self) -> Vec<String> {
         self.views
             .rules
             .iter()
@@ -105,50 +105,81 @@ impl App {
         !self.rules_tab.marked.is_empty()
     }
 
-    pub(super) fn on_key_rules(&mut self, key: KeyEvent) {
+    pub fn move_rule(&mut self, delta: isize) {
         let ids = self.rule_view_ids();
-        match key.code {
-            KeyCode::Down | KeyCode::Char('j') => self.rules_tab.sel.move_by(1, &ids),
-            KeyCode::Up | KeyCode::Char('k') => self.rules_tab.sel.move_by(-1, &ids),
-            KeyCode::PageDown => self.rules_tab.sel.move_by(10, &ids),
-            KeyCode::PageUp => self.rules_tab.sel.move_by(-10, &ids),
-            KeyCode::Enter => self.open_rule_detail(),
-            KeyCode::Char('e') | KeyCode::Char('E') => self.set_rules_enabled(true),
-            KeyCode::Char('d') | KeyCode::Char('D') => self.set_rules_enabled(false),
-            KeyCode::Char('c') | KeyCode::Char('C') => self.clone_selected_rule(),
-            KeyCode::Char(' ') => self.toggle_rule_mark(),
-            KeyCode::Char('h') | KeyCode::Char('H') => self.open_fire_history(),
-            KeyCode::Char('g') | KeyCode::Char('G') => self.open_groups(),
-            KeyCode::Char('f') => {
-                self.rules_tab.filter_bar = Some(RuleFilterBar {
-                    tag: self.rules_tab.filter_tag.clone(),
-                    trigger: self.rules_tab.filter_trigger.clone(),
-                    stale: self.rules_tab.filter_stale,
-                    active_field: RuleFilterField::Tag,
-                });
-            }
-            KeyCode::Char('s') => {
-                self.rules_tab.filter_stale = !self.rules_tab.filter_stale;
-                self.status = if self.rules_tab.filter_stale {
-                    "Filter: showing stale rules only".to_string()
-                } else {
-                    "Filter: showing all rules".to_string()
-                };
-            }
-            KeyCode::Delete | KeyCode::Char('x') => self.ask_delete_rule(),
-            KeyCode::Esc => {
-                if self.rules_tab.history.is_some() {
-                    self.rules_tab.history = None;
-                } else if self.bulk() {
-                    self.rules_tab.marked.clear();
-                    self.status = "Selection cleared".to_string();
-                }
-            }
-            _ => {}
+        self.rules_tab.sel.move_by(delta, &ids);
+    }
+
+    pub fn open_rule_filter_bar(&mut self) {
+        self.rules_tab.filter_bar = Some(RuleFilterBar {
+            tag: self.rules_tab.filter_tag.clone(),
+            trigger: self.rules_tab.filter_trigger.clone(),
+            stale: self.rules_tab.filter_stale,
+            active_field: RuleFilterField::Tag,
+        });
+    }
+
+    pub fn toggle_needs_fixing_filter(&mut self) {
+        self.rules_tab.filter_stale = !self.rules_tab.filter_stale;
+        self.status = if self.rules_tab.filter_stale {
+            "Showing automations that need fixing".to_string()
+        } else {
+            "Showing all automations".to_string()
+        };
+    }
+
+    /// Esc on the list: close Recent runs, then clear the marks.
+    pub fn rules_back(&mut self) -> bool {
+        if self.rules_tab.history.is_some() {
+            self.rules_tab.history = None;
+            return true;
+        }
+        if self.bulk() {
+            self.rules_tab.marked.clear();
+            self.status = "Marks cleared".to_string();
+            return true;
+        }
+        false
+    }
+
+    /// Space: turn the selected automation on or off. With marked ones,
+    /// all of them: on when any is off, else off.
+    pub fn toggle_rules(&mut self) {
+        if self.bulk() {
+            let any_off = self
+                .rules
+                .iter()
+                .any(|r| self.rules_tab.marked.contains(&r.id) && !r.enabled);
+            self.set_rules_enabled(any_off);
+            return;
+        }
+        if let Some(id) = self.selected_rule().map(|r| r.id.clone()) {
+            self.toggle_rule_id(&id);
         }
     }
 
-    pub(super) fn on_key_rule_filter_bar(&mut self, key: KeyEvent) {
+    /// Turn one automation on or off, from wherever it is shown.
+    pub fn toggle_rule_id(&mut self, id: &str) {
+        let Some(rule) = self.rules.iter().find(|r| r.id == id).cloned() else {
+            return;
+        };
+        let enabled = !rule.enabled;
+        let verb = if enabled { "on" } else { "off" };
+        let c = self.client.clone();
+        self.spawn_ok(
+            "update automation",
+            async move { c.toggle_rule(&rule.id, enabled).await.map(|_| rule) },
+            move |app, rule: Rule| {
+                if let Some(r) = app.rules.iter_mut().find(|r| r.id == rule.id) {
+                    r.enabled = enabled;
+                }
+                app.status = format!("{} {verb}", rule.name);
+                app.save_cache(&[Section::Rules]);
+            },
+        );
+    }
+
+    pub(crate) fn on_key_rule_filter_bar(&mut self, key: KeyEvent) {
         let Some(bar) = self.rules_tab.filter_bar.as_mut() else {
             return;
         };
@@ -167,7 +198,7 @@ impl App {
                 self.rules_tab.filter_trigger = bar.trigger;
                 self.rules_tab.filter_stale = bar.stale;
                 self.rules_tab.sel.reset();
-                self.status = "Rule filter applied".to_string();
+                self.status = "Automation filter applied".to_string();
             }
             KeyCode::Backspace => {
                 match bar.active_field {
@@ -185,14 +216,14 @@ impl App {
         }
     }
 
-    fn toggle_rule_mark(&mut self) {
+    pub fn toggle_rule_mark(&mut self) {
         let Some(id) = self.selected_rule().map(|r| r.id.clone()) else {
             return;
         };
         if !self.rules_tab.marked.remove(&id) {
             self.rules_tab.marked.insert(id);
         }
-        self.status = format!("{} rule(s) selected", self.rules_tab.marked.len());
+        self.status = format!("{} automation(s) marked", self.rules_tab.marked.len());
     }
 
     /// Enable or disable the marked rules, or the selected one.
@@ -211,7 +242,7 @@ impl App {
                         r.enabled = enabled;
                     }
                     app.rules_tab.marked.clear();
-                    app.status = format!("{verb} {n} rule(s)");
+                    app.status = format!("{verb} {n} automation(s)");
                     app.save_cache(&[Section::Rules]);
                 },
             );
@@ -221,43 +252,43 @@ impl App {
             return;
         };
         self.spawn_ok(
-            "update rule",
+            "update automation",
             async move { c.toggle_rule(&rule.id, enabled).await.map(|_| rule) },
             move |app, rule: Rule| {
                 if let Some(r) = app.rules.iter_mut().find(|r| r.id == rule.id) {
                     r.enabled = enabled;
                 }
-                app.status = format!("{verb} rule '{}'", rule.name);
+                app.status = format!("{verb} {}", rule.name);
                 app.save_cache(&[Section::Rules]);
             },
         );
     }
 
-    fn clone_selected_rule(&mut self) {
+    pub fn clone_selected_rule(&mut self) {
         let Some(id) = self.selected_rule().map(|r| r.id.clone()) else {
             return;
         };
         let c = self.client.clone();
         self.spawn_ok(
-            "clone rule",
+            "copy automation",
             async move { c.clone_rule(&id).await },
             |app, cloned: Rule| {
-                app.status = format!("Cloned -> \"{}\"", cloned.name);
+                app.status = format!("Copied to {}", cloned.name);
                 app.rules.push(cloned);
                 app.save_cache(&[Section::Rules]);
             },
         );
     }
 
-    fn ask_delete_rule(&mut self) {
+    pub fn ask_delete_rule(&mut self) {
         let Some(rule) = self.selected_rule() else {
             return;
         };
         let (id, name) = (rule.id.clone(), rule.name.clone());
         self.ask(
             Confirm::new(
-                "Confirm Delete",
-                format!("Delete rule: \"{name}\"?"),
+                "Delete automation?",
+                format!("{name} will be deleted from homeCore."),
                 ConfirmAction::DeleteRule {
                     id: id.clone(),
                     name,
@@ -267,24 +298,24 @@ impl App {
         );
     }
 
-    pub(super) fn delete_rule(&mut self, id: String, name: String) {
+    pub(crate) fn delete_rule(&mut self, id: String, name: String) {
         let c = self.client.clone();
         let target = id.clone();
         self.spawn_ok(
-            "delete rule",
+            "delete automation",
             async move { c.delete_rule(&target).await },
             move |app, ()| {
                 app.rules.retain(|r| r.id != id);
                 app.rules_tab.marked.remove(&id);
-                app.status = format!("Deleted rule '{name}'");
+                app.status = format!("Deleted {name}");
                 app.save_cache(&[Section::Rules]);
             },
         );
     }
 
-    // ── Fire history pane ────────────────────────────────────────────────
+    // ── Recent runs pane ─────────────────────────────────────────────────
 
-    fn open_fire_history(&mut self) {
+    pub fn open_recent_runs(&mut self) {
         let Some(id) = self.selected_rule().map(|r| r.id.clone()) else {
             return;
         };
@@ -311,7 +342,7 @@ impl App {
 
     // ── Detail view ──────────────────────────────────────────────────────
 
-    fn open_rule_detail(&mut self) {
+    pub fn open_rule_detail(&mut self) {
         let Some(id) = self.selected_rule().map(|r| r.id.clone()) else {
             return;
         };
@@ -325,7 +356,7 @@ impl App {
     }
 
     /// Fetch RON and history separately, so either can fail on its own.
-    fn load_rule_detail(&mut self) {
+    pub fn load_rule_detail(&mut self) {
         let Some(d) = self.rules_tab.detail.as_mut() else {
             return;
         };
@@ -366,29 +397,19 @@ impl App {
         );
     }
 
-    pub(super) fn on_key_rule_detail(&mut self, key: KeyEvent) {
-        let Some(d) = self.rules_tab.detail.as_mut() else {
-            return;
-        };
-        let scroll = |d: &mut RuleDetail, delta: i32| {
+    pub fn scroll_rule_detail(&mut self, delta: i32) {
+        if let Some(d) = self.rules_tab.detail.as_mut() {
             d.scroll = (d.scroll as i32 + delta).clamp(0, u16::MAX as i32) as u16;
-        };
-        match key.code {
-            KeyCode::Esc => self.rules_tab.detail = None,
-            KeyCode::Char('j') | KeyCode::Down => scroll(d, 1),
-            KeyCode::Char('k') | KeyCode::Up => scroll(d, -1),
-            KeyCode::PageDown => scroll(d, 10),
-            KeyCode::PageUp => scroll(d, -10),
-            KeyCode::Home => d.scroll = 0,
-            KeyCode::Char('r') => self.load_rule_detail(),
-            KeyCode::Char('q') => self.should_quit = true,
-            _ => {}
         }
+    }
+
+    pub fn close_rule_detail(&mut self) {
+        self.rules_tab.detail = None;
     }
 
     // ── Groups overlay ───────────────────────────────────────────────────
 
-    fn open_groups(&mut self) {
+    pub fn open_groups(&mut self) {
         self.rules_tab.groups = Some(GroupsOverlay {
             items: Load::Loading,
             sel: ListSel::default(),
@@ -417,7 +438,7 @@ impl App {
         }
     }
 
-    pub(super) fn on_key_groups(&mut self, key: KeyEvent) {
+    pub fn move_group(&mut self, delta: isize) {
         let Some(g) = self.rules_tab.groups.as_mut() else {
             return;
         };
@@ -426,44 +447,42 @@ impl App {
             .ready()
             .map(|v| v.iter().map(|x| x.id.clone()).collect())
             .unwrap_or_default();
-        match key.code {
-            KeyCode::Esc => self.rules_tab.groups = None,
-            KeyCode::Down | KeyCode::Char('j') => g.sel.move_by(1, &ids),
-            KeyCode::Up | KeyCode::Char('k') => g.sel.move_by(-1, &ids),
-            KeyCode::Char('e') | KeyCode::Char('E') => self.set_group_enabled(true),
-            KeyCode::Char('d') | KeyCode::Char('D') => self.set_group_enabled(false),
-            KeyCode::Delete | KeyCode::Char('x') => {
-                if let Some(grp) = self.selected_group() {
-                    let (id, name) = (grp.id.clone(), grp.name.clone());
-                    self.ask(Confirm::new(
-                        "Delete group",
-                        format!("Delete rule group \"{name}\"? Its rules stay."),
-                        ConfirmAction::DeleteRuleGroup { id, name },
-                    ));
-                }
-            }
-            _ => {}
+        g.sel.move_by(delta, &ids);
+    }
+
+    pub fn close_groups(&mut self) {
+        self.rules_tab.groups = None;
+    }
+
+    pub fn ask_delete_group(&mut self) {
+        if let Some(grp) = self.selected_group() {
+            let (id, name) = (grp.id.clone(), grp.name.clone());
+            self.ask(Confirm::new(
+                "Delete group?",
+                format!("The group {name} will be deleted. Its automations stay."),
+                ConfirmAction::DeleteRuleGroup { id, name },
+            ));
         }
     }
 
-    fn set_group_enabled(&mut self, enabled: bool) {
+    pub fn set_group_enabled(&mut self, enabled: bool) {
         let Some(grp) = self.selected_group() else {
             return;
         };
         let (id, name) = (grp.id.clone(), grp.name.clone());
         let c = self.client.clone();
-        let verb = if enabled { "enabled" } else { "disabled" };
+        let verb = if enabled { "on" } else { "off" };
         self.spawn_ok(
             "update group",
             async move { c.set_rule_group_enabled(&id, enabled).await },
             move |app, ()| {
-                app.status = format!("Group '{name}' {verb}");
+                app.status = format!("Group {name} {verb}");
                 app.start_sync();
             },
         );
     }
 
-    pub(super) fn delete_rule_group(&mut self, id: String, name: String) {
+    pub(crate) fn delete_rule_group(&mut self, id: String, name: String) {
         let c = self.client.clone();
         let target = id.clone();
         self.spawn_ok(
@@ -480,7 +499,7 @@ impl App {
         );
     }
 
-    pub(super) fn resolve_group_selection(&mut self) {
+    pub(crate) fn resolve_group_selection(&mut self) {
         if let Some(g) = self.rules_tab.groups.as_mut() {
             let ids: Vec<String> = g
                 .items
@@ -518,17 +537,17 @@ mod tests {
             ..Default::default()
         };
         let r = rule(json!({"DeviceStateChanged": {"device_id": "x"}}), vec![]);
-        assert!(rule_matches(&tab, &r));
+        assert!(rule_matches(&tab, &r, ""));
         let manual = rule(json!("ManualTrigger"), vec![]);
-        assert!(!rule_matches(&tab, &manual));
+        assert!(!rule_matches(&tab, &manual, ""));
         // Extra triggers count too.
         let multi = rule(
             json!("ManualTrigger"),
             vec![json!({"DeviceStateChanged": {}})],
         );
-        assert!(rule_matches(&tab, &multi));
+        assert!(rule_matches(&tab, &multi, ""));
         tab.filter_trigger = "manual".into();
-        assert!(rule_matches(&tab, &manual));
+        assert!(rule_matches(&tab, &manual, ""));
     }
 
     #[test]
@@ -538,8 +557,8 @@ mod tests {
             ..Default::default()
         };
         let mut r = rule(json!("ManualTrigger"), vec![]);
-        assert!(!rule_matches(&tab, &r));
+        assert!(!rule_matches(&tab, &r, ""));
         r.error = Some("parse error".into());
-        assert!(rule_matches(&tab, &r));
+        assert!(rule_matches(&tab, &r, ""));
     }
 }

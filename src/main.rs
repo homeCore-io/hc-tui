@@ -5,6 +5,7 @@ mod config;
 mod fixture_tests;
 mod model;
 mod net;
+mod screens;
 mod sync;
 mod text;
 mod ui;

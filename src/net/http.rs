@@ -12,9 +12,9 @@
 //! screen.
 
 use crate::model::{
-    Area, AuditEntry, Capabilities, DeviceState, LoginResponse, MatterNode, MatterNodesResponse,
-    ModeConfig, ModeRecord, PluginRecord, Role, Rule, RuleFiring, RuleGroup, Scene, SystemStatus,
-    UserInfo,
+    Alert, Area, AuditEntry, Capabilities, DeviceState, LoginResponse, MatterNode,
+    MatterNodesResponse, ModeConfig, ModeRecord, PluginRecord, Role, Rule, RuleFiring, RuleGroup,
+    Scene, SystemStatus, UserInfo,
 };
 use anyhow::{Context, Result, anyhow};
 use reqwest::{Client, Method, RequestBuilder, Response, StatusCode};
@@ -446,11 +446,11 @@ impl HomeCoreClient {
         self.send_empty(Method::DELETE, &path, None).await
     }
 
-    /// `PUT /areas/{id}/devices`. The body is a bare JSON array of ids.
-    pub async fn set_area_devices(&self, id: &str, device_ids: &[String]) -> Result<Area> {
-        let path = format!("/areas/{}/devices", seg(id));
-        self.send_json(Method::PUT, &path, Some(json!(device_ids)))
-            .await
+    /// `POST /areas/{id}/on` or `/off`: every light in the room.
+    pub async fn room_switch(&self, id: &str, on: bool) -> Result<()> {
+        let verb = if on { "on" } else { "off" };
+        let path = format!("/areas/{}/{verb}", seg(id));
+        self.send_empty(Method::POST, &path, None).await
     }
 
     // ── Automations ──────────────────────────────────────────────────────
@@ -580,6 +580,12 @@ impl HomeCoreClient {
         let path = format!("/auth/users/{}/role", seg(id));
         self.send_json(Method::PATCH, &path, Some(json!({ "role": role })))
             .await
+    }
+
+    // ── Alerts ───────────────────────────────────────────────────────────
+
+    pub async fn list_alerts(&self) -> Result<Vec<Alert>> {
+        self.get_json("/alerts").await
     }
 
     // ── Modes ────────────────────────────────────────────────────────────
