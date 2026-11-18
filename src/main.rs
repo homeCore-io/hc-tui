@@ -5,6 +5,8 @@ mod config;
 mod fixture_tests;
 mod model;
 mod net;
+mod plugin_admin;
+mod plugin_form;
 mod screens;
 mod sync;
 mod text;

@@ -176,6 +176,23 @@ fn grouped_view_uses_room_names() {
 }
 
 #[test]
+fn python_sdk_actions_with_null_fields_parse() {
+    // The Python SDK sends `"danger": null` and friends.
+    let caps: Capabilities = parse_body(
+        "/plugins/plugin.mcp/capabilities",
+        r#"{"spec": "1", "plugin_id": "plugin.mcp", "actions": [
+            {"id": "chat", "label": "Ask", "stream": true, "danger": null,
+             "cancelable": null, "concurrency": null, "requires_role": null,
+             "params": {"type": "object", "properties": {"text": {"type": "string"}}}}
+        ]}"#,
+    )
+    .unwrap();
+    let a = &caps.actions[0];
+    assert!(a.stream && !a.danger && !a.cancelable);
+    assert_eq!(a.requires_role, RequiresRole::User);
+}
+
+#[test]
 fn a_malformed_body_names_the_endpoint() {
     let err = parse_body::<Vec<DeviceState>>("/devices", "{\"oops\":1}").unwrap_err();
     assert!(err.to_string().starts_with("/devices:"), "{err}");

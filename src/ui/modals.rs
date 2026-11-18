@@ -29,6 +29,7 @@ pub fn draw_overlays(frame: &mut Frame<'_>, app: &App) {
     if app.plugins_tab.streaming.is_some() {
         draw_streaming_modal(frame, app);
     }
+    super::plugins::draw_plugin_overlays(frame, app);
     if app.rules_tab.groups.is_some() {
         draw_groups(frame, app);
     }

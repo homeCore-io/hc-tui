@@ -1,6 +1,7 @@
 //! Network access: REST, the live WebSocket streams and SSE.
 
 pub mod http;
+pub mod plugins_api;
 pub mod sse;
 pub mod ws;
 

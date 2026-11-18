@@ -243,7 +243,12 @@ impl HomeCoreClient {
         Ok(rb.bearer_auth(token))
     }
 
-    async fn request(&self, method: Method, path: &str, body: Option<&Value>) -> Result<Response> {
+    pub(crate) async fn request(
+        &self,
+        method: Method,
+        path: &str,
+        body: Option<&Value>,
+    ) -> Result<Response> {
         self.request_with(&self.http, method, path, body, None)
             .await
     }

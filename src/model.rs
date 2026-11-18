@@ -633,6 +633,12 @@ pub struct PluginRecord {
     #[serde(default)]
     pub last_heartbeat: Option<String>,
     #[serde(default)]
+    pub last_restart: Option<String>,
+    #[serde(default)]
+    pub uptime_started: Option<String>,
+    #[serde(default)]
+    pub config_path: Option<String>,
+    #[serde(default)]
     pub supports_management: bool,
     #[serde(default)]
     pub notices: Vec<PluginNotice>,
@@ -650,10 +656,19 @@ pub struct Capabilities {
     pub actions: Vec<Action>,
 }
 
+/// `null` reads as the default: the Python SDK sends `"danger": null`.
+fn null_default<'de, D, T>(d: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Default + Deserialize<'de>,
+{
+    Ok(Option::<T>::deserialize(d)?.unwrap_or_default())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Action {
     pub id: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub label: String,
     #[serde(default)]
     pub description: Option<String>,
@@ -661,20 +676,20 @@ pub struct Action {
     pub params: Option<Value>,
     #[serde(default)]
     pub result: Option<Value>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub stream: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub cancelable: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub concurrency: Concurrency,
     #[serde(default)]
     pub item_key: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub requires_role: RequiresRole,
     #[serde(default)]
     pub timeout_ms: Option<u64>,
     /// The action does something hard to undo; ask before running it.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub danger: bool,
 }
 

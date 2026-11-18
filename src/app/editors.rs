@@ -5,7 +5,7 @@
 //! request.
 
 use super::App;
-use crate::model::{Action, Role};
+use crate::model::Role;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 /// Apply a text-editing key to `field`: Backspace deletes, printable
@@ -67,10 +67,8 @@ pub enum ConfirmAction {
     },
     ImportRules,
     ImportScenes,
-    RunPluginAction {
-        plugin_id: String,
-        action: Box<Action>,
-    },
+    /// The Plugins screen's own questions (install, reset, an action).
+    Plugins(super::plugin_manage::PluginConfirm),
 }
 
 #[derive(Debug, Clone)]
