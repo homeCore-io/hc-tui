@@ -16,6 +16,9 @@ pub mod helpers_tab;
 pub mod home;
 pub mod manage;
 pub mod media;
+pub mod plugin_logs;
+pub mod plugin_manage;
+pub mod plugin_settings;
 pub mod plugins;
 pub mod rooms;
 pub mod rule_words;
@@ -928,6 +931,7 @@ impl App {
     /// stream follows the Logs panel). Called once per frame.
     pub fn update_streams(&mut self) {
         self.update_log_stream();
+        self.update_plugin_log_stream();
     }
 
     /// Scenes, modes, plugins and people: the `/` search only.
@@ -1001,6 +1005,7 @@ impl App {
         let ids = self.plugin_view_ids();
         self.plugins_tab.sel.resolve(&ids);
         self.resolve_plugin_detail_selection();
+        self.resolve_plugin_manage_selection();
         self.resolve_manage_selections();
         self.resolve_home_selection();
         self.resolve_picker_selection();
@@ -1040,6 +1045,9 @@ impl App {
         }
         if self.plugins_tab.streaming.is_some() {
             self.on_key_streaming(key);
+            return;
+        }
+        if self.on_key_plugins_modal(key) {
             return;
         }
         if self.on_key_editors(key)
@@ -1293,11 +1301,11 @@ impl App {
             C::UninstallPlugin { plugin_id } => self.uninstall_plugin(plugin_id),
             C::ImportRules => self.run_backup_action(manage::backup::BackupAction::ImportRules),
             C::ImportScenes => self.run_backup_action(manage::backup::BackupAction::ImportScenes),
-            C::RunPluginAction { plugin_id, action } => self.run_plugin_action(plugin_id, *action),
             C::Settings(a) => self.run_settings_confirmed(a),
             C::Helpers(a) => self.run_helper_confirm(a),
             C::Automations(a) => self.run_automation_confirm(a),
             C::Alerts(a) => self.run_alert_confirm(a),
+            C::Plugins(p) => self.run_plugin_confirm(p),
         }
     }
 }
@@ -1399,6 +1407,7 @@ pub(crate) mod test_support {
             (ScreenId::Automations, 2) => a.rules_tab.groups = Some(Default::default()),
             (ScreenId::Alerts, n @ 1..=3) => a.alerts_tab.sub = alerts::AlertsSub::ALL[n],
             (ScreenId::Plugins, 1) => a.plugins_tab.sub = PluginsSub::Matter,
+            (ScreenId::Plugins, 3) => a.plugins_tab.sub = PluginsSub::Catalog,
             (ScreenId::Plugins, 2) => {
                 a.plugins_tab.detail = Some(plugins::PluginDetail::new("p".into()))
             }

@@ -1,7 +1,15 @@
-//! Plugins tab: the list, the per-plugin detail screen (overview,
-//! actions, diagnostics) and the streaming-action modal.
+//! Plugins tab: the Installed list, the per-plugin detail screen
+//! (overview, settings, actions, notices, logs) and the streaming-action
+//! modal.
+//!
+//! Lifecycle, the Catalog, install and runtimes live in `plugin_manage`,
+//! the Settings form and an action's parameters in `plugin_settings`, the
+//! log stream in `plugin_logs`.
 
 use super::editors::{Confirm, ConfirmAction};
+use super::plugin_logs::PluginLogs;
+use super::plugin_manage::PluginManage;
+use super::plugin_settings::{ParamForm, SettingsPane};
 use super::{App, ListSel, Load};
 use crate::model::{Action, Capabilities, PluginRecord, RequiresRole};
 use crate::net::sse::{StreamKind, StreamMsg};
@@ -12,22 +20,28 @@ use tokio::task::JoinHandle;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PluginDetailPanel {
     Overview,
+    Settings,
     Actions,
-    Diagnostics,
+    Notices,
+    Logs,
 }
 
 impl PluginDetailPanel {
-    pub const ALL: [PluginDetailPanel; 3] = [
+    pub const ALL: [PluginDetailPanel; 5] = [
         PluginDetailPanel::Overview,
+        PluginDetailPanel::Settings,
         PluginDetailPanel::Actions,
-        PluginDetailPanel::Diagnostics,
+        PluginDetailPanel::Notices,
+        PluginDetailPanel::Logs,
     ];
 
     pub fn title(self) -> &'static str {
         match self {
             Self::Overview => "Overview",
+            Self::Settings => "Settings",
             Self::Actions => "Actions",
-            Self::Diagnostics => "Diagnostics",
+            Self::Notices => "Notices",
+            Self::Logs => "Logs",
         }
     }
 
@@ -46,13 +60,26 @@ impl PluginDetailPanel {
     }
 }
 
-/// The Plugins screen's tabs. Matter shows only when the Matter plugin
-/// is installed.
+/// The Plugins screen's tabs. Runtimes shows to those who can manage
+/// plugins, Matter only when the Matter plugin is installed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PluginsSub {
     #[default]
     Installed,
+    Catalog,
+    Runtimes,
     Matter,
+}
+
+impl PluginsSub {
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Installed => "Installed",
+            Self::Catalog => "Catalog",
+            Self::Runtimes => "Runtimes",
+            Self::Matter => "Matter",
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -64,6 +91,10 @@ pub struct PluginDetail {
     pub action_sel: ListSel,
     pub action_busy: bool,
     pub action_status: String,
+    pub settings: SettingsPane,
+    pub logs: PluginLogs,
+    /// First notice shown on the Notices tab.
+    pub notices_scroll: usize,
 }
 
 impl PluginDetail {
@@ -75,6 +106,9 @@ impl PluginDetail {
             action_sel: ListSel::default(),
             action_busy: false,
             action_status: String::new(),
+            settings: SettingsPane::default(),
+            logs: PluginLogs::default(),
+            notices_scroll: 0,
         }
     }
 }
@@ -85,6 +119,10 @@ pub struct PluginsTab {
     pub sel: ListSel,
     pub detail: Option<PluginDetail>,
     pub streaming: Option<StreamingAction>,
+    /// The registry, runtimes and what is being installed.
+    pub manage: PluginManage,
+    /// An action's parameters, asked before it runs.
+    pub params: Option<ParamForm>,
     stream_task: Option<JoinHandle<()>>,
     /// Bumped for every streaming run, so a late start reply from a run
     /// that was closed is not attached to the next one.
@@ -268,18 +306,59 @@ impl App {
         self.plugins_tab.sel.move_by(delta, &ids);
     }
 
-    /// ←/→ between Installed and Matter.
-    pub fn plugins_switch_sub(&mut self) {
-        if !self.has_matter() {
-            self.plugins_tab.sub = PluginsSub::Installed;
-            return;
+    /// The tabs this person sees, in order.
+    pub fn plugin_subs(&self) -> Vec<PluginsSub> {
+        let mut v = vec![PluginsSub::Installed, PluginsSub::Catalog];
+        if self.can("plugins:write") {
+            v.push(PluginsSub::Runtimes);
         }
-        self.plugins_tab.sub = match self.plugins_tab.sub {
-            PluginsSub::Installed => PluginsSub::Matter,
-            PluginsSub::Matter => PluginsSub::Installed,
-        };
-        if self.plugins_tab.sub == PluginsSub::Matter {
-            self.refresh_matter_nodes();
+        if self.has_matter() {
+            v.push(PluginsSub::Matter);
+        }
+        v
+    }
+
+    /// The tab on screen: the chosen one, or Installed when it is gone.
+    pub fn plugin_sub(&self) -> PluginsSub {
+        let sub = self.plugins_tab.sub;
+        if self.plugin_subs().contains(&sub) {
+            sub
+        } else {
+            PluginsSub::Installed
+        }
+    }
+
+    /// ←/→ between the tabs.
+    pub fn step_plugins_sub(&mut self, forward: bool) {
+        let subs = self.plugin_subs();
+        let n = subs.len();
+        let i = subs
+            .iter()
+            .position(|s| *s == self.plugin_sub())
+            .unwrap_or(0);
+        let next = subs[if forward {
+            (i + 1) % n
+        } else {
+            (i + n - 1) % n
+        }];
+        self.plugins_tab.sub = next;
+        self.on_plugin_sub_shown();
+    }
+
+    /// Load what the tab on screen needs.
+    pub fn on_plugin_sub_shown(&mut self) {
+        match self.plugin_sub() {
+            PluginsSub::Matter => self.refresh_matter_nodes(),
+            PluginsSub::Runtimes => {
+                if self.plugins_tab.manage.runtimes.ready().is_none() {
+                    self.load_runtimes();
+                }
+            }
+            PluginsSub::Installed | PluginsSub::Catalog => {
+                if matches!(self.plugins_tab.manage.registry, Load::Idle) {
+                    self.load_registry();
+                }
+            }
         }
     }
 
@@ -287,7 +366,6 @@ impl App {
         let Some(id) = self.selected_plugin().map(|p| p.plugin_id.clone()) else {
             return;
         };
-        self.status = format!("Opened plugin detail: {id}");
         self.plugins_tab.detail = Some(PluginDetail::new(id));
     }
 
@@ -295,14 +373,41 @@ impl App {
         let Some(d) = self.plugins_tab.detail.as_mut() else {
             return;
         };
+        if d.panel == PluginDetailPanel::Settings && panel != PluginDetailPanel::Settings {
+            // Leaving the form keeps its changes; an open input is closed.
+            d.settings.input = None;
+        }
         d.panel = panel;
-        if panel == PluginDetailPanel::Actions && !d.caps.is_loading() {
-            self.load_capabilities();
+        match panel {
+            PluginDetailPanel::Actions if !d.caps.is_loading() => self.load_capabilities(),
+            PluginDetailPanel::Settings if matches!(d.settings.form, Load::Idle) => {
+                self.load_plugin_settings()
+            }
+            _ => {}
         }
     }
 
     pub fn close_plugin_detail(&mut self) {
         self.plugins_tab.detail = None;
+    }
+
+    /// The plugin the lifecycle keys act on: the open one, else the
+    /// selected row.
+    pub fn target_plugin(&self) -> Option<&PluginRecord> {
+        if self.plugins_tab.detail.is_some() {
+            self.detail_plugin()
+        } else {
+            self.selected_plugin()
+        }
+    }
+
+    /// `j`/`k` on the Notices tab.
+    pub fn scroll_notices(&mut self, delta: isize) {
+        let n = self.detail_plugin().map(|p| p.notices.len()).unwrap_or(0);
+        if let Some(d) = self.plugins_tab.detail.as_mut() {
+            d.notices_scroll =
+                (d.notices_scroll as isize + delta).clamp(0, n.saturating_sub(1) as isize) as usize;
+        }
     }
 
     /// ←/→ in the detail view.
@@ -314,13 +419,20 @@ impl App {
 
     pub fn refresh_plugin_detail(&mut self) {
         self.start_sync();
-        if self
-            .plugins_tab
-            .detail
-            .as_ref()
-            .is_some_and(|d| d.panel == PluginDetailPanel::Actions)
-        {
-            self.load_capabilities();
+        let Some(d) = self.plugins_tab.detail.as_ref() else {
+            return;
+        };
+        match d.panel {
+            PluginDetailPanel::Actions => self.load_capabilities(),
+            // Reloading would drop changes not yet saved.
+            PluginDetailPanel::Settings => {
+                if d.settings.form.ready().is_some_and(|f| f.dirty()) {
+                    self.status = "Save or discard your changes first".into();
+                } else {
+                    self.load_plugin_settings();
+                }
+            }
+            _ => {}
         }
     }
 
@@ -394,28 +506,31 @@ impl App {
             ));
             return;
         }
+        // An action that takes parameters asks for them first; its form
+        // runs it (asking first when it is dangerous).
+        if let Some(form) = ParamForm::for_action(&plugin_id, &action) {
+            self.plugins_tab.params = Some(form);
+            return;
+        }
         if action.danger {
-            let label = action.display_label().to_string();
-            let detail = action.description.clone().unwrap_or_default();
-            self.ask(
-                Confirm::new(
-                    "Run action",
-                    format!("Run \"{label}\" on {plugin_id}?"),
-                    ConfirmAction::RunPluginAction {
-                        plugin_id,
-                        action: Box::new(action),
-                    },
-                )
-                .with_detail(detail),
-            );
+            self.ask(danger_confirm(plugin_id, action, json!({})));
             return;
         }
         self.run_plugin_action(plugin_id, action);
     }
 
     pub(crate) fn run_plugin_action(&mut self, plugin_id: String, action: Action) {
+        self.run_plugin_action_with(plugin_id, action, json!({}));
+    }
+
+    pub(crate) fn run_plugin_action_with(
+        &mut self,
+        plugin_id: String,
+        action: Action,
+        params: Value,
+    ) {
         if action.stream {
-            self.start_streaming_action(plugin_id, action);
+            self.start_streaming_action(plugin_id, action, params);
             return;
         }
         if let Some(d) = self.plugins_tab.detail.as_mut() {
@@ -425,12 +540,17 @@ impl App {
         let c = self.client.clone();
         let id = action.id.clone();
         self.spawn(
-            async move {
-                c.post_plugin_command(&plugin_id, &action.id, json!({}))
-                    .await
-            },
+            async move { c.post_plugin_command(&plugin_id, &action.id, params).await },
             move |app, res| {
                 let msg = match res {
+                    // A reply that says it failed comes back as success.
+                    Ok(resp) if resp.get("status").and_then(Value::as_str) == Some("error") => {
+                        let why = resp
+                            .get("error")
+                            .and_then(Value::as_str)
+                            .unwrap_or("the plugin said no");
+                        format!("`{id}` failed: {why}")
+                    }
                     Ok(resp) => format!("`{id}` ok: {}", summarize_response(&resp)),
                     Err(e) => format!("`{id}` failed: {e}"),
                 };
@@ -442,7 +562,7 @@ impl App {
         );
     }
 
-    fn start_streaming_action(&mut self, plugin_id: String, action: Action) {
+    fn start_streaming_action(&mut self, plugin_id: String, action: Action, params: Value) {
         let label = action.display_label().to_string();
         self.close_streaming_action();
         self.plugins_tab.streaming = Some(StreamingAction::new(plugin_id.clone(), label));
@@ -451,7 +571,7 @@ impl App {
         let c = self.client.clone();
         let pid = plugin_id.clone();
         self.spawn(
-            async move { c.post_plugin_command(&pid, &action.id, json!({})).await },
+            async move { c.post_plugin_command(&pid, &action.id, params).await },
             move |app, res| {
                 let Some(s) = app.plugins_tab.streaming.as_mut() else {
                     return; // closed while starting
@@ -598,7 +718,7 @@ impl App {
             self.error = Some("uninstalling a plugin needs the admin role".to_string());
             return;
         }
-        let Some(p) = self.selected_plugin() else {
+        let Some(p) = self.target_plugin() else {
             return;
         };
         let plugin_id = p.plugin_id.clone();
@@ -627,11 +747,35 @@ impl App {
                     .and_then(Value::as_u64)
                     .unwrap_or(0);
                 app.plugins.retain(|p| p.plugin_id != plugin_id);
+                if app
+                    .plugins_tab
+                    .detail
+                    .as_ref()
+                    .is_some_and(|d| d.plugin_id == plugin_id)
+                {
+                    app.plugins_tab.detail = None;
+                }
                 app.status = format!("Uninstalled {plugin_id} ({removed} device(s) removed)");
                 app.start_sync();
             },
         );
     }
+}
+
+/// The question before a dangerous action runs.
+pub(crate) fn danger_confirm(plugin_id: String, action: Action, params: Value) -> Confirm {
+    let label = action.display_label().to_string();
+    let detail = action.description.clone().unwrap_or_default();
+    Confirm::new(
+        "Run action?",
+        format!("Run \"{label}\" on {plugin_id}?"),
+        ConfirmAction::Plugins(super::plugin_manage::PluginConfirm::RunAction {
+            plugin_id,
+            action: Box::new(action),
+            params,
+        }),
+    )
+    .with_detail(detail)
 }
 
 /// Short summary of a plugin command reply for the panel footer.
@@ -700,7 +844,9 @@ mod tests {
         a.run_selected_action();
         assert!(matches!(
             a.confirm.as_ref().map(|c| &c.action),
-            Some(ConfirmAction::RunPluginAction { .. })
+            Some(ConfirmAction::Plugins(
+                super::super::plugin_manage::PluginConfirm::RunAction { .. }
+            ))
         ));
     }
 

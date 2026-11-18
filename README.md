@@ -67,9 +67,24 @@ It is built with:
   to another device, the RON read only, groups, marking several to
   switch at once. Automations are still written in the app or as RON
   files.
-- Plugins: overview, actions, streaming actions and recent events. When
-  the Matter plugin is installed, a Matter tab commissions, reinterviews
-  and removes nodes.
+- Plugins, in tabs as the app has them:
+  - Installed: each plugin's version, state, devices and notes (a newer
+    version in the registry, notices, restarts). Admins turn a plugin on
+    or off, start, stop, restart, update and uninstall it. Its detail has
+    Overview, Settings, Actions, Notices and Logs. Settings is a form made
+    from the plugin's config descriptor (or its schema), with its log
+    level; only what changed is written, in place, so comments and keys
+    the form does not know stay in the file. Secrets are never shown.
+    Actions that take parameters ask for them first; dangerous ones ask
+    before they run. Logs streams the plugin's own log while the tab is
+    open.
+  - Catalog: plugins in the registry that are not installed, and
+    install. When more than one runtime can run one, hc-tui asks which.
+  - Runtimes (admins): each plugin runtime, how it is doing, its host
+    version and the plugins placed on it; Reset login makes it a new key,
+    shown once.
+  - Matter, when the Matter plugin is installed: commission, reinterview
+    and remove nodes.
 - Temperatures are shown in the unit set on homeCore
   (`/system/status` `temperature_unit`); values on the bus are °C.
 - Live updates over `/api/v1/events/stream`: devices, rooms, scenes,
@@ -173,9 +188,14 @@ Screens:
 - Alerts: `←`/`→` Open, Acknowledged, Rules, Ignored. On an alert: `a`
   acknowledge, `p` run its action, `i` ignore its device. Rules:
   `Space` on/off, `x` delete. Ignored: `x` show them again.
-- Plugins: `Enter` detail (`←/→` panels, `Enter` runs an action), `x`
-  uninstall (admin), `←/→` Matter when installed (`c` commission, `i`
-  reinterview, `x` remove a node).
+- Plugins: `←/→` tabs (Installed, Catalog, Runtimes, Matter). Installed:
+  `Enter` detail, and for admins `Space` on/off, `s` start or stop, `R`
+  restart, `U` update (when there is one), `x` uninstall. In the detail
+  `←/→` moves between its tabs; Settings: `Enter` edit, `Space` change a
+  choice, `u` undo a change, `Ctrl+S` save, `Esc` discard; Actions:
+  `Enter` run; Logs: `Space` pause, `e`/`w`/`i`/`d` level, `c` clear.
+  Catalog: `i` install. Runtimes: `Enter` detail, `R` reset login.
+  Matter: `c` commission, `i` reinterview, `x` remove a node.
 - People: `←/→` tab (People, Roles, API keys, Sessions).
   - People: `n` new person, `Enter` change role, `x` delete, `c` remove
     PIN (admin); `p` changes your password, or an admin sets someone
@@ -238,9 +258,14 @@ This client uses:
 - `GET|POST /auth/users`, `DELETE /auth/users/{id}`,
   `PATCH /auth/users/{id}/role`, `PATCH /auth/users/{id}/password`,
   `DELETE /auth/users/{id}/pin` (admin)
-- `GET /plugins`, `DELETE /plugins/{id}`, `GET /plugins/{id}/capabilities`,
-  `POST /plugins/{id}/command`, `GET /plugins/{id}/command/{rid}/stream`
-  (SSE)
+- `GET /plugins`, `PATCH|DELETE /plugins/{id}`,
+  `POST /plugins/{id}/start|stop|restart`, `GET /plugins/{id}/capabilities`,
+  `GET|PUT /plugins/{id}/config`, `GET /plugins/{id}/config/descriptor`,
+  `GET /plugins/{id}/config/schema`, `POST /plugins/{id}/command`,
+  `GET /plugins/{id}/command/{rid}/stream` (SSE), `POST /plugins/install`,
+  `GET /registry/plugins`, `GET /plugin-runtimes`,
+  `GET /plugin-runtimes/placements`, `POST /plugin-runtimes/{id}/reset`;
+  a plugin's log is `GET /logs/stream?plugin_id=` (WebSocket, admin)
 - `GET /plugins/matter/nodes`, `POST /plugins/matter/commission`,
   `POST /plugins/matter/reinterview`, `DELETE /plugins/matter/nodes/{id}`
 

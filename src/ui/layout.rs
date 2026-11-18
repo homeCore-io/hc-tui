@@ -259,6 +259,9 @@ pub fn modal_hints(app: &App) -> Option<Vec<&'static str>> {
         }
         return Some(vec!["c stop the run", "Esc close"]);
     }
+    if let Some(h) = super::plugins::modal_hints(app) {
+        return Some(h);
+    }
     if app.devices_tab.editor.is_some() {
         return Some(vec!["Tab field", "Enter save", "Esc cancel"]);
     }
