@@ -148,13 +148,29 @@ Screens:
 - Plugins: `Enter` detail (`←/→` panels, `Enter` runs an action), `x`
   uninstall (admin), `←/→` Matter when installed (`c` commission, `i`
   reinterview, `x` remove a node).
-- People: `n` new person, `Enter` change role, `x` delete (admin); `p`
-  change your password.
-- Data & backups: `Enter` run.
+- People: `←/→` tab (People, Roles, API keys, Sessions).
+  - People: `n` new person, `Enter` change role, `x` delete, `c` remove
+    PIN (admin); `p` changes your password, or an admin sets someone
+    else's.
+  - Roles: what each role may do.
+  - API keys: `n` new key (a label and what it may do), `s` new secret,
+    `x` revoke. A key's secret is shown once, in a dialog; hc-tui never
+    writes it anywhere.
+  - Sessions: `x` end one, `X` end all others. This one stays; `L` signs
+    out.
+- Data & backups: `n` back up now; on a kept backup `Enter` downloads
+  it and `R` restores it (type the backup's date to go ahead); `Enter`
+  runs an action (restore from a file, export, import); `x` deletes a
+  calendar. Downloads and exports go to `~/.homecore/exports`, 0600. A
+  restore is staged for core's next start, and you're asked about
+  restarting.
 - Logs: `Space`/`p` pause, `e`/`w`/`i`/`d` level (error, warn, info,
-  debug), `/` filter, `c` clear.
+  debug), `c` clear. `/` searches the lines kept so far.
 - Events: `f` event type.
 - Audit: `Enter` detail, `]` next page, `[` previous page.
+- System: `←/→` core's log level, until it restarts (`plugins:write`);
+  `R` restart core (admin, asks first).
+- `/` searches People, API keys, Data & backups, Logs, Events and Audit.
 
 ## homeCore API Integration
 
@@ -173,10 +189,20 @@ This client uses:
 - `GET /events`, `GET /events/stream` (WebSocket), `GET /logs/stream`
   (WebSocket, admin)
 - `GET /system/status`, `POST /system/backup`, `GET /audit`
+- `GET /health`, `GET /system/versions`, `GET|PUT /system/log-level`,
+  `GET /system/temperature-unit`, `GET /ws/connections` (admin),
+  `POST /system/restart` (admin)
+- `GET /system/backups`, `GET /system/backups/{name}`,
+  `POST /system/backups/{name}/restore`, `POST /system/restore` (admin)
+- `GET /calendars`, `POST /calendars/upload`, `DELETE /calendars/{id}`
+- `GET /auth/roles`, `GET|POST /auth/api-keys`,
+  `DELETE /auth/api-keys/{id}`, `POST /auth/api-keys/{id}/rotate`,
+  `GET /auth/sessions`, `DELETE /auth/sessions/{id}`
 - `GET|POST /modes`, `DELETE /modes/{id}`, `POST /glue`; manual modes
   and helpers are switched with `PATCH /devices/{id}/state`
 - `GET|POST /auth/users`, `DELETE /auth/users/{id}`,
-  `PATCH /auth/users/{id}/role` (admin)
+  `PATCH /auth/users/{id}/role`, `PATCH /auth/users/{id}/password`,
+  `DELETE /auth/users/{id}/pin` (admin)
 - `GET /plugins`, `DELETE /plugins/{id}`, `GET /plugins/{id}/capabilities`,
   `POST /plugins/{id}/command`, `GET /plugins/{id}/command/{rid}/stream`
   (SSE)
