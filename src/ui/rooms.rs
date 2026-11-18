@@ -135,10 +135,14 @@ fn draw_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
         for d in chunk {
             let name = truncate(d.display_name(), name_w);
             let pad = " ".repeat(name_w.saturating_sub(char_len(&name)));
-            let st = if d.available {
-                app.device_status(d).to_lowercase()
+            let st = if !d.available {
+                "offline".to_string()
             } else {
-                "offline".into()
+                let st = app.device_status(d).to_lowercase();
+                match crate::app::devices::device_brightness(d) {
+                    Some(b) if st == "on" && b < 100 => format!("on {b}%"),
+                    _ => st,
+                }
             };
             spans.push(Span::raw(format!("  {name}{pad} ")));
             spans.push(Span::styled(
