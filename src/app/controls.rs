@@ -212,7 +212,7 @@ pub fn temp_text(v: f64, device: TempUnit, house: TempUnit) -> String {
 
 // ── Controls ────────────────────────────────────────────────────────────────
 
-/// Colour presets, as the app offers them: name and CIE xy.
+/// Color presets, as the app offers them: name and CIE xy.
 pub const COLOR_PRESETS: &[(&str, f64, f64, [u8; 3])] = &[
     ("warm white", 0.4596, 0.4105, [255, 217, 160]),
     ("soft white", 0.4148, 0.3959, [255, 241, 222]),
@@ -249,7 +249,7 @@ pub enum ControlKind {
         options: Vec<AttributeOption>,
         numeric: bool,
     },
-    /// Colour presets; `rgb` for a `color_rgb` attribute, else CIE xy.
+    /// Color presets; `rgb` for a `color_rgb` attribute, else CIE xy.
     Colors { rgb: bool },
     /// The device's one-key actions.
     Actions(Vec<ActionButton>),
@@ -390,7 +390,7 @@ fn vocabulary_controls(d: &DeviceState) -> Vec<Control> {
     if has("color_xy") {
         v.push(Control {
             attr: "color_xy".into(),
-            label: "Colour".into(),
+            label: "Color".into(),
             kind: ControlKind::Colors { rgb: false },
         });
     }
@@ -482,7 +482,7 @@ pub fn controls_for(d: &DeviceState, schema: Option<&DeviceSchema>, admin: bool)
     main
 }
 
-/// The colour preset nearest to the device's colour now.
+/// The color preset nearest to the device's color now.
 pub fn nearest_preset(v: Option<&Value>, rgb: bool) -> Option<usize> {
     let v = v?;
     let dist = |i: usize| -> f64 {
@@ -520,7 +520,7 @@ fn preset_value(i: usize, rgb: bool, current: Option<&Value>) -> Value {
     }
 }
 
-/// The key step of a range: 5 for a percentage, 100 K for colour
+/// The key step of a range: 5 for a percentage, 100 K for color
 /// temperature, else the schema's step.
 fn key_step(c: &Control) -> f64 {
     let ControlKind::Range { step, unit, .. } = &c.kind else {
@@ -1340,7 +1340,7 @@ mod tests {
     }
 
     #[test]
-    fn a_light_dims_turns_off_at_zero_and_takes_colours() {
+    fn a_light_dims_turns_off_at_zero_and_takes_colors() {
         let d = dev(
             "light",
             json!({"on": true, "brightness_pct": 5, "color_xy": {"x": 0.4596, "y": 0.4105}}),

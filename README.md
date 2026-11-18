@@ -45,7 +45,7 @@ It is built with:
   Offline (with the count) and Removed, sorted into the categories the
   way the app does it. The detail pane has controls built from the
   device's schema (`GET /devices/{id}/schema`): every writable everyday
-  setting (on and off, brightness, colour temperature, colour presets,
+  setting (on and off, brightness, color temperature, color presets,
   position, lock, mode, setpoints, fan) and the actions that need no
   input, with the shared vocabulary for a device without a schema.
   Changes are sent 600 ms after the last key. Temperatures are shown

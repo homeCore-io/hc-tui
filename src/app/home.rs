@@ -323,7 +323,7 @@ pub struct EntryView {
     pub name: String,
     pub kind_label: String,
     pub state: String,
-    /// On, active or enabled, for colour.
+    /// On, active or enabled, for color.
     pub on: Option<bool>,
 }
 

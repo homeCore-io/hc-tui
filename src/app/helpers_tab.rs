@@ -536,7 +536,7 @@ pub fn timer_own_secs(d: &DeviceState) -> u64 {
 }
 
 /// What a helper is now, for the State column. The bool says whether it
-/// counts as on (for the colour), when that means anything.
+/// counts as on (for the color), when that means anything.
 pub fn helper_state_line(d: &DeviceState) -> (String, Option<bool>) {
     use super::devices::{timer_remaining_secs, timer_state};
     use super::home::clock;
