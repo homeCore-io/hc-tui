@@ -2,6 +2,7 @@
 
 pub mod alerts_api;
 pub mod automations_api;
+pub mod devices_api;
 pub mod helpers_api;
 pub mod http;
 pub mod plugins_api;

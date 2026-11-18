@@ -1,6 +1,7 @@
-//! Scenes: homeCore's scenes and every plugin's.
+//! Scenes: homeCore's scenes and every plugin's. homeCore scenes can be
+//! made, edited and deleted here; a plugin's scenes only run.
 
-use super::{Binding, SPACE, Screen, ScreenId, moves};
+use super::{Binding, DELETE, ENTER, NEW, SPACE, Screen, ScreenId, moves};
 use crate::app::App;
 use crate::app::home::{HomeItem, ItemKind};
 use crossterm::event::KeyCode;
@@ -17,21 +18,27 @@ impl Screen for ScenesScreen {
         let mut v = moves(|a| a.move_scene(-1), |a| a.move_scene(1)).to_vec();
         if app.can("scenes:run") {
             v.extend([
-                Binding::new(SPACE, "Space", "activate", App::activate_selected_scene),
                 Binding::new(
                     &[KeyCode::Char('a')],
                     "a",
                     "activate",
                     App::activate_selected_scene,
-                )
-                .more(),
+                ),
+                Binding::new(SPACE, "Space", "activate", App::activate_selected_scene).more(),
+            ]);
+        }
+        if app.can("scenes:write") {
+            v.extend([
+                Binding::new(NEW, "n", "new", App::new_scene),
+                Binding::new(ENTER, "Enter", "edit", App::edit_selected_scene),
+                Binding::new(DELETE, "x", "delete", App::ask_delete_scene).more(),
             ]);
         }
         v
     }
 
     fn draw(&self, frame: &mut Frame<'_>, app: &App, area: Rect) {
-        crate::ui::devices::draw_scenes_table(frame, app, area);
+        crate::ui::scenes::draw_scenes_table(frame, app, area);
     }
 
     fn searchable(&self, _app: &App) -> bool {

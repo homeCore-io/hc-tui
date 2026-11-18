@@ -390,11 +390,6 @@ impl HomeCoreClient {
         self.get_json("/devices").await
     }
 
-    pub async fn delete_device(&self, device_id: &str) -> Result<()> {
-        let path = format!("/devices/{}", seg(device_id));
-        self.send_empty(Method::DELETE, &path, None).await
-    }
-
     /// `PATCH /devices/{id}/state` with a command body.
     pub async fn patch_device_state(&self, device_id: &str, body: Value) -> Result<()> {
         let path = format!("/devices/{}/state", seg(device_id));
@@ -750,7 +745,7 @@ pub fn build_plugin_command_body(action: &str, params: Value) -> Value {
     Value::Object(map)
 }
 
-async fn check_status(resp: Response) -> Result<Response> {
+pub(crate) async fn check_status(resp: Response) -> Result<Response> {
     let status = resp.status();
     if status.is_success() {
         return Ok(resp);
@@ -761,7 +756,10 @@ async fn check_status(resp: Response) -> Result<Response> {
     Err(anyhow!("{status}: {}", error_message(resp).await))
 }
 
-async fn parse_json<T: for<'a> Deserialize<'a>>(path: &str, resp: Response) -> Result<T> {
+pub(crate) async fn parse_json<T: for<'a> Deserialize<'a>>(
+    path: &str,
+    resp: Response,
+) -> Result<T> {
     let resp = check_status(resp).await?;
     let text = resp.text().await.context("reading response body")?;
     parse_body(path, &text)

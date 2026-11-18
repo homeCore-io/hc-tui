@@ -262,8 +262,16 @@ pub fn modal_hints(app: &App) -> Option<Vec<&'static str>> {
     if let Some(h) = super::plugins::modal_hints(app) {
         return Some(h);
     }
+    if let Some(h) = super::scenes::modal_hints(app) {
+        return Some(h);
+    }
     if app.devices_tab.editor.is_some() {
-        return Some(vec!["Tab field", "Enter save", "Esc cancel"]);
+        return Some(vec![
+            "Tab field",
+            "←/→ room or Security",
+            "Enter save",
+            "Esc cancel",
+        ]);
     }
     if app.rooms.editor.is_some() {
         return Some(vec!["Enter save", "Esc cancel"]);

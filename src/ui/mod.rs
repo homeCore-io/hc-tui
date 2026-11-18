@@ -3,6 +3,7 @@
 //! network.
 
 pub mod alerts;
+pub mod controls;
 pub mod devices;
 pub mod help;
 pub mod helpers;
@@ -15,6 +16,7 @@ mod modals;
 pub mod plugins;
 pub mod rooms;
 pub mod rules;
+pub mod scenes;
 pub mod settings;
 mod widgets;
 

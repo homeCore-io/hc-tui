@@ -8,6 +8,7 @@
 
 pub mod alerts;
 pub mod automations;
+pub mod controls;
 pub mod devices;
 pub mod editors;
 pub mod events;
@@ -16,6 +17,7 @@ pub mod helpers_tab;
 pub mod home;
 pub mod manage;
 pub mod media;
+pub mod picker;
 pub mod plugin_logs;
 pub mod plugin_manage;
 pub mod plugin_settings;
@@ -23,6 +25,7 @@ pub mod plugins;
 pub mod rooms;
 pub mod rule_words;
 pub mod rules;
+pub mod scenes;
 pub mod selection;
 
 use crate::cache::{CacheSnapshot, CacheStore, SavedSession};
@@ -260,6 +263,7 @@ pub struct App {
     pub home: home::HomeState,
     pub devices_tab: DevicesTab,
     pub scenes_sel: ListSel,
+    pub scenes_tab: scenes::ScenesTab,
     pub rooms: RoomsTab,
     pub helpers_sel: ListSel,
     pub alerts_sel: ListSel,
@@ -322,6 +326,7 @@ impl App {
             home: home::HomeState::default(),
             devices_tab: DevicesTab::default(),
             scenes_sel: ListSel::default(),
+            scenes_tab: scenes::ScenesTab::default(),
             rooms: RoomsTab::default(),
             helpers_sel: ListSel::default(),
             alerts_sel: ListSel::default(),
@@ -410,8 +415,10 @@ impl App {
                 });
             }
             self.persist_session_if_changed();
+            self.flush_device_controls();
         }
         self.pending > 0
+            || self.devices_tab.controls.pending.is_some()
             || self.login.in_progress
             || self.syncing
             || self.plugins_tab.streaming.is_some()
@@ -611,6 +618,7 @@ impl App {
         self.home = home::HomeState::default();
         self.devices_tab = DevicesTab::default();
         self.scenes_sel = ListSel::default();
+        self.scenes_tab = scenes::ScenesTab::default();
         self.rooms = RoomsTab::default();
         self.helpers_sel = ListSel::default();
         self.alerts_sel = ListSel::default();
@@ -1050,6 +1058,9 @@ impl App {
         if self.on_key_plugins_modal(key) {
             return;
         }
+        if self.on_key_device_modals(key) {
+            return;
+        }
         if self.on_key_editors(key)
             || self.on_key_helpers_modal(key)
             || self.on_key_automations_modal(key)
@@ -1306,6 +1317,7 @@ impl App {
             C::Automations(a) => self.run_automation_confirm(a),
             C::Alerts(a) => self.run_alert_confirm(a),
             C::Plugins(p) => self.run_plugin_confirm(p),
+            C::Devices(c) => self.run_device_confirm(c),
         }
     }
 }
@@ -1375,7 +1387,7 @@ pub(crate) mod test_support {
     }
 
     /// How many states [`enter_state`] knows per screen.
-    pub const SCREEN_STATES: usize = 4;
+    pub const SCREEN_STATES: usize = 5;
 
     /// Put screen `id` into its `n`th state (a sub-tab, a detail view),
     /// so tests can walk every key table. Unknown states are the plain
@@ -1387,6 +1399,7 @@ pub(crate) mod test_support {
         a.alerts_tab.sub = alerts::AlertsSub::Open;
         a.plugins_tab.detail = None;
         a.plugins_tab.sub = PluginsSub::Installed;
+        a.devices_tab.controls.focus = None;
         a.devices_tab.room = None;
         a.manage.people.tab = manage::people::PeopleTab::ALL[0];
         match (id, n) {
@@ -1396,6 +1409,8 @@ pub(crate) mod test_support {
             (ScreenId::Data, n) => manage::backup::test_state(a, n),
             (ScreenId::Devices, 1) => a.devices_tab.sub = DeviceSubPanel::MediaPlayers,
             (ScreenId::Devices, 2) => a.devices_tab.room = Some("r".into()),
+            (ScreenId::Devices, 3) => a.devices_tab.controls.focus = Some(0),
+            (ScreenId::Devices, 4) => a.devices_tab.sub = DeviceSubPanel::Removed,
             (ScreenId::Automations, 1) => {
                 a.rules_tab.detail = Some(rules::RuleDetail {
                     rule_id: "r".into(),

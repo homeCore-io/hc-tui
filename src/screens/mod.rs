@@ -231,7 +231,6 @@ pub const SPACE: &[KeyCode] = &[KeyCode::Char(' ')];
 pub const NEW: &[KeyCode] = &[KeyCode::Char('n')];
 pub const DELETE: &[KeyCode] = &[KeyCode::Char('x'), KeyCode::Delete];
 pub const ESC: &[KeyCode] = &[KeyCode::Esc];
-pub const SIDE: &[KeyCode] = &[KeyCode::Left, KeyCode::Right];
 
 /// A key press with no modifiers, for passing a bound key on to a
 /// handler that matches on keys itself.

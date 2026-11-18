@@ -74,6 +74,8 @@ pub enum ConfirmAction {
     Alerts(super::alerts::AlertConfirm),
     /// The Plugins screen's own questions (install, reset, an action).
     Plugins(super::plugin_manage::PluginConfirm),
+    /// Asked by Devices, Rooms or Scenes.
+    Devices(super::controls::DeviceConfirm),
 }
 
 #[derive(Debug, Clone)]
@@ -110,6 +112,7 @@ impl Confirm {
 pub enum DeviceEditField {
     Name,
     Area,
+    Security,
     CanonicalName,
 }
 
@@ -124,6 +127,9 @@ pub struct DeviceEditor {
     pub initial_name: String,
     pub initial_area: String,
     pub initial_canonical_name: String,
+    /// Security: in (true), out (false), or as its type says (None).
+    pub security: Option<bool>,
+    pub initial_security: Option<bool>,
     pub field: DeviceEditField,
 }
 
@@ -137,7 +143,31 @@ impl DeviceEditor {
             name,
             area,
             canonical_name,
+            security: None,
+            initial_security: None,
             field: DeviceEditField::Name,
+        }
+    }
+
+    pub fn with_security(mut self, security: Option<bool>) -> Self {
+        self.security = security;
+        self.initial_security = security;
+        self
+    }
+
+    /// The next Security choice: as its type says, in, out.
+    pub fn cycle_security(&mut self, forward: bool) {
+        let order = [None, Some(true), Some(false)];
+        let i = order.iter().position(|s| *s == self.security).unwrap_or(0);
+        self.security = order[if forward { (i + 1) % 3 } else { (i + 2) % 3 }];
+    }
+
+    /// The Security choice in words.
+    pub fn security_label(s: Option<bool>) -> &'static str {
+        match s {
+            None => "as its type says",
+            Some(true) => "yes, watch it",
+            Some(false) => "no, leave it out",
         }
     }
 
@@ -164,6 +194,12 @@ impl DeviceEditor {
             &self.canonical_name,
             &self.initial_canonical_name,
         );
+        if self.security != self.initial_security {
+            body.insert(
+                "security".to_string(),
+                self.security.map(Value::Bool).unwrap_or(Value::Null),
+            );
+        }
         body
     }
 }
@@ -386,19 +422,40 @@ impl App {
                 self.devices_tab.editor = None;
                 self.status = "Device edit canceled".to_string();
             }
-            KeyCode::Tab | KeyCode::Right | KeyCode::Down => {
+            KeyCode::Tab | KeyCode::Down => {
                 ed.field = match ed.field {
                     F::Name => F::Area,
-                    F::Area => F::CanonicalName,
+                    F::Area => F::Security,
+                    F::Security => F::CanonicalName,
                     F::CanonicalName => F::Name,
                 };
             }
-            KeyCode::BackTab | KeyCode::Left | KeyCode::Up => {
+            KeyCode::BackTab | KeyCode::Up => {
                 ed.field = match ed.field {
                     F::Name => F::CanonicalName,
                     F::Area => F::Name,
-                    F::CanonicalName => F::Area,
+                    F::Security => F::Area,
+                    F::CanonicalName => F::Security,
                 };
+            }
+            KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') if ed.field == F::Security => {
+                ed.cycle_security(key.code != KeyCode::Left);
+            }
+            KeyCode::Left | KeyCode::Right if ed.field == F::Area => {
+                // Step through the rooms there are, and no room.
+                let mut names: Vec<String> = self.areas.iter().map(|a| a.name.clone()).collect();
+                names.sort_by_key(|n| n.to_lowercase());
+                names.insert(0, String::new());
+                let i = names
+                    .iter()
+                    .position(|n| n.eq_ignore_ascii_case(ed.area.trim()));
+                let n = names.len();
+                let next = match (i, key.code) {
+                    (Some(i), KeyCode::Left) => (i + n - 1) % n,
+                    (Some(i), _) => (i + 1) % n,
+                    (None, _) => 0,
+                };
+                ed.area = names[next].clone();
             }
             KeyCode::Enter => self.save_device_editor(),
             _ => {
@@ -406,6 +463,7 @@ impl App {
                     F::Name => &mut ed.name,
                     F::Area => &mut ed.area,
                     F::CanonicalName => &mut ed.canonical_name,
+                    F::Security => return,
                 };
                 edit_text(field, key);
             }
@@ -529,6 +587,20 @@ mod tests {
         let c = ed.changes();
         assert!(c["area"].is_null(), "emptied room clears the override");
         assert!(!c.contains_key("canonical_name"));
+    }
+
+    #[test]
+    fn security_is_sent_as_true_false_or_null_only_when_changed() {
+        let mut ed = DeviceEditor::new("d1".into(), "Door".into(), String::new(), String::new())
+            .with_security(Some(false));
+        assert!(ed.changes().is_empty());
+        ed.cycle_security(true);
+        assert!(ed.changes()["security"].is_null(), "as its type says");
+        ed.cycle_security(true);
+        assert_eq!(ed.changes()["security"], true);
+        ed.cycle_security(false);
+        ed.cycle_security(false);
+        assert!(ed.changes().is_empty(), "back where it was");
     }
 
     #[test]

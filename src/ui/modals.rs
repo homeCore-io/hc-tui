@@ -36,6 +36,7 @@ pub fn draw_overlays(frame: &mut Frame<'_>, app: &App) {
     super::home::draw_heading_editor(frame, app);
     super::helpers::draw_helper_overlays(frame, app);
     super::rules::draw_rule_overlays(frame, app);
+    super::scenes::draw_overlays(frame, app);
     super::help::draw_help(frame, app);
     // The question goes over everything.
     draw_confirm(frame, app);
@@ -120,8 +121,8 @@ fn draw_device_editor(frame: &mut Frame<'_>, app: &App) {
     let Some(ed) = &app.devices_tab.editor else {
         return;
     };
-    let inner = modal(frame, 72, 58, "Edit Device");
-    let r = rows(inner, 4);
+    let inner = modal(frame, 72, 70, "Edit Device");
+    let r = rows(inner, 5);
     frame.render_widget(Paragraph::new(format!("Device: {}", ed.device_id)), r[0]);
     frame.render_widget(
         input(
@@ -131,19 +132,40 @@ fn draw_device_editor(frame: &mut Frame<'_>, app: &App) {
         ),
         r[1],
     );
+    let room = if ed.area.trim().is_empty() {
+        "no room".to_string()
+    } else {
+        ed.area.clone()
+    };
     frame.render_widget(
-        input(&ed.area, "Area / Room", ed.field == DeviceEditField::Area),
+        input(
+            &room,
+            "Room (type one, or ←/→ through the rooms)",
+            ed.field == DeviceEditField::Area,
+        ),
         r[2],
+    );
+    let security = format!(
+        "‹ {} ›",
+        crate::app::editors::DeviceEditor::security_label(ed.security)
+    );
+    frame.render_widget(
+        input(
+            &security,
+            "Security (←/→)",
+            ed.field == DeviceEditField::Security,
+        ),
+        r[3],
     );
     frame.render_widget(
         input(
             &ed.canonical_name,
-            "Canonical Name",
+            "Name in automations",
             ed.field == DeviceEditField::CanonicalName,
         ),
-        r[3],
+        r[4],
     );
-    help(frame, "Tab switch field | Enter save | Esc cancel", r[4]);
+    help(frame, "Tab field | Enter save | Esc cancel", r[5]);
 }
 
 fn draw_area_editor(frame: &mut Frame<'_>, app: &App) {
