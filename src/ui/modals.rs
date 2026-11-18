@@ -33,9 +33,6 @@ pub fn draw_overlays(frame: &mut Frame<'_>, app: &App) {
         draw_groups(frame, app);
     }
     draw_filter_bar(frame, app);
-    if app.manage.logs.input_open {
-        draw_log_filter_input(frame, app);
-    }
     super::home::draw_picker(frame, app);
     super::home::draw_heading_editor(frame, app);
     super::help::draw_help(frame, app);
@@ -522,20 +519,6 @@ fn draw_filter_bar(frame: &mut Frame<'_>, app: &App) {
             .block(Block::default().borders(Borders::ALL).title("Stale only")),
         layout[2],
     );
-}
-
-fn draw_log_filter_input(frame: &mut Frame<'_>, app: &App) {
-    let popup = centered_rect(60, 20, frame.area());
-    frame.render_widget(Clear, popup);
-    let outer = Block::default()
-        .borders(Borders::ALL)
-        .title("Target / Message Filter")
-        .border_style(Style::default().fg(Color::Yellow));
-    let inner = outer.inner(popup);
-    frame.render_widget(outer, popup);
-    let r = rows(inner, 1);
-    frame.render_widget(input(&app.manage.logs.input, "Filter string", true), r[0]);
-    help(frame, "Enter apply  |  Esc cancel", r[1]);
 }
 
 // ── Streaming action modal ──────────────────────────────────────────────────

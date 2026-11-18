@@ -318,9 +318,6 @@ pub fn modal_hints(app: &App) -> Option<Vec<&'static str>> {
             "Esc cancel",
         ]);
     }
-    if app.manage.logs.input_open {
-        return Some(vec!["type filter", "Enter apply", "Esc cancel"]);
-    }
     None
 }
 

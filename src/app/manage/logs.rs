@@ -5,7 +5,6 @@
 //! level.
 
 use crate::app::App;
-use crate::app::editors::edit_text;
 use crate::model::LogLine;
 use crate::net::ws::{LogMsg, LogParams};
 use crossterm::event::{KeyCode, KeyEvent};
@@ -58,15 +57,13 @@ impl LogLevelFilter {
 pub struct LogsPanel {
     pub lines: VecDeque<LogLine>,
     pub level: LogLevelFilter,
-    /// Local substring filter on target and message.
-    pub module_filter: String,
     pub paused: bool,
+    /// Lines above the newest: 0 follows the stream. Only moves while
+    /// paused.
     pub scroll: usize,
     pub connected: bool,
     /// Why the stream last dropped, shown while it is down.
     pub last_error: Option<String>,
-    pub input_open: bool,
-    pub input: String,
     task: Option<(JoinHandle<()>, LogParams)>,
 }
 
@@ -132,19 +129,13 @@ impl App {
                 if !logs.level.passes(&line.level) {
                     return;
                 }
-                let f = &logs.module_filter;
-                if !f.is_empty()
-                    && !line.target.contains(f.as_str())
-                    && !line.message.contains(f.as_str())
-                {
-                    return;
-                }
                 logs.lines.push_back(line);
                 if logs.lines.len() > MAX_LINES {
                     logs.lines.pop_front();
                 }
-                if !logs.paused {
-                    logs.scroll = logs.lines.len().saturating_sub(1);
+                if logs.paused {
+                    // Keep the paused view still as lines arrive below it.
+                    logs.scroll = (logs.scroll + 1).min(logs.lines.len().saturating_sub(1));
                 }
             }
         }
@@ -162,7 +153,7 @@ impl App {
             KeyCode::Char('p') | KeyCode::Char(' ') => {
                 logs.paused = !logs.paused;
                 if !logs.paused {
-                    logs.scroll = logs.lines.len().saturating_sub(1);
+                    logs.scroll = 0;
                 }
                 self.status = if logs.paused {
                     "Log stream paused".to_string()
@@ -171,10 +162,10 @@ impl App {
                 };
             }
             KeyCode::Down | KeyCode::Char('j') if logs.paused => {
-                logs.scroll = (logs.scroll + 1).min(logs.lines.len().saturating_sub(1));
+                logs.scroll = logs.scroll.saturating_sub(1);
             }
             KeyCode::Up | KeyCode::Char('k') if logs.paused => {
-                logs.scroll = logs.scroll.saturating_sub(1);
+                logs.scroll = (logs.scroll + 1).min(logs.lines.len().saturating_sub(1));
             }
             KeyCode::Char('e') => self.set_log_level(LogLevelFilter::Error),
             KeyCode::Char('w') => self.set_log_level(LogLevelFilter::Warn),
@@ -185,31 +176,21 @@ impl App {
                 logs.scroll = 0;
                 self.status = "Log buffer cleared".to_string();
             }
-            KeyCode::Char('/') => {
-                logs.input_open = true;
-                logs.input = logs.module_filter.clone();
-            }
             _ => {}
         }
     }
 
-    pub(crate) fn on_key_log_filter_input(&mut self, key: KeyEvent) {
-        let logs = &mut self.manage.logs;
-        match key.code {
-            KeyCode::Esc => logs.input_open = false,
-            KeyCode::Enter => {
-                logs.module_filter = logs.input.trim().to_string();
-                logs.input_open = false;
-                self.status = if logs.module_filter.is_empty() {
-                    "Log filter cleared".to_string()
-                } else {
-                    format!("Log filter: {}", logs.module_filter)
-                };
-            }
-            _ => {
-                edit_text(&mut logs.input, key);
-            }
-        }
+    /// The buffered lines that match the `/` search (on target and
+    /// message). Searching filters what is kept, so clearing the search
+    /// brings every line back.
+    pub fn visible_log_lines(&self) -> Vec<&LogLine> {
+        let q = self.query(crate::screens::ScreenId::Logs);
+        self.manage
+            .logs
+            .lines
+            .iter()
+            .filter(|l| crate::text::matches_query(q, &[&l.target, &l.message]))
+            .collect()
     }
 }
 
@@ -247,5 +228,52 @@ mod tests {
         a.screen = crate::screens::ScreenId::People;
         a.update_log_stream();
         assert!(!a.manage.logs.is_streaming());
+    }
+
+    fn line(target: &str, message: &str) -> LogLine {
+        serde_json::from_value(serde_json::json!({
+            "level": "INFO", "target": target, "message": message
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn search_filters_what_is_kept_and_clearing_brings_it_back() {
+        let mut a = signed_in(Role::Admin);
+        a.screen = crate::screens::ScreenId::Logs;
+        a.manage.logs.lines.extend([
+            line("hc_core::rules", "fired Night"),
+            line("hc_hue", "bridge up"),
+            line("hc_core::state", "saved"),
+        ]);
+        a.queries
+            .insert(crate::screens::ScreenId::Logs, "hc_core".into());
+        assert_eq!(a.visible_log_lines().len(), 2);
+        a.queries
+            .insert(crate::screens::ScreenId::Logs, "BRIDGE".into());
+        assert_eq!(a.visible_log_lines()[0].target, "hc_hue");
+        a.queries.remove(&crate::screens::ScreenId::Logs);
+        assert_eq!(a.visible_log_lines().len(), 3);
+    }
+
+    #[test]
+    fn scrolling_counts_up_from_the_newest_line_while_paused() {
+        let mut a = signed_in(Role::Admin);
+        a.screen = crate::screens::ScreenId::Logs;
+        a.manage.logs.lines.extend([line("a", "1"), line("b", "2")]);
+        // Live: k does nothing.
+        a.on_key(key(KeyCode::Char('k')));
+        assert_eq!(a.manage.logs.scroll, 0);
+        a.on_key(key(KeyCode::Char(' ')));
+        assert!(a.manage.logs.paused);
+        a.on_key(key(KeyCode::Char('k')));
+        a.on_key(key(KeyCode::Char('k')));
+        assert_eq!(a.manage.logs.scroll, 1, "clamped at the oldest line");
+        a.on_key(key(KeyCode::Char('j')));
+        assert_eq!(a.manage.logs.scroll, 0);
+        // Resuming follows the stream again.
+        a.on_key(key(KeyCode::Char('k')));
+        a.on_key(key(KeyCode::Char(' ')));
+        assert_eq!(a.manage.logs.scroll, 0);
     }
 }

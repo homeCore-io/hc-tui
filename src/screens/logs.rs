@@ -42,12 +42,16 @@ impl Screen for LogsScreen {
                 logs(a, 'd')
             })
             .more(),
-            Binding::new(&[KeyCode::Char('/')], "/", "filter", |a| logs(a, '/')),
             Binding::new(&[KeyCode::Char('c')], "c", "clear", |a| logs(a, 'c')),
         ]
     }
 
     fn draw(&self, frame: &mut Frame<'_>, app: &App, area: Rect) {
         crate::ui::manage::draw_logs(frame, app, area);
+    }
+
+    /// `/` searches the lines kept so far; the stream keeps coming.
+    fn searchable(&self, _app: &App) -> bool {
+        true
     }
 }

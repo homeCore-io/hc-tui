@@ -1047,10 +1047,6 @@ impl App {
             self.on_key_rule_filter_bar(key);
             return;
         }
-        if self.manage.logs.input_open {
-            self.on_key_log_filter_input(key);
-            return;
-        }
 
         let screen = screens::screen(self.screen);
         if let Some(b) = screen.bindings(self).into_iter().find(|b| b.matches(&key)) {

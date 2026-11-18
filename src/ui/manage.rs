@@ -322,10 +322,12 @@ pub fn draw_logs(frame: &mut Frame<'_>, app: &App, area: Rect) {
     };
     let live = if logs.connected { "●" } else { "○" };
     let pause = if logs.paused { " [PAUSED]" } else { " [LIVE]" };
-    let filter = if logs.module_filter.is_empty() {
+    let q = app.query(crate::screens::ScreenId::Logs);
+    let shown = app.visible_log_lines();
+    let filter = if q.is_empty() {
         String::new()
     } else {
-        format!(" filter={}", logs.module_filter)
+        format!(" | {} match /{q}", shown.len())
     };
     let admin_note = if !app.is_admin() {
         " (admin only)".to_string()
@@ -348,14 +350,11 @@ pub fn draw_logs(frame: &mut Frame<'_>, app: &App, area: Rect) {
 
     let body = layout[1];
     let height = body.height.saturating_sub(2) as usize;
-    let total = logs.lines.len();
-    let start = if total > height {
-        logs.scroll.min(total - height)
-    } else {
-        0
-    };
-    let items: Vec<ListItem> = logs
-        .lines
+    let total = shown.len();
+    // `scroll` counts up from the newest line.
+    let end = total - logs.scroll.min(total.saturating_sub(height));
+    let start = end.saturating_sub(height);
+    let items: Vec<ListItem> = shown
         .iter()
         .skip(start)
         .take(height)
@@ -383,7 +382,7 @@ pub fn draw_logs(frame: &mut Frame<'_>, app: &App, area: Rect) {
         })
         .collect();
     let block_title = if total > height && height > 0 {
-        format!("Log lines (scroll: {}/{})", start + 1, total - height + 1)
+        format!("Log lines {} to {} of {total}", start + 1, end)
     } else {
         "Log lines".to_string()
     };
@@ -466,9 +465,9 @@ pub fn draw_audit(frame: &mut Frame<'_>, app: &App, area: Rect) {
         .direction(Direction::Vertical)
         .constraints(constraints)
         .split(area);
-    let items: Vec<ListItem> = a
-        .entries
-        .iter()
+    let items: Vec<ListItem> = app
+        .visible_audit()
+        .into_iter()
         .map(|e| {
             let rc = match e.result {
                 AuditResult::Success => Color::Green,
@@ -510,7 +509,7 @@ pub fn draw_audit(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let title = if a.loading {
         "Audit [loading...]".to_string()
     } else {
-        format!("Audit ({} entries)", a.entries.len())
+        format!("Audit ({} entries)", items.len())
     };
     let n = items.len();
     render_list(
@@ -560,9 +559,8 @@ pub fn draw_audit(frame: &mut Frame<'_>, app: &App, area: Rect) {
         Some(err) => (format!("Error: {err}"), Color::Red),
         None => (
             format!(
-                "page {} · offset {} · limit {} · n=next p=prev r=refresh Enter=detail",
+                "page {} · {} per page · ] next page · [ previous page · Enter detail",
                 a.offset / a.limit.max(1) + 1,
-                a.offset,
                 a.limit
             ),
             Color::DarkGray,

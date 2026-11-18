@@ -287,11 +287,29 @@ impl App {
 
     pub(crate) fn compute_event_view(&mut self) {
         let filter = self.manage.events.type_filter.clone();
+        let q = self.query(crate::screens::ScreenId::Events).to_string();
         self.views.events = (0..self.events.len())
             .filter(|&i| {
-                filter
-                    .as_deref()
-                    .is_none_or(|f| self.events[i].event_type == f)
+                let e = &self.events[i];
+                filter.as_deref().is_none_or(|f| e.event_type == f) && {
+                    let device = e
+                        .device_id
+                        .as_deref()
+                        .and_then(|d| self.device_by_id(d))
+                        .map(|d| d.display_name())
+                        .unwrap_or("");
+                    crate::text::matches_query(
+                        &q,
+                        &[
+                            &e.event_type,
+                            e.device_id.as_deref().unwrap_or(""),
+                            device,
+                            e.rule_name.as_deref().unwrap_or(""),
+                            e.plugin_id.as_deref().unwrap_or(""),
+                            e.event_detail.as_deref().unwrap_or(""),
+                        ],
+                    )
+                }
             })
             .collect();
     }

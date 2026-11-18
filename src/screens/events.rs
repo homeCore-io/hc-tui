@@ -26,4 +26,8 @@ impl Screen for EventsScreen {
     fn draw(&self, frame: &mut Frame<'_>, app: &App, area: Rect) {
         crate::ui::manage::draw_events(frame, app, area);
     }
+
+    fn searchable(&self, _app: &App) -> bool {
+        true
+    }
 }

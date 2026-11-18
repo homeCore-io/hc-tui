@@ -31,11 +31,31 @@ impl Default for AuditPanel {
 }
 
 impl App {
-    pub(crate) fn audit_ids(&self) -> Vec<String> {
+    /// The page's entries that match the `/` search.
+    pub fn visible_audit(&self) -> Vec<&AuditEntry> {
+        let q = self.query(crate::screens::ScreenId::Audit);
         self.manage
             .audit
             .entries
             .iter()
+            .filter(|e| {
+                crate::text::matches_query(
+                    q,
+                    &[
+                        &e.actor_label,
+                        &e.event_type,
+                        e.result.as_str(),
+                        e.target_kind.as_deref().unwrap_or(""),
+                        e.target_id.as_deref().unwrap_or(""),
+                    ],
+                )
+            })
+            .collect()
+    }
+
+    pub(crate) fn audit_ids(&self) -> Vec<String> {
+        self.visible_audit()
+            .into_iter()
             .map(AuditEntry::key)
             .collect()
     }

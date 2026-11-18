@@ -35,6 +35,11 @@ impl Screen for AuditScreen {
         crate::ui::manage::draw_audit(frame, app, area);
     }
 
+    /// `/` searches the page on view.
+    fn searchable(&self, _app: &App) -> bool {
+        true
+    }
+
     fn on_enter(&self, app: &mut App) {
         app.refresh_audit();
     }
