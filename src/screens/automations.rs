@@ -1,5 +1,7 @@
-//! Automations: the list, the read-only detail with Recent runs, and
-//! groups.
+//! Automations: the list with what starts each, its last run and group,
+//! the selected one's When / If / Then and Recent runs, the read-only
+//! RON, run now, a dry run at a time, resuming a paused one, sending a
+//! rule's missing device to another, and groups.
 
 use super::{
     Binding, DELETE, DOWN, ENTER, ESC, PAGE_DOWN, PAGE_UP, SPACE, Screen, ScreenId, UP, moves,
@@ -11,6 +13,45 @@ use ratatui::{Frame, layout::Rect};
 
 pub struct AutomationsScreen;
 
+const RUN: &[KeyCode] = &[KeyCode::Char('R')];
+const TEST: &[KeyCode] = &[KeyCode::Char('t')];
+const RESUME: &[KeyCode] = &[KeyCode::Char('u')];
+const FIX: &[KeyCode] = &[KeyCode::Char('F')];
+
+/// R, t, u and F, for the list and the detail alike.
+fn rule_keys(app: &App, v: &mut Vec<Binding>) {
+    let write = app.can("automations:write");
+    let rule = match &app.rules_tab.detail {
+        Some(d) => app.rules.iter().find(|r| r.id == d.rule_id),
+        None => app.selected_rule(),
+    };
+    let Some(rule) = rule else {
+        return;
+    };
+    if write {
+        v.push(Binding::new(RUN, "R", "run now", App::ask_run_rule));
+    }
+    v.push(Binding::new(TEST, "t", "test at...", App::open_rule_test));
+    if write && app.rule_paused(&rule.id) {
+        v.push(Binding::new(RESUME, "u", "resume", App::resume_target_rule));
+    }
+    if write
+        && app
+            .rules_tab
+            .extra
+            .missing
+            .get(&rule.id)
+            .is_some_and(|m| !m.is_empty())
+    {
+        v.push(Binding::new(
+            FIX,
+            "F",
+            "fix missing device",
+            App::open_rule_fix,
+        ));
+    }
+}
+
 impl Screen for AutomationsScreen {
     fn id(&self) -> ScreenId {
         ScreenId::Automations
@@ -19,14 +60,16 @@ impl Screen for AutomationsScreen {
     fn bindings(&self, app: &App) -> Vec<Binding> {
         let write = app.can("automations:write");
         if app.rules_tab.detail.is_some() {
-            return vec![
+            let mut v = vec![
                 Binding::new(DOWN, "j/k", "scroll", |a| a.scroll_rule_detail(1)),
                 Binding::new(UP, "k", "scroll up", |a| a.scroll_rule_detail(-1)).more(),
                 Binding::new(PAGE_DOWN, "PgDn", "page down", |a| a.scroll_rule_detail(10)).more(),
                 Binding::new(PAGE_UP, "PgUp", "page up", |a| a.scroll_rule_detail(-10)).more(),
                 Binding::new(&[KeyCode::Char('r')], "r", "refresh", App::load_rule_detail).more(),
-                Binding::new(ESC, "Esc", "back", App::close_rule_detail),
             ];
+            rule_keys(app, &mut v);
+            v.push(Binding::new(ESC, "Esc", "back", App::close_rule_detail));
+            return v;
         }
         if app.rules_tab.groups.is_some() {
             let mut v = moves(|a| a.move_group(-1), |a| a.move_group(1)).to_vec();
@@ -52,18 +95,8 @@ impl Screen for AutomationsScreen {
         if write {
             v.push(Binding::new(SPACE, "Space", "on/off", App::toggle_rules));
         }
-        v.push(Binding::new(
-            ENTER,
-            "Enter",
-            "detail",
-            App::open_rule_detail,
-        ));
-        v.push(Binding::new(
-            &[KeyCode::Char('h')],
-            "h",
-            "recent runs",
-            App::open_recent_runs,
-        ));
+        rule_keys(app, &mut v);
+        v.push(Binding::new(ENTER, "Enter", "RON", App::open_rule_detail).more());
         if write {
             v.extend([
                 Binding::new(&[KeyCode::Char('m')], "m", "mark", App::toggle_rule_mark).more(),
@@ -92,6 +125,16 @@ impl Screen for AutomationsScreen {
 
     fn draw(&self, frame: &mut Frame<'_>, app: &App, area: Rect) {
         crate::ui::rules::draw_rules_tab(frame, app, area);
+    }
+
+    fn on_enter(&self, app: &mut App) {
+        app.load_automation_extras();
+    }
+
+    fn refresh(&self, app: &mut App) {
+        app.status = "Refreshing...".to_string();
+        app.start_sync();
+        app.load_automation_extras();
     }
 
     fn searchable(&self, app: &App) -> bool {

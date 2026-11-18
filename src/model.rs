@@ -335,6 +335,17 @@ pub struct Alert {
     pub acknowledged: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin_id: Option<String>,
+    /// A time rule's alert: which alert rule raised it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule_id: Option<String>,
+    /// A plugin's alert: which of its kinds, and what it is about.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub topic: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    /// The alert's one button (`POST /alerts/{id}/press`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<Value>,
 }
 
 impl Alert {
@@ -365,6 +376,11 @@ pub struct Rule {
     /// Extra triggers, OR'd with `trigger`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub triggers: Vec<Value>,
+    /// Its checks and steps as core sends them, for the summary.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub conditions: Vec<Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<Value>,
 }
 
 /// The variant name of an externally tagged enum value: the single key of
@@ -390,7 +406,8 @@ impl Rule {
     }
 
     /// Short label for the list: the primary trigger, plus a count of
-    /// the extra ones.
+    /// the extra ones. The screens say it in words (`app::rule_words`).
+    #[cfg(test)]
     pub fn trigger_label(&self) -> String {
         let names = self.trigger_names();
         match names.as_slice() {

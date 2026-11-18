@@ -10,7 +10,7 @@ pub mod modes;
 pub mod status;
 pub mod users;
 
-use super::editors::{GlueCreator, ModeEditor, UserEditor};
+use super::editors::{ModeEditor, UserEditor};
 use super::{App, ListSel};
 
 #[derive(Debug, Default)]
@@ -26,7 +26,6 @@ pub struct ManageTab {
     pub mode_editor: Option<ModeEditor>,
     pub users_sel: ListSel,
     pub user_editor: Option<UserEditor>,
-    pub glue_creator: Option<GlueCreator>,
     pub matter: matter::MatterPanel,
     pub status: status::StatusPanel,
     pub logs: logs::LogsPanel,
@@ -69,36 +68,5 @@ impl App {
     pub fn move_event(&mut self, delta: isize) {
         let ids = self.event_row_ids();
         self.manage.events.sel.move_by(delta, &ids);
-    }
-
-    pub(crate) fn save_glue_creator(&mut self) {
-        let Some(creator) = self.manage.glue_creator.as_mut() else {
-            return;
-        };
-        let (id, name, ty, config) = match creator.build() {
-            Ok(v) => v,
-            Err(e) => {
-                creator.error = Some(e.clone());
-                self.error = Some(e);
-                return;
-            }
-        };
-        let c = self.client.clone();
-        self.spawn(
-            async move { c.create_glue(&id, &name, ty, config).await },
-            move |app, res| match res {
-                Ok(dev) => {
-                    app.status = format!("Created {ty} {}", dev.device_id);
-                    app.devices.push(dev);
-                    app.manage.glue_creator = None;
-                }
-                Err(e) => {
-                    if let Some(c) = app.manage.glue_creator.as_mut() {
-                        c.error = Some(e.to_string());
-                    }
-                    app.error = Some(e.to_string());
-                }
-            },
-        );
     }
 }

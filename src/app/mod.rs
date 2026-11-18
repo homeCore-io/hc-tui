@@ -6,15 +6,19 @@
 //! applied to the app on the main loop. The event loop in `main.rs`
 //! selects over terminal input, that channel and a tick timer.
 
+pub mod alerts;
+pub mod automations;
 pub mod devices;
 pub mod editors;
 pub mod events;
 pub mod helpers;
+pub mod helpers_tab;
 pub mod home;
 pub mod manage;
 pub mod media;
 pub mod plugins;
 pub mod rooms;
+pub mod rule_words;
 pub mod rules;
 pub mod selection;
 
@@ -256,6 +260,8 @@ pub struct App {
     pub rooms: RoomsTab,
     pub helpers_sel: ListSel,
     pub alerts_sel: ListSel,
+    pub alerts_tab: alerts::AlertsTab,
+    pub helpers_tab: helpers_tab::HelpersTab,
     pub rules_tab: RulesTab,
     pub plugins_tab: PluginsTab,
     pub manage: ManageTab,
@@ -316,6 +322,8 @@ impl App {
             rooms: RoomsTab::default(),
             helpers_sel: ListSel::default(),
             alerts_sel: ListSel::default(),
+            alerts_tab: alerts::AlertsTab::default(),
+            helpers_tab: helpers_tab::HelpersTab::default(),
             rules_tab: RulesTab::default(),
             plugins_tab: PluginsTab::default(),
             manage: ManageTab::default(),
@@ -603,6 +611,8 @@ impl App {
         self.rooms = RoomsTab::default();
         self.helpers_sel = ListSel::default();
         self.alerts_sel = ListSel::default();
+        self.alerts_tab = alerts::AlertsTab::default();
+        self.helpers_tab = helpers_tab::HelpersTab::default();
         self.rules_tab = RulesTab::default();
         self.plugins_tab = PluginsTab::default();
         self.manage = ManageTab::default();
@@ -1028,7 +1038,10 @@ impl App {
             self.on_key_streaming(key);
             return;
         }
-        if self.on_key_editors(key) {
+        if self.on_key_editors(key)
+            || self.on_key_helpers_modal(key)
+            || self.on_key_automations_modal(key)
+        {
             return;
         }
         if self.home.picker.is_some() {
@@ -1281,6 +1294,9 @@ impl App {
             C::ImportRules => self.run_backup_action(manage::backup::BackupAction::ImportRules),
             C::ImportScenes => self.run_backup_action(manage::backup::BackupAction::ImportScenes),
             C::RunPluginAction { plugin_id, action } => self.run_plugin_action(plugin_id, *action),
+            C::Helpers(a) => self.run_helper_confirm(a),
+            C::Automations(a) => self.run_automation_confirm(a),
+            C::Alerts(a) => self.run_alert_confirm(a),
         }
     }
 }
@@ -1358,7 +1374,7 @@ pub(crate) mod test_support {
         a.devices_tab.sub = DeviceSubPanel::All;
         a.rules_tab.detail = None;
         a.rules_tab.groups = None;
-        a.rules_tab.history = None;
+        a.alerts_tab.sub = alerts::AlertsSub::Open;
         a.plugins_tab.detail = None;
         a.plugins_tab.sub = PluginsSub::Installed;
         a.devices_tab.room = None;
@@ -1374,12 +1390,7 @@ pub(crate) mod test_support {
                 })
             }
             (ScreenId::Automations, 2) => a.rules_tab.groups = Some(Default::default()),
-            (ScreenId::Automations, 3) => {
-                a.rules_tab.history = Some(rules::HistoryPane {
-                    rule_id: "r".into(),
-                    items: Load::Idle,
-                })
-            }
+            (ScreenId::Alerts, n @ 1..=3) => a.alerts_tab.sub = alerts::AlertsSub::ALL[n],
             (ScreenId::Plugins, 1) => a.plugins_tab.sub = PluginsSub::Matter,
             (ScreenId::Plugins, 2) => {
                 a.plugins_tab.detail = Some(plugins::PluginDetail::new("p".into()))
@@ -1397,6 +1408,8 @@ mod tests {
 
     #[test]
     fn digits_jump_only_to_screens_the_user_can_open() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _g = rt.enter();
         let mut a = signed_in(Role::User);
         a.on_key(key(KeyCode::Char('9')));
         assert_eq!(a.screen, ScreenId::Home, "users have no Plugins");

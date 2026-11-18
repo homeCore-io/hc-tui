@@ -2,8 +2,10 @@
 //! rebuilt for this frame; nothing here mutates state or touches the
 //! network.
 
+pub mod alerts;
 pub mod devices;
 pub mod help;
+pub mod helpers;
 pub mod home;
 mod layout;
 pub mod lists;

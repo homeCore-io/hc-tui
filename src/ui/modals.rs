@@ -3,8 +3,8 @@
 
 use super::widgets::{centered_rect, highlight, input, mask};
 use crate::app::editors::{
-    DeviceEditField, GlueCreator, GlueEditField, MatterCommissionField, ModeEditField, ModeKind,
-    RuleFilterField, UserEditField, UserEditMode,
+    DeviceEditField, MatterCommissionField, ModeEditField, ModeKind, RuleFilterField,
+    UserEditField, UserEditMode,
 };
 use crate::app::plugins::progress_percent;
 use crate::app::{App, Load, StreamingAction, StreamingStage};
@@ -22,9 +22,6 @@ pub fn draw_overlays(frame: &mut Frame<'_>, app: &App) {
     draw_area_editor(frame, app);
     draw_user_editor(frame, app);
     draw_mode_editor(frame, app);
-    if let Some(c) = &app.manage.glue_creator {
-        draw_glue_creator(frame, c);
-    }
     draw_matter_editor(frame, app);
     if app.plugins_tab.streaming.is_some() {
         draw_streaming_modal(frame, app);
@@ -38,6 +35,8 @@ pub fn draw_overlays(frame: &mut Frame<'_>, app: &App) {
     }
     super::home::draw_picker(frame, app);
     super::home::draw_heading_editor(frame, app);
+    super::helpers::draw_helper_overlays(frame, app);
+    super::rules::draw_rule_overlays(frame, app);
     super::help::draw_help(frame, app);
     // The question goes over everything.
     draw_confirm(frame, app);
@@ -308,99 +307,6 @@ fn draw_matter_editor(frame: &mut Frame<'_>, app: &App) {
         r[4],
     );
     help(frame, "Tab field  |  Enter commission  |  Esc cancel", r[5]);
-}
-
-fn draw_glue_creator(frame: &mut Frame<'_>, c: &GlueCreator) {
-    let area = centered_rect(64, 60, frame.area());
-    frame.render_widget(Clear, area);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title("Create Helper")
-        .style(Style::default().fg(Color::White));
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
-    let active = highlight();
-    let inactive = Style::default().fg(Color::DarkGray);
-    let label = |f: GlueEditField, name: &str| {
-        Span::styled(
-            format!("{name:<14}"),
-            if c.field == f { active } else { inactive },
-        )
-    };
-    let value_row = |f: GlueEditField, name: &str, v: &str| {
-        Line::from(vec![
-            label(f, name),
-            Span::raw("  "),
-            Span::styled(v.to_string(), Style::default().fg(Color::White)),
-            Span::styled(
-                if c.field == f { "_" } else { "" },
-                Style::default().fg(Color::Cyan),
-            ),
-        ])
-    };
-    let note = |t: &str| {
-        Line::from(Span::styled(
-            t.to_string(),
-            Style::default().fg(Color::DarkGray),
-        ))
-    };
-
-    let visible = GlueCreator::fields_for_type(c.glue_type);
-    let mut lines = vec![
-        Line::from(vec![
-            label(GlueEditField::Type, "type"),
-            Span::raw("  "),
-            Span::styled(
-                format!("{}  (Space to cycle)", c.glue_type.as_str()),
-                Style::default().fg(Color::Cyan),
-            ),
-        ]),
-        Line::from(""),
-        value_row(GlueEditField::Id, "id", &c.id),
-        value_row(GlueEditField::Name, "name", &c.name),
-    ];
-    if visible.contains(&GlueEditField::Options) {
-        lines.push(Line::from(""));
-        lines.push(note(
-            "select options (comma-separated, e.g. \"red,green,blue\"):",
-        ));
-        lines.push(value_row(GlueEditField::Options, "options", &c.options));
-    }
-    if visible.contains(&GlueEditField::Members) {
-        lines.push(Line::from(""));
-        lines.push(note("group members (comma-separated device IDs):"));
-        lines.push(value_row(GlueEditField::Members, "members", &c.members));
-    }
-    if visible.contains(&GlueEditField::SourceDeviceId) {
-        lines.push(Line::from(""));
-        lines.push(note(
-            "threshold tracks one numeric attribute on a source device:",
-        ));
-        lines.push(value_row(
-            GlueEditField::SourceDeviceId,
-            "source dev",
-            &c.source_device_id,
-        ));
-        lines.push(value_row(
-            GlueEditField::SourceAttribute,
-            "source attr",
-            &c.source_attribute,
-        ));
-        lines.push(value_row(
-            GlueEditField::Threshold,
-            "threshold",
-            &c.threshold,
-        ));
-    }
-    if let Some(err) = &c.error {
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            format!("Error: {err}"),
-            Style::default().fg(Color::Red),
-        )));
-    }
-    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
 }
 
 fn draw_groups(frame: &mut Frame<'_>, app: &App) {

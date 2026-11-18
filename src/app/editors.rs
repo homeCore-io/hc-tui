@@ -71,6 +71,9 @@ pub enum ConfirmAction {
         plugin_id: String,
         action: Box<Action>,
     },
+    Helpers(super::helpers_tab::HelperConfirm),
+    Automations(super::automations::AutomationConfirm),
+    Alerts(super::alerts::AlertConfirm),
 }
 
 #[derive(Debug, Clone)]
@@ -298,190 +301,6 @@ pub struct ModeEditor {
     pub field: ModeEditField,
 }
 
-// ── Glue (helper) creator ───────────────────────────────────────────────────
-
-/// The helper types served by `POST /glue`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GlueType {
-    Switch,
-    Timer,
-    Counter,
-    Number,
-    Select,
-    Text,
-    Button,
-    Datetime,
-    Group,
-    Threshold,
-    Schedule,
-}
-
-impl GlueType {
-    pub const ALL: [GlueType; 11] = [
-        GlueType::Switch,
-        GlueType::Timer,
-        GlueType::Counter,
-        GlueType::Number,
-        GlueType::Select,
-        GlueType::Text,
-        GlueType::Button,
-        GlueType::Datetime,
-        GlueType::Group,
-        GlueType::Threshold,
-        GlueType::Schedule,
-    ];
-
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            GlueType::Switch => "switch",
-            GlueType::Timer => "timer",
-            GlueType::Counter => "counter",
-            GlueType::Number => "number",
-            GlueType::Select => "select",
-            GlueType::Text => "text",
-            GlueType::Button => "button",
-            GlueType::Datetime => "datetime",
-            GlueType::Group => "group",
-            GlueType::Threshold => "threshold",
-            GlueType::Schedule => "schedule",
-        }
-    }
-
-    pub fn next(&self) -> Self {
-        let i = Self::ALL.iter().position(|t| t == self).unwrap_or(0);
-        Self::ALL[(i + 1) % Self::ALL.len()]
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GlueEditField {
-    Type,
-    Id,
-    Name,
-    Options,
-    Members,
-    SourceDeviceId,
-    SourceAttribute,
-    Threshold,
-}
-
-#[derive(Debug, Clone)]
-pub struct GlueCreator {
-    pub glue_type: GlueType,
-    pub id: String,
-    pub name: String,
-    pub options: String,
-    pub members: String,
-    pub source_device_id: String,
-    pub source_attribute: String,
-    pub threshold: String,
-    pub field: GlueEditField,
-    pub error: Option<String>,
-}
-
-impl Default for GlueCreator {
-    fn default() -> Self {
-        Self {
-            glue_type: GlueType::Counter,
-            id: String::new(),
-            name: String::new(),
-            options: String::new(),
-            members: String::new(),
-            source_device_id: String::new(),
-            source_attribute: "value".to_string(),
-            threshold: String::new(),
-            field: GlueEditField::Type,
-            error: None,
-        }
-    }
-}
-
-impl GlueCreator {
-    /// Fields in order, skipping ones that do not apply to the type.
-    pub fn fields_for_type(t: GlueType) -> Vec<GlueEditField> {
-        let mut fields = vec![GlueEditField::Type, GlueEditField::Id, GlueEditField::Name];
-        match t {
-            GlueType::Select => fields.push(GlueEditField::Options),
-            GlueType::Group => fields.push(GlueEditField::Members),
-            GlueType::Threshold => {
-                fields.push(GlueEditField::SourceDeviceId);
-                fields.push(GlueEditField::SourceAttribute);
-                fields.push(GlueEditField::Threshold);
-            }
-            _ => {}
-        }
-        fields
-    }
-
-    fn field_mut(&mut self) -> Option<&mut String> {
-        match self.field {
-            GlueEditField::Type => None,
-            GlueEditField::Id => Some(&mut self.id),
-            GlueEditField::Name => Some(&mut self.name),
-            GlueEditField::Options => Some(&mut self.options),
-            GlueEditField::Members => Some(&mut self.members),
-            GlueEditField::SourceDeviceId => Some(&mut self.source_device_id),
-            GlueEditField::SourceAttribute => Some(&mut self.source_attribute),
-            GlueEditField::Threshold => Some(&mut self.threshold),
-        }
-    }
-
-    /// Build `(id, name, type, config)` for `POST /glue`, or a message
-    /// saying what is missing.
-    pub fn build(&self) -> Result<(String, String, &'static str, serde_json::Value), String> {
-        use serde_json::{Value, json};
-        let id = self.id.trim().to_string();
-        if id.is_empty() {
-            return Err("id cannot be empty".to_string());
-        }
-        let name = if self.name.trim().is_empty() {
-            id.clone()
-        } else {
-            self.name.trim().to_string()
-        };
-        let list = |s: &str| -> Vec<Value> {
-            s.split(',')
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(|s| Value::String(s.to_string()))
-                .collect()
-        };
-        let mut config = serde_json::Map::new();
-        match self.glue_type {
-            GlueType::Select => {
-                let opts = list(&self.options);
-                if opts.is_empty() {
-                    return Err("select needs at least one option (comma-separated)".into());
-                }
-                config.insert("options".into(), Value::Array(opts));
-            }
-            GlueType::Group => {
-                config.insert("members".into(), Value::Array(list(&self.members)));
-            }
-            GlueType::Threshold => {
-                let src = self.source_device_id.trim();
-                if src.is_empty() {
-                    return Err("threshold requires source_device_id".into());
-                }
-                config.insert("source_device_id".into(), json!(src));
-                let attr = match self.source_attribute.trim() {
-                    "" => "value",
-                    a => a,
-                };
-                config.insert("source_attribute".into(), json!(attr));
-                let t: f64 = self
-                    .threshold
-                    .trim()
-                    .parse()
-                    .map_err(|_| "threshold must be a number".to_string())?;
-                config.insert("threshold".into(), json!(t));
-            }
-            _ => {}
-        }
-        Ok((id, name, self.glue_type.as_str(), Value::Object(config)))
-    }
-}
-
 // ── Matter commission editor ────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -546,8 +365,6 @@ impl App {
             self.on_key_user_editor(key);
         } else if self.manage.mode_editor.is_some() {
             self.on_key_mode_editor(key);
-        } else if self.manage.glue_creator.is_some() {
-            self.on_key_glue_creator(key);
         } else if self.manage.matter.editor.is_some() {
             self.on_key_matter_editor(key);
         } else {
@@ -659,40 +476,6 @@ impl App {
         }
     }
 
-    fn on_key_glue_creator(&mut self, key: KeyEvent) {
-        let Some(c) = self.manage.glue_creator.as_mut() else {
-            return;
-        };
-        match key.code {
-            KeyCode::Esc => {
-                self.manage.glue_creator = None;
-                self.status = "Cancelled".to_string();
-            }
-            KeyCode::Tab | KeyCode::BackTab => {
-                let fields = GlueCreator::fields_for_type(c.glue_type);
-                let i = fields.iter().position(|f| *f == c.field).unwrap_or(0);
-                let n = fields.len();
-                c.field = if key.code == KeyCode::Tab {
-                    fields[(i + 1) % n]
-                } else {
-                    fields[(i + n - 1) % n]
-                };
-            }
-            KeyCode::Char(' ') if c.field == GlueEditField::Type => {
-                c.glue_type = c.glue_type.next();
-                if !GlueCreator::fields_for_type(c.glue_type).contains(&c.field) {
-                    c.field = GlueEditField::Type;
-                }
-            }
-            KeyCode::Enter => self.save_glue_creator(),
-            _ => {
-                if let Some(f) = c.field_mut() {
-                    edit_text(f, key);
-                }
-            }
-        }
-    }
-
     fn on_key_matter_editor(&mut self, key: KeyEvent) {
         let Some(ed) = self.manage.matter.editor.as_mut() else {
             return;
@@ -743,20 +526,6 @@ mod tests {
         let c = ed.changes();
         assert!(c["area"].is_null(), "emptied room clears the override");
         assert!(!c.contains_key("canonical_name"));
-    }
-
-    #[test]
-    fn glue_build_checks_type_fields() {
-        let mut g = GlueCreator {
-            id: "x".into(),
-            glue_type: GlueType::Select,
-            ..Default::default()
-        };
-        assert!(g.build().is_err());
-        g.options = "a, b".into();
-        let (id, name, t, cfg) = g.build().unwrap();
-        assert_eq!((id.as_str(), name.as_str(), t), ("x", "x", "select"));
-        assert_eq!(cfg["options"], serde_json::json!(["a", "b"]));
     }
 
     #[test]
