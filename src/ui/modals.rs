@@ -34,6 +34,7 @@ pub fn draw_overlays(frame: &mut Frame<'_>, app: &App) {
         draw_variables(frame, app);
     }
     super::history::draw_history_view(frame, app);
+    super::history::draw_orphans(frame, app);
     super::rooms::draw_room_overlay(frame, app);
     draw_vocabulary(frame, app);
     draw_filter_bar(frame, app);

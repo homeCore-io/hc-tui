@@ -143,6 +143,90 @@ fn num(v: f64) -> String {
     }
 }
 
+/// `o` on Devices: what no plugin manages any more, for removing by hand.
+pub fn draw_orphans(frame: &mut Frame<'_>, app: &App) {
+    let Some(o) = &app.devices_tab.orphans else {
+        return;
+    };
+    let popup = centered_rect(80, 60, frame.area());
+    frame.render_widget(Clear, popup);
+    let outer = Block::default()
+        .borders(Borders::ALL)
+        .title(" Devices no plugin manages ")
+        .border_style(Style::default().fg(Color::Cyan));
+    let inner = outer.inner(popup);
+    frame.render_widget(outer, popup);
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(3), Constraint::Length(2)])
+        .split(inner);
+    let dim = Style::default().fg(Color::DarkGray);
+    let lines: Vec<Line> = match &o.suspects {
+        Load::Ready(list) if list.is_empty() => vec![Line::from(Span::styled(
+            " None: every plugin manages as many devices as homeCore holds for it.",
+            Style::default().fg(Color::Green),
+        ))],
+        Load::Ready(list) => {
+            let mut out: Vec<Line> = o
+                .counts
+                .iter()
+                .filter(|(_, holds, reports)| holds > reports)
+                .map(|(p, holds, reports)| {
+                    Line::from(Span::styled(
+                        format!(" {p}: homeCore holds {holds}, the plugin manages {reports}"),
+                        dim,
+                    ))
+                })
+                .collect();
+            out.push(Line::from(""));
+            for (i, s) in list.iter().enumerate() {
+                let mark = if o.marked.contains(&s.device_id) {
+                    "[x]"
+                } else {
+                    "[ ]"
+                };
+                let style = if i == o.sel {
+                    Style::default().fg(Color::Black).bg(Color::Cyan)
+                } else {
+                    Style::default()
+                };
+                out.push(Line::from(vec![
+                    Span::styled(
+                        format!(" {mark} {:<36}", crate::text::take_chars(&s.name, 36)),
+                        style,
+                    ),
+                    Span::styled(
+                        format!("  last seen {} ago", stale_words(s.stale_secs)),
+                        dim,
+                    ),
+                ]));
+            }
+            out
+        }
+        Load::Failed(e) => vec![Line::from(format!(" Couldn't check: {e}"))],
+        _ => vec![Line::from(Span::styled(" checking...", dim))],
+    };
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), rows[0]);
+    frame.render_widget(
+        Paragraph::new(vec![
+            Line::from(Span::styled(
+                " These are guesses, the least recently seen of each plugin's. Check each is really gone.",
+                dim,
+            )),
+            Line::from(Span::styled(" j/k move   Space mark   x remove the marked   Esc close", dim)),
+        ]),
+        rows[1],
+    );
+}
+
+fn stale_words(secs: u64) -> String {
+    match secs {
+        s if s < 3600 => format!("{} min", s / 60),
+        s if s < 86_400 => format!("{} h", s / 3600),
+        s => format!("{} days", s / 86_400),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::num;

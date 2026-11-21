@@ -18,6 +18,7 @@ pub mod history_view;
 pub mod home;
 pub mod manage;
 pub mod media;
+pub mod orphans;
 pub mod picker;
 pub mod plugin_logs;
 pub mod plugin_manage;
@@ -1319,6 +1320,7 @@ impl App {
         use editors::ConfirmAction as C;
         match action {
             C::DeleteDevice { id } => self.delete_device(id),
+            C::DeleteDevices { ids } => self.delete_devices(ids),
             C::DeleteArea { id, name } => self.delete_area(id, name),
             C::MergeArea {
                 id,

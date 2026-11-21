@@ -31,6 +31,22 @@ impl Screen for DevicesScreen {
     }
 
     fn bindings(&self, app: &App) -> Vec<Binding> {
+        if app.devices_tab.orphans.is_some() {
+            let mut v = moves(|a| a.move_orphan(-1), |a| a.move_orphan(1)).to_vec();
+            if app.can("devices:write") {
+                v.extend([
+                    Binding::new(SPACE, "Space", "mark", App::mark_orphan),
+                    Binding::new(
+                        DELETE,
+                        "x",
+                        "remove the marked (asks first)",
+                        App::ask_remove_orphans,
+                    ),
+                ]);
+            }
+            v.push(Binding::new(ESC, "Esc", "close", App::close_orphans));
+            return v;
+        }
         if app.devices_tab.history_view.is_some() {
             let mut v = moves(|a| a.move_history_attr(-1), |a| a.move_history_attr(1)).to_vec();
             v.extend([
@@ -217,6 +233,17 @@ impl Screen for DevicesScreen {
                 "history",
                 App::open_history_view,
             ));
+        }
+        if sub.is_list() {
+            v.push(
+                Binding::new(
+                    &[KeyCode::Char('o')],
+                    "o",
+                    "devices no plugin manages",
+                    App::open_orphans,
+                )
+                .more(),
+            );
         }
         v
     }

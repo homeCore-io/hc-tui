@@ -85,6 +85,10 @@ It is built with:
   to keep them, turned off, or delete them too. Making rules is left to
   the app. Kept live from the event stream,
   with the open count on the sidebar.
+- Devices: `o` lists devices no plugin manages any more (homeCore holds more
+  than the plugin says it has): each suspect with when it was last seen;
+  `Space` marks, `x` removes the marked after naming them. They are guesses,
+  so nothing is marked for you.
 - Devices: `h` opens a device's history: any number or on/off reading,
   `←/→` for 1 hour to 30 days, with the lowest, highest and latest, or
   each change and when.

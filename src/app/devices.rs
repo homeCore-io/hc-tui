@@ -141,6 +141,8 @@ pub struct DevicesTab {
     pub controls: super::controls::ControlsState,
     /// The history explorer (`h`), when open.
     pub history_view: Option<super::history_view::HistoryView>,
+    /// Devices no plugin manages any more (`o`), when open.
+    pub orphans: Option<super::orphans::OrphanView>,
 }
 
 // ── Attribute readers ───────────────────────────────────────────────────────

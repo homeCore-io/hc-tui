@@ -40,6 +40,9 @@ pub enum ConfirmAction {
     DeleteDevice {
         id: String,
     },
+    DeleteDevices {
+        ids: Vec<String>,
+    },
     DeleteArea {
         id: String,
         name: String,
