@@ -20,6 +20,7 @@ pub enum SettingsConfirm {
     DeleteCalendar { id: String },
     ReplaceCalendar { path: PathBuf, name: String },
     RestartCore,
+    DeleteDisplay { id: String, name: String },
 }
 
 /// An open Settings dialog. Only one at a time.
@@ -29,6 +30,15 @@ pub enum SettingsModal {
     Secret(NewApiKey),
     Restore(RestoreForm),
     Path(PathForm),
+    /// Naming a new display.
+    DisplayName(DisplayNameForm),
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct DisplayNameForm {
+    pub name: String,
+    pub busy: bool,
+    pub error: Option<String>,
 }
 
 impl std::fmt::Debug for SettingsModal {
@@ -38,6 +48,7 @@ impl std::fmt::Debug for SettingsModal {
             Self::Secret(k) => write!(f, "Secret({k:?})"),
             Self::Restore(r) => write!(f, "Restore({:?})", r.source),
             Self::Path(p) => write!(f, "Path({:?})", p.purpose),
+            Self::DisplayName(_) => f.write_str("DisplayName"),
         }
     }
 }
@@ -218,6 +229,41 @@ impl App {
             return;
         }
         match modal {
+            SettingsModal::DisplayName(f) => {
+                if f.busy {
+                    return;
+                }
+                f.error = None;
+                if key.code != KeyCode::Enter {
+                    edit_text(&mut f.name, key);
+                    return;
+                }
+                let name = f.name.trim().to_string();
+                if name.is_empty() {
+                    f.error = Some("Give it a name, such as Hall tablet".into());
+                    return;
+                }
+                f.busy = true;
+                let c = self.client.clone();
+                self.spawn(
+                    async move { c.create_display(&name).await },
+                    |app, res| match res {
+                        Ok(k) => {
+                            app.status =
+                                format!("Made the display {}: its key is shown once", k.label);
+                            app.manage.modal = Some(SettingsModal::Secret(k));
+                            app.manage.people.displays = Load::Idle;
+                            app.load_displays();
+                        }
+                        Err(e) => {
+                            if let Some(SettingsModal::DisplayName(f)) = app.manage.modal.as_mut() {
+                                f.busy = false;
+                                f.error = Some(e.to_string());
+                            }
+                        }
+                    },
+                );
+            }
             SettingsModal::Secret(_) => {
                 if key.code == KeyCode::Enter {
                     self.manage.modal = None;
@@ -309,6 +355,7 @@ impl App {
             S::DeleteCalendar { id } => self.delete_calendar(id),
             S::ReplaceCalendar { path, name } => self.upload_calendar(path, name),
             S::RestartCore => self.restart_core(),
+            S::DeleteDisplay { id, name } => self.delete_display(id, name),
         }
     }
 

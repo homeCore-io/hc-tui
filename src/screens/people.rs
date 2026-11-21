@@ -82,6 +82,15 @@ impl Screen for PeopleScreen {
                     Binding::new(DELETE, "x", "revoke", App::ask_revoke_api_key),
                 ]);
             }
+            PeopleTab::Displays => {
+                v.extend(moves(|a| a.move_display(-1), |a| a.move_display(1)));
+                if app.is_admin() {
+                    v.extend([
+                        Binding::new(NEW, "n", "new display", App::open_new_display),
+                        Binding::new(DELETE, "x", "delete display", App::ask_delete_display),
+                    ]);
+                }
+            }
             PeopleTab::Sessions => {
                 v.extend(moves(|a| a.move_session(-1), |a| a.move_session(1)));
                 v.extend([

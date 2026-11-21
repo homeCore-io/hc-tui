@@ -243,7 +243,10 @@ Screens:
   `Enter` run, `f` run with a file; Logs: `Space` pause, `e`/`w`/`i`/`d` level, `c` clear.
   Catalog: `i` install. Runtimes: `Enter` detail, `R` reset login.
   Matter: `c` commission, `i` reinterview, `x` remove a node.
-- People: `←/→` tab (People, Roles, API keys, Sessions).
+- People: `←/→` tab (People, Roles, API keys, Sessions, Displays).
+  Displays (admins): `n` makes one for a hall tablet or kitchen panel and
+  shows its key once (it may use the house and change nothing), `x` deletes
+  one, which signs it out.
   - People: `n` new person, `Enter` change role, `x` delete, `c` remove
     PIN (admin); `p` changes your password, or an admin sets someone
     else's.

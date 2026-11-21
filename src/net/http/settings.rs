@@ -205,6 +205,25 @@ impl HomeCoreClient {
         self.get_json("/ws/connections").await
     }
 
+    pub async fn list_displays(&self) -> Result<Vec<crate::model::settings::Display>> {
+        self.get_json("/displays").await
+    }
+
+    /// `POST /displays`: a display and its key, in `token`, shown once.
+    pub async fn create_display(&self, name: &str) -> Result<NewApiKey> {
+        let mut k: NewApiKey = self
+            .send_json(Method::POST, "/displays", Some(json!({ "name": name })))
+            .await?;
+        k.label = name.to_string();
+        Ok(k)
+    }
+
+    /// `DELETE /displays/{id}`: it is signed out on its next request.
+    pub async fn delete_display(&self, id: &str) -> Result<()> {
+        let path = format!("/displays/{}", seg(id));
+        self.send_empty(Method::DELETE, &path, None).await
+    }
+
     pub async fn house_temperature(&self) -> Result<HouseTemperature> {
         self.get_json("/system/temperature-unit").await
     }

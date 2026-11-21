@@ -64,6 +64,18 @@ impl ApiKey {
 /// What `POST /auth/api-keys` and `POST /auth/api-keys/{id}/rotate`
 /// return. The `token` is the only time core sends the secret. It is
 /// never serialized, never printed by `Debug`, and zeroed on drop.
+/// A screen for the house, such as a hall tablet (`GET /displays`).
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct Display {
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub last_used_at: Option<String>,
+    #[serde(default)]
+    pub revoked: bool,
+}
+
 #[derive(Default, Deserialize)]
 pub struct NewApiKey {
     #[serde(default)]
