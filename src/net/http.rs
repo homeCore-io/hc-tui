@@ -501,6 +501,20 @@ impl HomeCoreClient {
             .await
     }
 
+    /// `GET /automations/variables`: the hub variables rules have set, by
+    /// name, sorted. In memory on homeCore: none after a restart until a rule
+    /// sets one.
+    pub async fn list_hub_variables(&self) -> Result<Vec<(String, Value)>> {
+        let v: Value = self.get_json("/automations/variables").await?;
+        let mut out: Vec<(String, Value)> = v
+            .get("hub")
+            .and_then(Value::as_object)
+            .map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+            .unwrap_or_default();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(out)
+    }
+
     pub async fn list_rule_groups(&self) -> Result<Vec<RuleGroup>> {
         self.get_json("/automations/groups").await
     }

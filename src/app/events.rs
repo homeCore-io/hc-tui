@@ -225,7 +225,12 @@ impl App {
                 }
                 self.on_rule_event("rule_changed", &event);
             }
-            "rule_fired" => self.on_rule_event("rule_fired", &event),
+            "rule_fired" => {
+                self.on_rule_event("rule_fired", &event);
+                // A rule that ran may have set a variable; there is no event
+                // for that, so the open overlay asks again.
+                self.reload_variables();
+            }
             "rule_removed" => {
                 if let Some(id) = s(&event, "rule_id") {
                     self.rules.retain(|r| r.id != id);

@@ -30,6 +30,9 @@ pub fn draw_overlays(frame: &mut Frame<'_>, app: &App) {
     if app.rules_tab.groups.is_some() {
         draw_groups(frame, app);
     }
+    if app.rules_tab.variables.is_some() {
+        draw_variables(frame, app);
+    }
     draw_filter_bar(frame, app);
     super::settings::draw_modal(frame, app);
     super::home::draw_picker(frame, app);
@@ -383,6 +386,77 @@ fn draw_matter_editor(frame: &mut Frame<'_>, app: &App) {
         r[4],
     );
     help(frame, "Tab field  |  Enter commission  |  Esc cancel", r[5]);
+}
+
+/// A hub variable's value in a few characters: strings bare, the rest as JSON.
+pub(crate) fn variable_text(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
+
+fn draw_variables(frame: &mut Frame<'_>, app: &App) {
+    let Some(vars) = &app.rules_tab.variables else {
+        return;
+    };
+    let popup = centered_rect(60, 60, frame.area());
+    frame.render_widget(Clear, popup);
+    let outer = Block::default()
+        .borders(Borders::ALL)
+        .title("Hub variables")
+        .border_style(Style::default().fg(Color::Cyan));
+    let inner = outer.inner(popup);
+    frame.render_widget(outer, popup);
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(3), Constraint::Length(1)])
+        .split(inner);
+    match vars {
+        Load::Ready(items) if !items.is_empty() => {
+            let width = items
+                .iter()
+                .map(|(k, _)| k.chars().count())
+                .max()
+                .unwrap_or(0)
+                .min(28);
+            let rows: Vec<Line> = items
+                .iter()
+                .map(|(name, value)| {
+                    Line::from(vec![
+                        Span::styled(
+                            format!("  {:<width$}  ", crate::text::take_chars(name, 28)),
+                            Style::default()
+                                .fg(Color::White)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::raw(variable_text(value)),
+                    ])
+                })
+                .collect();
+            frame.render_widget(Paragraph::new(rows).wrap(Wrap { trim: false }), layout[0]);
+        }
+        other => {
+            let msg = match other {
+                Load::Failed(e) => format!("Couldn't read the variables: {e}"),
+                Load::Ready(_) => "No hub variables. Rules set them; after a restart there are none until one does.".to_string(),
+                _ => "loading...".to_string(),
+            };
+            frame.render_widget(
+                Paragraph::new(msg)
+                    .alignment(Alignment::Center)
+                    .wrap(Wrap { trim: true })
+                    .style(Style::default().fg(Color::DarkGray)),
+                layout[0],
+            );
+        }
+    }
+    frame.render_widget(
+        Paragraph::new("r refresh  |  Esc close  |  updates as automations run")
+            .style(Style::default().fg(Color::DarkGray))
+            .alignment(Alignment::Center),
+        layout[1],
+    );
 }
 
 fn draw_groups(frame: &mut Frame<'_>, app: &App) {
@@ -754,4 +828,18 @@ fn draw_terminal(frame: &mut Frame<'_>, area: Rect, s: &StreamingAction) {
             .wrap(Wrap { trim: false }),
         area,
     );
+}
+
+#[cfg(test)]
+mod variable_tests {
+    use super::variable_text;
+    use serde_json::json;
+
+    #[test]
+    fn a_variable_reads_as_its_value() {
+        assert_eq!(variable_text(&json!("away")), "away");
+        assert_eq!(variable_text(&json!(3)), "3");
+        assert_eq!(variable_text(&json!(true)), "true");
+        assert_eq!(variable_text(&json!({"n": 1})), "{\"n\":1}");
+    }
 }

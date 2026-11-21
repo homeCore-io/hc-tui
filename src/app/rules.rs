@@ -32,6 +32,8 @@ pub struct RulesTab {
     pub sel: ListSel,
     pub detail: Option<RuleDetail>,
     pub groups: Option<GroupsOverlay>,
+    /// The hub variables overlay (`v`), when open.
+    pub variables: Option<Load<Vec<(String, serde_json::Value)>>>,
     /// Runs, paused ones, missing devices, groups, a dry run and the
     /// device picker: see `automations.rs`.
     pub extra: super::automations::AutomationsExtra,
@@ -418,6 +420,32 @@ impl App {
 
     pub fn close_groups(&mut self) {
         self.rules_tab.groups = None;
+    }
+
+    /// `v`: the hub variables rules have set, as they are now.
+    pub fn open_variables(&mut self) {
+        self.rules_tab.variables = Some(Load::Loading);
+        self.reload_variables();
+    }
+
+    pub fn close_variables(&mut self) {
+        self.rules_tab.variables = None;
+    }
+
+    /// Ask again, keeping what is shown until the answer comes.
+    pub fn reload_variables(&mut self) {
+        if self.rules_tab.variables.is_none() {
+            return;
+        }
+        let c = self.client.clone();
+        self.spawn(async move { c.list_hub_variables().await }, |app, res| {
+            if app.rules_tab.variables.is_some() {
+                app.rules_tab.variables = Some(match res {
+                    Ok(v) => Load::Ready(v),
+                    Err(e) => Load::Failed(e.to_string()),
+                });
+            }
+        });
     }
 
     pub fn ask_delete_group(&mut self) {

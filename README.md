@@ -81,6 +81,8 @@ It is built with:
   to keep them, turned off, or delete them too. Making rules is left to
   the app. Kept live from the event stream,
   with the open count on the sidebar.
+- Automations: `v` shows the hub variables rules have set, as they are
+  now, and updates as automations run.
 - Automations: what starts each one in words (`sunset -15m`,
   `Garage Door open 10m`, `time 17:00`), its last run and group, a mark
   for one another rule paused (‖) and for one that needs fixing (!,
