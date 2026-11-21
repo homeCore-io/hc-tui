@@ -252,7 +252,8 @@ Screens:
     4 to 8 digits nobody else has); `p` changes your password, or an admin sets someone
     else's.
   - Roles: what each role may do.
-  - API keys: `n` new key (a label and what it may do), `s` new secret,
+  - API keys: `n` new key (a label and what it may do), `e` change a
+    key's label or what it may do (its secret stays), `s` new secret,
     `x` revoke. A key's secret is shown once, in a dialog; hc-tui never
     writes it anywhere.
   - Sessions: `x` end one, `X` end all others. This one stays; `L` signs

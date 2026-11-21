@@ -70,6 +70,8 @@ pub struct NewKeyForm {
     pub cursor: usize,
     pub busy: bool,
     pub error: Option<String>,
+    /// The key being edited (`e`), by id; `None` makes a new one.
+    pub editing: Option<String>,
 }
 
 impl NewKeyForm {
@@ -88,6 +90,7 @@ impl NewKeyForm {
             cursor: 0,
             busy: false,
             error: None,
+            editing: None,
         }
     }
 

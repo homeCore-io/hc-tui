@@ -85,6 +85,12 @@ impl Screen for PeopleScreen {
                 v.extend(moves(|a| a.move_api_key(-1), |a| a.move_api_key(1)));
                 v.extend([
                     Binding::new(NEW, "n", "new key", App::open_new_api_key),
+                    Binding::new(
+                        &[KeyCode::Char('e')],
+                        "e",
+                        "change label or scopes",
+                        App::open_edit_api_key,
+                    ),
                     Binding::new(&[KeyCode::Char('s')], "s", "new secret", |a| {
                         a.ask_rotate_api_key()
                     }),

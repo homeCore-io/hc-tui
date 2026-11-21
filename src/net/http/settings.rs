@@ -53,6 +53,17 @@ impl HomeCoreClient {
 
     /// `POST /auth/api-keys/{id}/rotate`: a new secret, shown once; the
     /// old one stops working.
+    /// `PATCH /auth/api-keys/{id}`: a new label and scopes; the secret stays.
+    pub async fn update_api_key(&self, id: &str, label: &str, scopes: &[String]) -> Result<()> {
+        let path = format!("/auth/api-keys/{}", seg(id));
+        self.send_empty(
+            Method::PATCH,
+            &path,
+            Some(json!({ "label": label, "scopes": scopes })),
+        )
+        .await
+    }
+
     pub async fn rotate_api_key(&self, id: &str) -> Result<NewApiKey> {
         let path = format!("/auth/api-keys/{}/rotate", seg(id));
         self.send_json(Method::POST, &path, None).await

@@ -215,6 +215,30 @@ impl App {
         self.manage.modal = Some(SettingsModal::NewKey(NewKeyForm::new(scopes)));
     }
 
+    /// `e` on a key: change its label or what it may do. Its secret stays.
+    pub fn open_edit_api_key(&mut self) {
+        let Some(k) = self.selected_api_key().cloned() else {
+            return;
+        };
+        if k.is_revoked() {
+            self.status = "A revoked key can't be changed".into();
+            return;
+        }
+        let mut held = self.grantable_scopes();
+        for s in &k.scopes {
+            if !held.contains(s) {
+                held.push(s.clone());
+            }
+        }
+        let mut form = NewKeyForm::new(held);
+        for (s, on) in form.scopes.iter_mut() {
+            *on = k.scopes.contains(s);
+        }
+        form.label = k.label.clone();
+        form.editing = Some(k.id.clone());
+        self.manage.modal = Some(SettingsModal::NewKey(form));
+    }
+
     pub(crate) fn save_new_api_key(&mut self) {
         let Some(SettingsModal::NewKey(form)) = self.manage.modal.as_mut() else {
             return;
@@ -231,6 +255,27 @@ impl App {
         }
         form.busy = true;
         let c = self.client.clone();
+        if let Some(id) = form.editing.clone() {
+            let sent = label.clone();
+            self.spawn(
+                async move { c.update_api_key(&id, &sent, &scopes).await },
+                move |app, res| match res {
+                    Ok(()) => {
+                        app.manage.modal = None;
+                        app.status = format!("Saved the key {label}");
+                        app.manage.people.keys = Load::Idle;
+                        app.load_api_keys();
+                    }
+                    Err(e) => {
+                        if let Some(SettingsModal::NewKey(f)) = app.manage.modal.as_mut() {
+                            f.busy = false;
+                            f.error = Some(e.to_string());
+                        }
+                    }
+                },
+            );
+            return;
+        }
         self.spawn(
             async move { c.create_api_key(&label, &scopes).await },
             |app, res| match res {

@@ -825,7 +825,12 @@ pub fn draw_modal(frame: &mut Frame<'_>, app: &App) {
             frame.render_widget(Paragraph::new(Line::from(note)), r[2]);
         }
         SettingsModal::NewKey(f) => {
-            let inner = dialog(frame, 70, 70, "New API key", Color::Cyan);
+            let title = if f.editing.is_some() {
+                "Edit API key"
+            } else {
+                "New API key"
+            };
+            let inner = dialog(frame, 70, 70, title, Color::Cyan);
             let r = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
