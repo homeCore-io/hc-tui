@@ -689,6 +689,10 @@ impl App {
         if !self.authenticated {
             return;
         }
+        // Schemas are cached until they change; a sync (`r`, a reconnect) may
+        // follow a `device_schema_changed` this client never saw, so they are
+        // asked for again as each device is shown.
+        self.devices_tab.controls.schemas.clear();
         self.sync_seq += 1;
         let seq = self.sync_seq;
         self.syncing = true;

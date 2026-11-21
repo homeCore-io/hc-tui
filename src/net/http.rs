@@ -647,6 +647,22 @@ impl HomeCoreClient {
         self.get_json(&path).await
     }
 
+    /// `POST /plugins/{id}/query`: a read-only action, which core answers
+    /// for anyone who can read devices (`command` needs `plugins:write`).
+    pub async fn post_plugin_query(
+        &self,
+        plugin_id: &str,
+        action: &str,
+        params: Value,
+    ) -> Result<Value> {
+        let path = format!("/plugins/{}/query", seg(plugin_id));
+        let body = build_plugin_command_body(action, params);
+        let resp = self.request(Method::POST, &path, Some(&body)).await?;
+        let resp = check_status(resp).await?;
+        let text = resp.text().await.unwrap_or_default();
+        Ok(serde_json::from_str(&text).unwrap_or(Value::Null))
+    }
+
     /// `POST /plugins/{id}/command`. The body is `{action, ...params}`.
     /// A busy single-concurrency stream answers 409 with
     /// `{status:"busy", active_request_id}`; that comes back as `Ok`.

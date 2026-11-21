@@ -539,8 +539,15 @@ impl App {
         }
         let c = self.client.clone();
         let id = action.id.clone();
+        let query = uses_query(&action);
         self.spawn(
-            async move { c.post_plugin_command(&plugin_id, &action.id, params).await },
+            async move {
+                if query {
+                    c.post_plugin_query(&plugin_id, &action.id, params).await
+                } else {
+                    c.post_plugin_command(&plugin_id, &action.id, params).await
+                }
+            },
             move |app, res| {
                 let msg = match res {
                     // A reply that says it failed comes back as success.
@@ -855,5 +862,35 @@ mod tests {
         assert_eq!(progress_percent(&json!({"percent": 40})), Some(40.0));
         assert_eq!(progress_percent(&json!({"pct": 140})), Some(100.0));
         assert_eq!(progress_percent(&json!({})), None);
+    }
+}
+
+/// Whether `action` goes to `/plugins/{id}/query` rather than `/command`.
+///
+/// Core answers a read-only, non-streaming action there for anyone who can
+/// read devices; on `/command` it needs `plugins:write`, so a person without
+/// it would be refused an action they are allowed to run.
+pub(crate) fn uses_query(action: &Action) -> bool {
+    action.requires_role == RequiresRole::ReadOnly && !action.stream
+}
+
+#[cfg(test)]
+mod query_tests {
+    use super::*;
+
+    fn action(role: RequiresRole, stream: bool) -> Action {
+        let mut a: Action = serde_json::from_value(json!({"id": "a"})).unwrap();
+        a.requires_role = role;
+        a.stream = stream;
+        a
+    }
+
+    #[test]
+    fn only_a_read_only_non_streaming_action_is_a_query() {
+        assert!(uses_query(&action(RequiresRole::ReadOnly, false)));
+        assert!(!uses_query(&action(RequiresRole::ReadOnly, true)));
+        assert!(!uses_query(&action(RequiresRole::User, false)));
+        assert!(!uses_query(&action(RequiresRole::Admin, false)));
+        assert!(!uses_query(&action(RequiresRole::SignedIn, false)));
     }
 }

@@ -177,6 +177,14 @@ impl App {
                     self.upsert_device(new);
                 }
             }
+            "device_schema_changed" => {
+                // Its attributes or actions changed: drop the cached schema so
+                // the controls are rebuilt from the new one the next time the
+                // device is shown (at once, if it is selected now).
+                if let Some(id) = device_id.as_deref() {
+                    self.devices_tab.controls.schemas.remove(id);
+                }
+            }
             "device_removed" => {
                 if let Some(id) = device_id.as_deref() {
                     self.devices.retain(|d| d.device_id != id);
@@ -387,6 +395,31 @@ mod tests {
         // No `current` at all: nothing changes.
         a.apply_event(json!({"type": "device_state_changed", "device_id": "lamp"}));
         assert_eq!(a.devices[0].attributes.len(), 2);
+    }
+
+    #[test]
+    fn a_schema_change_drops_the_cached_schema() {
+        let mut a = app_with_lamp();
+        a.devices_tab
+            .controls
+            .schemas
+            .insert("lamp".into(), crate::app::Load::Ready(None));
+        a.devices_tab
+            .controls
+            .schemas
+            .insert("other".into(), crate::app::Load::Ready(None));
+        a.apply_event(json!({
+            "type": "device_schema_changed", "device_id": "lamp",
+            "attributes": ["on", "brightness_pct", "color_temp"], "actions": []
+        }));
+        assert!(
+            !a.devices_tab.controls.schemas.contains_key("lamp"),
+            "asked for again"
+        );
+        assert!(
+            a.devices_tab.controls.schemas.contains_key("other"),
+            "others kept"
+        );
     }
 
     #[test]
