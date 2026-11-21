@@ -98,6 +98,13 @@ fn detail_bindings(app: &App, admin: bool) -> Vec<Binding> {
                 Binding::new(DOWN, "j", "move down", |a| a.move_plugin_action(1)).more(),
                 Binding::new(UP, "k", "move up", |a| a.move_plugin_action(-1)).more(),
                 Binding::new(ENTER, "Enter", "run", App::run_selected_action),
+                Binding::new(
+                    &[KeyCode::Char('f')],
+                    "f",
+                    "run with a file",
+                    App::run_selected_action_with_file,
+                )
+                .more(),
             ]);
         }
         PluginDetailPanel::Notices => {
@@ -216,6 +223,21 @@ fn runtime_bindings(app: &App, admin: bool) -> Vec<Binding> {
             "reset login",
             App::ask_reset_runtime,
         ));
+        v.extend([
+            Binding::new(
+                &[KeyCode::Char('n')],
+                "n",
+                "add a runtime",
+                App::open_add_runtime,
+            ),
+            Binding::new(
+                &[KeyCode::Char('x')],
+                "x",
+                "remove it",
+                App::ask_remove_runtime,
+            )
+            .more(),
+        ]);
     }
     v
 }

@@ -65,6 +65,17 @@ pub fn mode_schedule(
 }
 
 impl App {
+    /// `d` on a criteria mode: what turns it on and off.
+    pub fn open_mode_definition(&mut self) {
+        if let Some(m) = self.selected_mode().filter(|m| m.definition.is_some()) {
+            self.manage.mode_detail = Some(m.config.id.clone());
+        }
+    }
+
+    pub fn close_mode_definition(&mut self) {
+        self.manage.mode_detail = None;
+    }
+
     pub fn selected_mode(&self) -> Option<&ModeRecord> {
         let id = self.manage.modes_sel.id()?;
         self.views
@@ -185,6 +196,7 @@ impl App {
             None => self.modes.push(ModeRecord {
                 config: cfg,
                 state: None,
+                definition: None,
             }),
         }
         self.save_cache(&[Section::Modes]);

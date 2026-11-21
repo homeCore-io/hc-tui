@@ -59,6 +59,25 @@ impl Screen for AlertsScreen {
                     "made in the app's Settings, Alerts",
                 ));
             }
+            AlertsSub::Kinds => {
+                if write {
+                    v.extend([
+                        Binding::new(
+                            &[KeyCode::Char(' ')],
+                            "Space",
+                            "on/off",
+                            App::toggle_alert_kind,
+                        ),
+                        Binding::new(
+                            &[KeyCode::Char('d')],
+                            "d",
+                            "the plugin's choice",
+                            App::reset_alert_kind,
+                        )
+                        .more(),
+                    ]);
+                }
+            }
             AlertsSub::Ignored => {
                 if write {
                     v.push(Binding::new(

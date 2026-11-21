@@ -120,17 +120,26 @@ pub fn draw_modes(frame: &mut Frame<'_>, app: &App, area: Rect) {
             } else {
                 ("○", Color::DarkGray)
             };
-            let kc = match m.config.kind.as_str() {
-                "solar" => Color::Yellow,
-                "manual" => Color::Cyan,
-                _ => Color::White,
+            let name_of = |id: &str| app.rule_device_name(id);
+            let criteria = m
+                .definition
+                .as_ref()
+                .and_then(|d| crate::app::rule_words::criteria_words(d, &name_of));
+            let (kind, kc) = match (&criteria, m.config.kind.as_str()) {
+                (Some(_), _) => ("criteria".to_string(), Color::Magenta),
+                (None, "solar") => (m.config.kind.clone(), Color::Yellow),
+                (None, "manual") => (m.config.kind.clone(), Color::Cyan),
+                (None, k) => (k.to_string(), Color::White),
             };
-            let when = mode_schedule(&m.config, on, app.mode_attributes(&m.config.id));
+            let when = match &criteria {
+                Some((on_when, _, _)) => format!("on when {on_when}"),
+                None => mode_schedule(&m.config, on, app.mode_attributes(&m.config.id)),
+            };
             let style = |c: Color| if is_sel { hl } else { Style::default().fg(c) };
             Row::new(vec![
                 Cell::from(format!("  {dot}")).style(style(dc)),
                 Cell::from(m.config.name.clone()).style(style(Color::White)),
-                Cell::from(m.config.kind.clone()).style(style(kc)),
+                Cell::from(kind).style(style(kc)),
                 Cell::from(when).style(style(Color::Gray)),
             ])
         })
@@ -163,6 +172,7 @@ pub fn draw_modes(frame: &mut Frame<'_>, app: &App, area: Rect) {
 
 /// The scene editor, and the picker when it is open over it.
 pub fn draw_overlays(frame: &mut Frame<'_>, app: &App) {
+    draw_mode_definition(frame, app);
     draw_scene_editor(frame, app);
     super::controls::draw_picker(frame, app);
 }
@@ -268,6 +278,58 @@ pub fn modal_hints(app: &App) -> Option<Vec<&'static str>> {
             "Esc cancel",
         ],
     })
+}
+
+/// `d` on a criteria mode: what turns it on and off, in words.
+fn draw_mode_definition(frame: &mut Frame<'_>, app: &App) {
+    let Some(id) = &app.manage.mode_detail else {
+        return;
+    };
+    let Some(m) = app.modes.iter().find(|m| &m.config.id == id) else {
+        return;
+    };
+    let name_of = |id: &str| app.rule_device_name(id);
+    let Some(def) = &m.definition else {
+        return;
+    };
+    let Some((on, off, every)) = crate::app::rule_words::criteria_words(def, &name_of) else {
+        return;
+    };
+    let rules = def
+        .get("generated_rule_ids")
+        .and_then(serde_json::Value::as_array)
+        .map_or(0, Vec::len);
+    let r = super::widgets::centered_rect(70, 40, frame.area());
+    frame.render_widget(ratatui::widgets::Clear, r);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" {} ", m.config.name))
+        .border_style(Style::default().fg(Color::Magenta));
+    let label =
+        |s: &'static str| Span::styled(format!(" {s:<9}"), Style::default().fg(Color::DarkGray));
+    let lines = vec![
+        Line::from(vec![label("On"), Span::raw(format!("when {on}"))]),
+        Line::from(vec![label("Off"), Span::raw(off)]),
+        Line::from(vec![label("Checked"), Span::raw(every)]),
+        Line::from(""),
+        Line::from(Span::styled(
+            format!(
+                " homeCore keeps it so with {rules} automations of its own; change it in the app."
+            ),
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            " Esc close",
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(block)
+            .wrap(ratatui::widgets::Wrap { trim: false }),
+        r,
+    );
 }
 
 #[cfg(test)]

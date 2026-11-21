@@ -910,6 +910,11 @@ pub struct ModeRecord {
     pub config: ModeConfig,
     #[serde(default)]
     pub state: Option<DeviceState>,
+    /// What turns it on and off, for a criteria mode:
+    /// `{criteria: {on_condition, off_behavior, off_condition,
+    /// reevaluate_every_n_minutes}, generated_rule_ids}`. `None` otherwise.
+    #[serde(default)]
+    pub definition: Option<serde_json::Value>,
 }
 
 // ── Matter ──────────────────────────────────────────────────────────────────

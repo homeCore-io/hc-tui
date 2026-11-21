@@ -7,6 +7,36 @@ use crate::model::settings::{
     step_log_level,
 };
 
+/// One finding of `GET /system/vocabulary-check`.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct VocabFinding {
+    #[serde(default)]
+    pub severity: String,
+    #[serde(default)]
+    pub place: serde_json::Value,
+    #[serde(default)]
+    pub device_id: String,
+    #[serde(default)]
+    pub message: String,
+}
+
+impl VocabFinding {
+    /// Where it is, in words: an automation or scene by name, or the device.
+    pub fn place_text(&self) -> String {
+        let kind = self
+            .place
+            .get("kind")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        let name = self.place.get("name").and_then(serde_json::Value::as_str);
+        match (kind, name) {
+            ("automation", Some(n)) => format!("automation {n}"),
+            ("scene", Some(n)) => format!("scene {n}"),
+            _ => "the device itself".to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct StatusPanel {
     pub loading: bool,
@@ -20,6 +50,10 @@ pub struct StatusPanel {
     pub house_temp: Option<HouseTemperature>,
     /// Set while a restart runs.
     pub restarting: Option<String>,
+    /// The vocabulary check overlay (`c`), when open.
+    pub vocab: Option<Load<Vec<VocabFinding>>>,
+    /// `GET /system/battery_settings`, once read.
+    pub battery: Option<serde_json::Value>,
 }
 
 /// Plugins as the System screen counts them: running, meant to run but
@@ -58,21 +92,23 @@ impl App {
         let c = self.client.clone();
         self.spawn(
             async move {
-                let (h, v, l, t) = tokio::join!(
+                let (h, v, l, t, b) = tokio::join!(
                     c.health(),
                     c.system_versions(),
                     c.get_log_level(),
-                    c.house_temperature()
+                    c.house_temperature(),
+                    c.battery_settings()
                 );
-                Ok((h, v, l, t))
+                Ok((h, v, l, t, b))
             },
             |app, res: anyhow::Result<_>| {
-                let Ok((h, v, l, t)) = res else { return };
+                let Ok((h, v, l, t, b)) = res else { return };
                 let p = &mut app.manage.status;
                 p.health = load_of(h);
                 p.versions = load_of(v.map(|v| parse_versions(&v)));
                 p.log_level = load_of(l);
                 p.house_temp = t.ok();
+                p.battery = b.ok();
             },
         );
         if self.is_admin() {
@@ -99,6 +135,70 @@ impl App {
     }
 
     /// Whether this user may change core's log level.
+    /// `c` on System: what automations, scenes and devices say that devices
+    /// won't take. A report; it changes nothing.
+    pub fn open_vocabulary_check(&mut self) {
+        self.manage.status.vocab = Some(Load::Loading);
+        let c = self.client.clone();
+        self.spawn(
+            async move {
+                let v: serde_json::Value = c.get_json("/system/vocabulary-check").await?;
+                Ok(serde_json::from_value::<Vec<VocabFinding>>(
+                    v.get("findings").cloned().unwrap_or_default(),
+                )
+                .unwrap_or_default())
+            },
+            |app, res: anyhow::Result<Vec<VocabFinding>>| {
+                if app.manage.status.vocab.is_some() {
+                    app.manage.status.vocab = Some(match res {
+                        Ok(v) => Load::Ready(v),
+                        Err(e) => Load::Failed(e.to_string()),
+                    });
+                }
+            },
+        );
+    }
+
+    pub fn close_vocabulary_check(&mut self) {
+        self.manage.status.vocab = None;
+    }
+
+    /// `u` (admin): the household's temperatures in the other unit.
+    pub fn switch_temperature_unit(&mut self) {
+        let now = self
+            .manage
+            .status
+            .house_temp
+            .as_ref()
+            .map(|t| t.temperature_unit.clone())
+            .unwrap_or_else(|| "°C".into());
+        let to = if now == "°F" { "°C" } else { "°F" };
+        let c = self.client.clone();
+        self.spawn_ok(
+            "change the temperature unit",
+            async move { c.set_temperature_unit(to).await },
+            move |app, t| {
+                app.status = format!("Temperatures in {} for the household", t.temperature_unit);
+                app.manage.status.house_temp = Some(t);
+            },
+        );
+    }
+
+    /// `N` (admin): a test notification to every channel.
+    pub fn send_test_notification(&mut self) {
+        let c = self.client.clone();
+        self.status = "Sending a test notification...".into();
+        self.spawn(async move { c.notify_test().await }, |app, res| {
+            app.status = match res {
+                Ok(v) => match v.get("error").and_then(serde_json::Value::as_str) {
+                    Some(e) => format!("Test notification failed: {e}"),
+                    None => "Test notification sent to every channel".to_string(),
+                },
+                Err(e) => format!("Test notification failed: {e}"),
+            };
+        });
+    }
+
     pub fn can_set_log_level(&self) -> bool {
         self.can("plugins:write") || self.is_admin()
     }

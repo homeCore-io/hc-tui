@@ -58,6 +58,15 @@ impl Screen for PeopleScreen {
                     .selected_user()
                     .zip(app.current_user.as_ref())
                     .is_none_or(|(sel, me)| sel.id == me.id);
+                v.push(
+                    Binding::new(
+                        &[KeyCode::Char('P')],
+                        "P",
+                        "set your PIN for displays",
+                        App::open_set_pin,
+                    )
+                    .more(),
+                );
                 v.push(Binding::new(
                     &[KeyCode::Char('p')],
                     "p",
@@ -76,11 +85,26 @@ impl Screen for PeopleScreen {
                 v.extend(moves(|a| a.move_api_key(-1), |a| a.move_api_key(1)));
                 v.extend([
                     Binding::new(NEW, "n", "new key", App::open_new_api_key),
+                    Binding::new(
+                        &[KeyCode::Char('e')],
+                        "e",
+                        "change label or scopes",
+                        App::open_edit_api_key,
+                    ),
                     Binding::new(&[KeyCode::Char('s')], "s", "new secret", |a| {
                         a.ask_rotate_api_key()
                     }),
                     Binding::new(DELETE, "x", "revoke", App::ask_revoke_api_key),
                 ]);
+            }
+            PeopleTab::Displays => {
+                v.extend(moves(|a| a.move_display(-1), |a| a.move_display(1)));
+                if app.is_admin() {
+                    v.extend([
+                        Binding::new(NEW, "n", "new display", App::open_new_display),
+                        Binding::new(DELETE, "x", "delete display", App::ask_delete_display),
+                    ]);
+                }
             }
             PeopleTab::Sessions => {
                 v.extend(moves(|a| a.move_session(-1), |a| a.move_session(1)));

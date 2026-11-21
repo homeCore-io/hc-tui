@@ -9,6 +9,42 @@ use reqwest::Method;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+/// A kind of alert a plugin can raise (`GET /alerts/kinds`), with the house's
+/// choice for it.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct AlertKind {
+    pub plugin_id: String,
+    pub topic: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub severity: String,
+    #[serde(default)]
+    pub default_on: bool,
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub notify: Option<String>,
+}
+
+impl AlertKind {
+    pub fn key(&self) -> String {
+        format!("{}/{}", self.plugin_id, self.topic)
+    }
+}
+
+/// An automation an alert rule starts (`GET /alert-rules/{id}/automations`).
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct AlertRuleStarts {
+    #[serde(default)]
+    pub name: String,
+    /// It has another trigger, and runs on without this rule's.
+    #[serde(default)]
+    pub keeps_running: bool,
+}
+
 /// An alert rule (core's `AlertRule`): a device in a state, maybe only at
 /// some hours, maybe only once it has lasted. The rest of its fields are
 /// kept as they came, so turning it on or off sends it back whole.
@@ -95,11 +131,45 @@ impl HomeCoreClient {
         self.send_json(Method::PUT, &path, Some(json!(rule))).await
     }
 
-    /// `DELETE /alert-rules/{id}?automations=disable`: automations it
-    /// starts stay, turned off.
-    pub async fn delete_alert_rule(&self, id: &str) -> Result<()> {
-        let path = format!("/alert-rules/{}?automations=disable", seg(id));
+    /// `GET /alert-rules/{id}/automations`: what it starts, and whether
+    /// each runs on without it. What a delete asks about.
+    pub async fn alert_rule_automations(&self, id: &str) -> Result<Vec<AlertRuleStarts>> {
+        let path = format!("/alert-rules/{}/automations", seg(id));
+        self.get_json(&path).await
+    }
+
+    /// `DELETE /alert-rules/{id}?automations=disable|delete`: what becomes
+    /// of the automations it alone starts. Those with another trigger run on
+    /// either way.
+    pub async fn delete_alert_rule(&self, id: &str, delete_automations: bool) -> Result<()> {
+        let then = if delete_automations {
+            "delete"
+        } else {
+            "disable"
+        };
+        let path = format!("/alert-rules/{}?automations={then}", seg(id));
         self.send_empty(Method::DELETE, &path, None).await
+    }
+
+    pub async fn list_alert_kinds(&self) -> Result<Vec<AlertKind>> {
+        self.get_json("/alerts/kinds").await
+    }
+
+    /// `PUT /alerts/kinds/{plugin}/{topic}`. `None` is the plugin's default.
+    pub async fn set_alert_kind(
+        &self,
+        plugin_id: &str,
+        topic: &str,
+        enabled: Option<bool>,
+        notify: Option<&str>,
+    ) -> Result<()> {
+        let path = format!("/alerts/kinds/{}/{}", seg(plugin_id), seg(topic));
+        self.send_empty(
+            Method::PUT,
+            &path,
+            Some(json!({"enabled": enabled, "notify": notify})),
+        )
+        .await
     }
 
     pub async fn list_alert_ignores(&self) -> Result<Vec<AlertIgnore>> {

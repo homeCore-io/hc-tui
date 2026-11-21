@@ -264,7 +264,7 @@ fn draw_overview(frame: &mut Frame<'_>, app: &App, area: Rect) {
                         .find(|r| r.runtime_id == pl.runtime_id)
                         .map(|r| r.name.clone())
                         .unwrap_or_else(|| pl.runtime_id.clone());
-                    format!("in {name}")
+                    format!("in {name}{}", pa::interpreter_note(pl))
                 }
                 None if p.managed => "here, started by homeCore".to_string(),
                 None => "elsewhere".to_string(),
@@ -930,7 +930,12 @@ fn draw_runtime_detail(frame: &mut Frame<'_>, app: &App, r: &pa::Runtime, area: 
             Some(v) if v != p.version => format!("  (running {v}, {} arriving)", p.version),
             _ => String::new(),
         };
-        lines.push(Line::from(format!("  {} {}{note}", p.plugin_id, p.version)));
+        lines.push(Line::from(format!(
+            "  {} {}{}{note}",
+            p.plugin_id,
+            p.version,
+            pa::interpreter_note(p)
+        )));
     }
     frame.render_widget(
         Paragraph::new(lines)

@@ -64,7 +64,9 @@ It is built with:
   has. homeCore scenes can be made, edited and deleted: pick devices
   and each is taken as it is now (its first few everyday settings, or
   just off). A plugin's scenes only run.
-- Modes: Space turns a manual mode on or off; solar modes follow the
+- Modes: a criteria mode says what turns it on (`d` shows when it goes on
+  and off, and how often it is checked; changing it is left to the app).
+  Space turns a manual mode on or off; solar modes follow the
   sun and show their next change (`until sunset 16:46`). A mode's name,
   and a solar mode's events and offsets, can be edited.
 - Helpers: every kind of helper core has (switch, timer, counter,
@@ -76,9 +78,22 @@ It is built with:
 - Alerts: Open, Acknowledged, Rules and Ignored. The selected alert
   shows where it came from (its alert rule and where that rule tells,
   or the plugin) and what can be done: acknowledge, press its button,
+  ignore its device. Plugin kinds lists the kinds of alert each plugin can
+  raise: `Space` turns one off or on, `d` goes back to the plugin's choice.
   ignore its device. Alert rules can be turned on or off and deleted;
-  making them is left to the app. Kept live from the event stream,
+  deleting one that alone starts automations names them and asks whether
+  to keep them, turned off, or delete them too. Making rules is left to
+  the app. Kept live from the event stream,
   with the open count on the sidebar.
+- Devices: `o` lists devices no plugin manages any more (homeCore holds more
+  than the plugin says it has): each suspect with when it was last seen;
+  `Space` marks, `x` removes the marked after naming them. They are guesses,
+  so nothing is marked for you.
+- Devices: `h` opens a device's history: any number or on/off reading,
+  `←/→` for 1 hour to 30 days, with the lowest, highest and latest, or
+  each change and when.
+- Automations: `v` shows the hub variables rules have set, as they are
+  now, and updates as automations run.
 - Automations: what starts each one in words (`sunset -15m`,
   `Garage Door open 10m`, `time 17:00`), its last run and group, a mark
   for one another rule paused (‖) and for one that needs fixing (!,
@@ -97,12 +112,16 @@ It is built with:
     level; only what changed is written, in place, so comments and keys
     the form does not know stay in the file. Secrets are never shown.
     Actions that take parameters ask for them first; dangerous ones ask
-    before they run. Logs streams the plugin's own log while the tab is
+    before they run. `f` runs one with a file from this computer (such as
+    WLED's firmware install), asking for its path with the other
+    parameters. Read-only actions run for anyone who can read devices.
+    Logs streams the plugin's own log while the tab is
     open.
   - Catalog: plugins in the registry that are not installed, and
     install. When more than one runtime can run one, hc-tui asks which.
   - Runtimes (admins): each plugin runtime, how it is doing, its host
-    version and the plugins placed on it; Reset login makes it a new key,
+    version and the plugins placed on it, with the Python each runs on;
+    Reset login makes it a new key,
     shown once.
   - Matter, when the Matter plugin is installed: commission, reinterview
     and remove nodes.
@@ -182,6 +201,7 @@ Screens:
   add, `Esc` done), `x` take off Home, `J`/`K` move, `h` rename the
   heading (`Tab` in the box adds a new heading instead).
 - Rooms: `Space` room on/off, `Enter` its devices (`Esc` comes back),
+  `s` what Room on would bring back, `M` merge into another room (asks first),
   `n` new room, `e` rename, `x` delete.
 - Devices: `←/→` tab, `Tab` into the controls (`Shift+Tab` back,
   `←/→` change, `Space` switch or press, `Esc` out), `Space`/`t` on/off,
@@ -220,30 +240,43 @@ Screens:
   restart, `U` update (when there is one), `x` uninstall. In the detail
   `←/→` moves between its tabs; Settings: `Enter` edit, `Space` change a
   choice, `u` undo a change, `Ctrl+S` save, `Esc` discard; Actions:
-  `Enter` run; Logs: `Space` pause, `e`/`w`/`i`/`d` level, `c` clear.
-  Catalog: `i` install. Runtimes: `Enter` detail, `R` reset login.
+  `Enter` run, `f` run with a file; Logs: `Space` pause, `e`/`w`/`i`/`d` level, `c` clear.
+  Catalog: `i` install. Runtimes: `Enter` detail, `R` reset login, `n` add
+  a runtime (its key is shown once), `x` remove one (its plugins are
+  uninstalled; the confirm names them) — admin.
   Matter: `c` commission, `i` reinterview, `x` remove a node.
-- People: `←/→` tab (People, Roles, API keys, Sessions).
+- People: `←/→` tab (People, Roles, API keys, Sessions, Displays).
+  Displays (admins): `n` makes one for a hall tablet or kitchen panel and
+  shows its key once (it may use the house and change nothing), `x` deletes
+  one, which signs it out.
   - People: `n` new person, `Enter` change role, `x` delete, `c` remove
-    PIN (admin); `p` changes your password, or an admin sets someone
+    PIN (admin); `P` sets your own PIN for displays (your password, then
+    4 to 8 digits nobody else has); `p` changes your password, or an admin sets someone
     else's.
   - Roles: what each role may do.
-  - API keys: `n` new key (a label and what it may do), `s` new secret,
+  - API keys: `n` new key (a label and what it may do), `e` change a
+    key's label or what it may do (its secret stays), `s` new secret,
     `x` revoke. A key's secret is shown once, in a dialog; hc-tui never
     writes it anywhere.
   - Sessions: `x` end one, `X` end all others. This one stays; `L` signs
     out.
 - Data & backups: `n` back up now; on a kept backup `Enter` downloads
   it and `R` restores it (type the backup's date to go ahead); `Enter`
-  runs an action (restore from a file, export, import); `x` deletes a
-  calendar. Downloads and exports go to `~/.homecore/exports`, 0600. A
+  runs an action (restore from a file, export, import, add a calendar from
+  a file or a web address, which homeCore then fetches again on its own);
+  on a calendar `Enter` shows its next events and `x` deletes it. Downloads and exports go to `~/.homecore/exports`, 0600. A
   restore is staged for core's next start, and you're asked about
   restarting.
 - Logs: `Space`/`p` pause, `e`/`w`/`i`/`d` level (error, warn, info,
   debug), `c` clear. `/` searches the lines kept so far.
 - Events: `f` event type.
-- Audit: `Enter` detail, `]` next page, `[` previous page.
-- System: `←/→` core's log level, until it restarts (`plugins:write`);
+- Audit: `Enter` detail, `]` next page, `[` previous page, `f` shows
+  everything, sign-ins, changes, refused or failed (homeCore filters the
+  whole log, not just the page).
+- System: `u` switches the household between °C and °F, `N` sends a test
+  notification to every channel (both admin); it also says when a battery
+  counts as low. `c` checks automations, scenes and devices against what devices
+  take (a report; it changes nothing); `←/→` core's log level, until it restarts (`plugins:write`);
   `R` restart core (admin, asks first).
 - `/` searches People, API keys, Data & backups, Logs, Events and Audit.
 
@@ -279,7 +312,8 @@ This client uses:
   `POST /system/restart` (admin)
 - `GET /system/backups`, `GET /system/backups/{name}`,
   `POST /system/backups/{name}/restore`, `POST /system/restore` (admin)
-- `GET /calendars`, `POST /calendars/upload`, `DELETE /calendars/{id}`
+- `GET /calendars`, `POST /calendars/upload`, `POST /calendars/fetch`,
+  `GET /calendars/{id}/events`, `DELETE /calendars/{id}`
 - `GET /auth/roles`, `GET|POST /auth/api-keys`,
   `DELETE /auth/api-keys/{id}`, `POST /auth/api-keys/{id}/rotate`,
   `GET /auth/sessions`, `DELETE /auth/sessions/{id}`
@@ -295,7 +329,10 @@ This client uses:
   `GET /plugins/{id}/config/schema`, `POST /plugins/{id}/command`,
   `GET /plugins/{id}/command/{rid}/stream` (SSE), `POST /plugins/install`,
   `GET /registry/plugins`, `GET /plugin-runtimes`,
-  `GET /plugin-runtimes/placements`, `POST /plugin-runtimes/{id}/reset`;
+  `GET /plugin-runtimes/placements`, `POST /plugin-runtimes/{id}/reset`,
+  `POST /plugins/{id}/query` (read-only actions), `POST /plugins/{id}/upload/{action}`,
+  `GET /alert-rules/{id}/automations`, `GET /alerts/kinds`,
+  `PUT /alerts/kinds/{plugin_id}/{topic}`;
   a plugin's log is `GET /logs/stream?plugin_id=` (WebSocket, admin)
 - `GET /plugins/matter/nodes`, `POST /plugins/matter/commission`,
   `POST /plugins/matter/reinterview`, `DELETE /plugins/matter/nodes/{id}`

@@ -1,6 +1,7 @@
 //! Rooms: what is on in each room, Room on and Room off, and room
 //! create, rename and delete.
 
+use super::Load;
 use super::editors::{AreaEditor, Confirm, ConfirmAction};
 use super::{App, ListSel, Section};
 use crate::model::{Area, DeviceState};
@@ -12,6 +13,23 @@ use serde_json::Value;
 pub struct RoomsTab {
     pub sel: ListSel,
     pub editor: Option<AreaEditor>,
+    pub overlay: Option<RoomOverlay>,
+}
+
+/// A box over Rooms: what Room on would bring back, or where to merge a room.
+#[derive(Debug)]
+pub enum RoomOverlay {
+    Saved {
+        name: String,
+        lights: Load<Option<serde_json::Value>>,
+    },
+    Merge {
+        from_id: String,
+        from_name: String,
+        /// Every other room, `(id, name)`, by name.
+        targets: Vec<(String, String)>,
+        sel: usize,
+    },
 }
 
 /// What the Rooms table shows for a room.
@@ -293,6 +311,103 @@ impl App {
                 ConfirmAction::DeleteArea { id, name },
             )
             .with_detail(format!("Its {n} device(s) will have no room.")),
+        );
+    }
+
+    /// `s` on a room: what Room off saved, which Room on brings back.
+    pub fn show_saved_lights(&mut self) {
+        let Some(room) = self.selected_room() else {
+            return;
+        };
+        let (id, name) = (room.id.clone(), room.name.clone());
+        self.rooms.overlay = Some(RoomOverlay::Saved {
+            name,
+            lights: Load::Loading,
+        });
+        let c = self.client.clone();
+        self.spawn(async move { c.room_saved_lights(&id).await }, |app, res| {
+            if let Some(RoomOverlay::Saved { lights, .. }) = app.rooms.overlay.as_mut() {
+                *lights = match res {
+                    Ok(v) => Load::Ready(v),
+                    Err(e) => Load::Failed(e.to_string()),
+                };
+            }
+        });
+    }
+
+    /// `M` on a room: choose the room to fold it into.
+    pub fn start_merge_room(&mut self) {
+        let Some(room) = self.selected_room() else {
+            return;
+        };
+        let (from_id, from_name) = (room.id.clone(), room.name.clone());
+        let mut targets: Vec<(String, String)> = self
+            .areas
+            .iter()
+            .filter(|a| a.id != from_id)
+            .map(|a| (a.id.clone(), a.name.clone()))
+            .collect();
+        targets.sort_by_key(|a| a.1.to_lowercase());
+        if targets.is_empty() {
+            self.status = "There is no other room to merge it into".into();
+            return;
+        }
+        self.rooms.overlay = Some(RoomOverlay::Merge {
+            from_id,
+            from_name,
+            targets,
+            sel: 0,
+        });
+    }
+
+    pub fn move_merge_target(&mut self, delta: isize) {
+        if let Some(RoomOverlay::Merge { targets, sel, .. }) = self.rooms.overlay.as_mut() {
+            let n = targets.len() as isize;
+            *sel = (*sel as isize + delta).rem_euclid(n) as usize;
+        }
+    }
+
+    /// Enter on a target: ask first; a merge can't be undone.
+    pub fn choose_merge_target(&mut self) {
+        let Some(RoomOverlay::Merge {
+            from_id,
+            from_name,
+            targets,
+            sel,
+        }) = self.rooms.overlay.take()
+        else {
+            return;
+        };
+        let (into_id, into_name) = targets[sel].clone();
+        self.ask(Confirm::new(
+            "Merge rooms?",
+            format!(
+                "{from_name}'s devices move into {into_name}, which answers to {from_name}'s names from now on. {from_name} is deleted."
+            ),
+            ConfirmAction::MergeArea {
+                id: from_id,
+                name: from_name,
+                into: into_id,
+                into_name,
+            },
+        ));
+    }
+
+    pub fn close_room_overlay(&mut self) {
+        self.rooms.overlay = None;
+    }
+
+    pub(crate) fn merge_area(&mut self, id: String, name: String, into: String, into_name: String) {
+        let c = self.client.clone();
+        let (from, to) = (id.clone(), into.clone());
+        self.spawn_ok(
+            "merge rooms",
+            async move { c.merge_area(&from, &to).await },
+            move |app, ()| {
+                app.areas.retain(|a| a.id != id);
+                app.status = format!("Merged {name} into {into_name}");
+                app.start_sync();
+            },
         );
     }
 

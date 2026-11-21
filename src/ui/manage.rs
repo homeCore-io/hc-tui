@@ -328,7 +328,11 @@ pub fn draw_audit(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let title = if a.loading {
         "Audit [loading...]".to_string()
     } else {
-        format!("Audit ({} entries)", items.len())
+        format!(
+            "Audit · {} ({} entries) · f to change",
+            a.filter.label(),
+            items.len()
+        )
     };
     let n = items.len();
     render_list(

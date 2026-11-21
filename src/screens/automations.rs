@@ -71,6 +71,12 @@ impl Screen for AutomationsScreen {
             v.push(Binding::new(ESC, "Esc", "back", App::close_rule_detail));
             return v;
         }
+        if app.rules_tab.variables.is_some() {
+            return vec![
+                Binding::new(&[KeyCode::Char('r')], "r", "refresh", App::reload_variables),
+                Binding::new(ESC, "Esc", "close", App::close_variables),
+            ];
+        }
         if app.rules_tab.groups.is_some() {
             let mut v = moves(|a| a.move_group(-1), |a| a.move_group(1)).to_vec();
             if write {
@@ -106,6 +112,12 @@ impl Screen for AutomationsScreen {
         }
         v.extend([
             Binding::new(&[KeyCode::Char('g')], "g", "groups", App::open_groups),
+            Binding::new(
+                &[KeyCode::Char('v')],
+                "v",
+                "hub variables",
+                App::open_variables,
+            ),
             Binding::new(
                 &[KeyCode::Char('f')],
                 "f",

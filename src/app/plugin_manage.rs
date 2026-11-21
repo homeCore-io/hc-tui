@@ -29,6 +29,10 @@ pub enum PluginConfirm {
         runtime_id: String,
         name: String,
     },
+    RemoveRuntime {
+        runtime_id: String,
+        name: String,
+    },
     RunAction {
         plugin_id: String,
         action: Box<Action>,
@@ -321,6 +325,9 @@ impl App {
             PluginConfirm::ResetRuntime { runtime_id, name } => {
                 self.reset_runtime(runtime_id, name)
             }
+            PluginConfirm::RemoveRuntime { runtime_id, name } => {
+                self.remove_runtime(runtime_id, name)
+            }
             PluginConfirm::RunAction {
                 plugin_id,
                 action,
@@ -503,6 +510,75 @@ impl App {
     }
 
     /// `R` on a runtime: ask, then make it a new key.
+    /// `n` on Runtimes: name a new runtime; its key is shown once.
+    pub fn open_add_runtime(&mut self) {
+        if self.needs_admin("adding a runtime") {
+            return;
+        }
+        let mut f = super::manage::settings_modal::PathForm::new(
+            super::manage::settings_modal::PathPurpose::NewRuntime,
+        );
+        // Where hc-tui reaches homeCore is usually where a runtime does too.
+        f.path = self.client.base_url().to_string();
+        f.field = super::manage::settings_modal::PathField::Name;
+        self.manage.modal = Some(super::manage::settings_modal::SettingsModal::Path(f));
+    }
+
+    /// `x` on a runtime: say what removing it uninstalls, then ask.
+    pub fn ask_remove_runtime(&mut self) {
+        if self.needs_admin("removing a runtime") {
+            return;
+        }
+        let Some(r) = self
+            .detail_runtime()
+            .or_else(|| self.selected_runtime())
+            .cloned()
+        else {
+            return;
+        };
+        let name = if r.name.is_empty() {
+            r.runtime_id.clone()
+        } else {
+            r.name.clone()
+        };
+        let placed: Vec<String> =
+            crate::plugin_admin::placed_on(&self.plugins_tab.manage.placements, &r.runtime_id)
+                .iter()
+                .map(|p| p.plugin_id.clone())
+                .collect();
+        let what = if placed.is_empty() {
+            "Nothing is placed on it.".to_string()
+        } else {
+            format!(
+                "Its plugins are uninstalled, with their devices: {}.",
+                placed.join(", ")
+            )
+        };
+        self.ask(
+            Confirm::new(
+                format!("Remove {name}?"),
+                format!("{name} is removed and its key stops working. {what}"),
+                ConfirmAction::Plugins(PluginConfirm::RemoveRuntime {
+                    runtime_id: r.runtime_id,
+                    name,
+                }),
+            )
+            .with_detail("The container itself is yours to stop."),
+        );
+    }
+
+    fn remove_runtime(&mut self, runtime_id: String, name: String) {
+        let c = self.client.clone();
+        self.spawn_ok(
+            "remove runtime",
+            async move { c.remove_runtime(&runtime_id).await },
+            move |app, ()| {
+                app.status = format!("Removed {name}");
+                app.load_runtimes();
+            },
+        );
+    }
+
     pub fn ask_reset_runtime(&mut self) {
         if self.needs_admin("resetting a runtime's login") {
             return;

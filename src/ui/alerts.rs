@@ -47,6 +47,7 @@ pub fn draw_alerts(frame: &mut Frame<'_>, app: &App, area: Rect) {
         AlertsSub::Open | AlertsSub::Acknowledged => draw_alert_list(frame, app, inner),
         AlertsSub::Rules => draw_rules(frame, app, inner),
         AlertsSub::Ignored => draw_ignores(frame, app, inner),
+        AlertsSub::Kinds => draw_kinds(frame, app, inner),
     }
 }
 
@@ -313,6 +314,79 @@ fn draw_rules(frame: &mut Frame<'_>, app: &App, area: Rect) {
             .style(Style::default().fg(Color::DarkGray)),
         parts[1],
     );
+}
+
+fn draw_kinds(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    if let Some(t) = load_text(&app.alerts_tab.kinds) {
+        return empty(frame, area, &t);
+    }
+    let list = app.alerts_tab.kinds.ready().cloned().unwrap_or_default();
+    if list.is_empty() {
+        return empty(frame, area, "No plugin declares kinds of alert.");
+    }
+    let selected = app.alerts_tab.kinds_sel.id().map(str::to_string);
+    // The table, and what the selected kind is about beneath it.
+    let parts = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(3), Constraint::Length(2)])
+        .split(area);
+    let about = list
+        .iter()
+        .find(|k| selected.as_deref() == Some(k.key().as_str()))
+        .and_then(|k| k.description.clone())
+        .unwrap_or_default();
+    frame.render_widget(
+        Paragraph::new(format!(" {about}"))
+            .style(Style::default().fg(Color::DarkGray))
+            .wrap(Wrap { trim: true }),
+        parts[1],
+    );
+    let area = parts[0];
+    let mut sel_row = None;
+    let rows: Vec<Row> = list
+        .iter()
+        .enumerate()
+        .map(|(i, k)| {
+            let is_sel = selected.as_deref() == Some(k.key().as_str());
+            if is_sel {
+                sel_row = Some(i);
+            }
+            let state = match (k.enabled, k.enabled == k.default_on) {
+                (true, true) => "on",
+                (false, true) => "off",
+                (true, false) => "on (turned on)",
+                (false, false) => "off (turned off)",
+            };
+            let dim = Style::default().fg(Color::DarkGray);
+            Row::new(vec![
+                Cell::from(if is_sel { " ▸" } else { "  " }),
+                Cell::from(k.plugin_id.trim_start_matches("plugin.").to_string()).style(dim),
+                Cell::from(k.label.clone()).style(if k.enabled { Style::default() } else { dim }),
+                Cell::from(k.severity.clone()).style(dim),
+                Cell::from(state).style(if k.enabled {
+                    Style::default().fg(Color::Green)
+                } else {
+                    dim
+                }),
+                Cell::from(k.notify.clone().unwrap_or_else(|| "default channel".into())).style(dim),
+            ])
+        })
+        .collect();
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(3),
+            Constraint::Length(10),
+            Constraint::Min(28),
+            Constraint::Length(8),
+            Constraint::Length(17),
+            Constraint::Length(16),
+        ],
+    )
+    .row_highlight_style(highlight());
+    let mut state = TableState::default();
+    state.select(sel_row);
+    frame.render_stateful_widget(table, area, &mut state);
 }
 
 fn draw_ignores(frame: &mut Frame<'_>, app: &App, area: Rect) {

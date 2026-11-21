@@ -30,6 +30,14 @@ pub fn draw_overlays(frame: &mut Frame<'_>, app: &App) {
     if app.rules_tab.groups.is_some() {
         draw_groups(frame, app);
     }
+    if app.rules_tab.variables.is_some() {
+        draw_variables(frame, app);
+    }
+    super::history::draw_history_view(frame, app);
+    super::history::draw_orphans(frame, app);
+    super::history::draw_calendar_events(frame, app);
+    super::rooms::draw_room_overlay(frame, app);
+    draw_vocabulary(frame, app);
     draw_filter_bar(frame, app);
     super::settings::draw_modal(frame, app);
     super::home::draw_picker(frame, app);
@@ -109,8 +117,12 @@ fn draw_confirm(frame: &mut Frame<'_>, app: &App) {
             layout[1],
         );
     }
+    let mut keys = format!("No (n or Esc)     y  {}", c.yes.as_deref().unwrap_or("Yes"));
+    if let Some((k, label, _)) = &c.alt {
+        keys.push_str(&format!("     {k}  {label}"));
+    }
     frame.render_widget(
-        Paragraph::new("No (n or Esc)     y  Yes")
+        Paragraph::new(keys)
             .style(Style::default().fg(Color::Yellow))
             .alignment(Alignment::Center),
         layout[2],
@@ -192,6 +204,7 @@ fn draw_user_editor(frame: &mut Frame<'_>, app: &App) {
         UserEditMode::EditRole => "Change Role",
         UserEditMode::ChangePassword => "Change Password",
         UserEditMode::SetPassword => "Set Their Password",
+        UserEditMode::SetPin => "Your PIN for displays",
     };
     let inner = modal(frame, 64, 60, title);
     let f = |x: UserEditField| ed.field == x;
@@ -242,6 +255,27 @@ fn draw_user_editor(frame: &mut Frame<'_>, app: &App) {
                 "Tab field | Enter save (signs them out everywhere) | Esc cancel",
                 r[3],
             );
+        }
+        UserEditMode::SetPin => {
+            let r = rows(inner, 4);
+            frame.render_widget(
+                Paragraph::new("At a display, your PIN unlocks the full app as you for five minutes. 4 to 8 digits, and not anyone else's.")
+                    .wrap(ratatui::widgets::Wrap { trim: true }),
+                r[0],
+            );
+            let cur = mask(&ed.current_password, "*");
+            frame.render_widget(
+                input(&cur, "Your password", f(UserEditField::CurrentPassword)),
+                r[1],
+            );
+            let pin = mask(&ed.password, "*");
+            frame.render_widget(input(&pin, "PIN", f(UserEditField::Password)), r[2]);
+            let again = mask(&ed.confirm_password, "*");
+            frame.render_widget(
+                input(&again, "PIN again", f(UserEditField::ConfirmPassword)),
+                r[3],
+            );
+            help(frame, "Tab/↑↓ field | Enter save | Esc cancel", r[4]);
         }
         UserEditMode::ChangePassword => {
             let r = rows(inner, 4);
@@ -379,6 +413,138 @@ fn draw_matter_editor(frame: &mut Frame<'_>, app: &App) {
         r[4],
     );
     help(frame, "Tab field  |  Enter commission  |  Esc cancel", r[5]);
+}
+
+/// A hub variable's value in a few characters: strings bare, the rest as JSON.
+pub(crate) fn variable_text(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
+
+fn draw_vocabulary(frame: &mut Frame<'_>, app: &App) {
+    let Some(vocab) = &app.manage.status.vocab else {
+        return;
+    };
+    let popup = centered_rect(80, 70, frame.area());
+    frame.render_widget(Clear, popup);
+    let outer = Block::default()
+        .borders(Borders::ALL)
+        .title(" What devices won't take ")
+        .border_style(Style::default().fg(Color::Cyan));
+    let inner = outer.inner(popup);
+    frame.render_widget(outer, popup);
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(3), Constraint::Length(1)])
+        .split(inner);
+    let lines: Vec<Line> = match vocab {
+        Load::Ready(items) if items.is_empty() => vec![Line::from(Span::styled(
+            " Nothing to fix: every automation, scene and device uses names and units devices take.",
+            Style::default().fg(Color::Green),
+        ))],
+        Load::Ready(items) => items
+            .iter()
+            .flat_map(|f| {
+                let color = match f.severity.as_str() {
+                    "broken" => Color::Red,
+                    "unit" | "rename" => Color::Yellow,
+                    _ => Color::Gray,
+                };
+                let device = app
+                    .device_by_id(&f.device_id)
+                    .map(|d| d.display_name().to_string())
+                    .unwrap_or_else(|| f.device_id.clone());
+                [
+                    Line::from(vec![
+                        Span::styled(
+                            format!(" {:<11}", f.severity),
+                            Style::default().fg(color).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(f.place_text(), Style::default().fg(Color::White)),
+                        Span::styled(format!(" · {device}"), Style::default().fg(Color::DarkGray)),
+                    ]),
+                    Line::from(format!("             {}", f.message)),
+                    Line::from(""),
+                ]
+            })
+            .collect(),
+        Load::Failed(e) => vec![Line::from(format!(" Couldn't check: {e}"))],
+        _ => vec![Line::from(Span::styled(
+            " checking...",
+            Style::default().fg(Color::DarkGray),
+        ))],
+    };
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), layout[0]);
+    frame.render_widget(
+        Paragraph::new(" r check again  |  Esc close  |  a report: it changes nothing")
+            .style(Style::default().fg(Color::DarkGray)),
+        layout[1],
+    );
+}
+
+fn draw_variables(frame: &mut Frame<'_>, app: &App) {
+    let Some(vars) = &app.rules_tab.variables else {
+        return;
+    };
+    let popup = centered_rect(60, 60, frame.area());
+    frame.render_widget(Clear, popup);
+    let outer = Block::default()
+        .borders(Borders::ALL)
+        .title("Hub variables")
+        .border_style(Style::default().fg(Color::Cyan));
+    let inner = outer.inner(popup);
+    frame.render_widget(outer, popup);
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(3), Constraint::Length(1)])
+        .split(inner);
+    match vars {
+        Load::Ready(items) if !items.is_empty() => {
+            let width = items
+                .iter()
+                .map(|(k, _)| k.chars().count())
+                .max()
+                .unwrap_or(0)
+                .min(28);
+            let rows: Vec<Line> = items
+                .iter()
+                .map(|(name, value)| {
+                    Line::from(vec![
+                        Span::styled(
+                            format!("  {:<width$}  ", crate::text::take_chars(name, 28)),
+                            Style::default()
+                                .fg(Color::White)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::raw(variable_text(value)),
+                    ])
+                })
+                .collect();
+            frame.render_widget(Paragraph::new(rows).wrap(Wrap { trim: false }), layout[0]);
+        }
+        other => {
+            let msg = match other {
+                Load::Failed(e) => format!("Couldn't read the variables: {e}"),
+                Load::Ready(_) => "No hub variables. Rules set them; after a restart there are none until one does.".to_string(),
+                _ => "loading...".to_string(),
+            };
+            frame.render_widget(
+                Paragraph::new(msg)
+                    .alignment(Alignment::Center)
+                    .wrap(Wrap { trim: true })
+                    .style(Style::default().fg(Color::DarkGray)),
+                layout[0],
+            );
+        }
+    }
+    frame.render_widget(
+        Paragraph::new("r refresh  |  Esc close  |  updates as automations run")
+            .style(Style::default().fg(Color::DarkGray))
+            .alignment(Alignment::Center),
+        layout[1],
+    );
 }
 
 fn draw_groups(frame: &mut Frame<'_>, app: &App) {
@@ -750,4 +916,18 @@ fn draw_terminal(frame: &mut Frame<'_>, area: Rect, s: &StreamingAction) {
             .wrap(Wrap { trim: false }),
         area,
     );
+}
+
+#[cfg(test)]
+mod variable_tests {
+    use super::variable_text;
+    use serde_json::json;
+
+    #[test]
+    fn a_variable_reads_as_its_value() {
+        assert_eq!(variable_text(&json!("away")), "away");
+        assert_eq!(variable_text(&json!(3)), "3");
+        assert_eq!(variable_text(&json!(true)), "true");
+        assert_eq!(variable_text(&json!({"n": 1})), "{\"n\":1}");
+    }
 }

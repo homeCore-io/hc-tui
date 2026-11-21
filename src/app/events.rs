@@ -177,6 +177,14 @@ impl App {
                     self.upsert_device(new);
                 }
             }
+            "device_schema_changed" => {
+                // Its attributes or actions changed: drop the cached schema so
+                // the controls are rebuilt from the new one the next time the
+                // device is shown (at once, if it is selected now).
+                if let Some(id) = device_id.as_deref() {
+                    self.devices_tab.controls.schemas.remove(id);
+                }
+            }
             "device_removed" => {
                 if let Some(id) = device_id.as_deref() {
                     self.devices.retain(|d| d.device_id != id);
@@ -217,7 +225,12 @@ impl App {
                 }
                 self.on_rule_event("rule_changed", &event);
             }
-            "rule_fired" => self.on_rule_event("rule_fired", &event),
+            "rule_fired" => {
+                self.on_rule_event("rule_fired", &event);
+                // A rule that ran may have set a variable; there is no event
+                // for that, so the open overlay asks again.
+                self.reload_variables();
+            }
             "rule_removed" => {
                 if let Some(id) = s(&event, "rule_id") {
                     self.rules.retain(|r| r.id != id);
@@ -243,6 +256,29 @@ impl App {
                     && let Some(p) = self.plugins.iter_mut().find(|p| p.plugin_id == pid)
                 {
                     p.status = status.to_string();
+                }
+            }
+            "plugin_offline" => {
+                if let Some(pid) = s(&event, "plugin_id")
+                    && let Some(p) = self.plugins.iter_mut().find(|p| p.plugin_id == pid)
+                {
+                    p.status = "offline".to_string();
+                }
+            }
+            // A new plugin, or one back after a restart, may bring devices,
+            // schemas and settings with it: resync. Rare enough to be cheap.
+            "plugin_registered" => self.start_sync(),
+            // New actions or settings from a plugin: the open detail view takes
+            // them from the event, as if it had asked.
+            "plugin_capabilities" => {
+                if let (Some(pid), Some(caps)) = (
+                    s(&event, "plugin_id"),
+                    parse::<crate::model::Capabilities>(event.get("capabilities")),
+                ) && let Some(d) = self.plugins_tab.detail.as_mut()
+                    && d.plugin_id == pid
+                    && !matches!(d.caps, super::Load::Idle)
+                {
+                    d.caps = super::Load::Ready(caps);
                 }
             }
             "alert_raised" | "alert_acknowledged" => {
@@ -387,6 +423,60 @@ mod tests {
         // No `current` at all: nothing changes.
         a.apply_event(json!({"type": "device_state_changed", "device_id": "lamp"}));
         assert_eq!(a.devices[0].attributes.len(), 2);
+    }
+
+    #[test]
+    fn plugin_events_update_the_plugin_without_a_refresh() {
+        let mut a = signed_in(Role::Admin);
+        a.plugins.push(
+            serde_json::from_value(json!({"plugin_id": "plugin.hue", "status": "active"})).unwrap(),
+        );
+        a.apply_event(json!({"type": "plugin_offline", "plugin_id": "plugin.hue"}));
+        assert_eq!(a.plugins[0].status, "offline");
+
+        let mut d = crate::app::plugins::PluginDetail::new("plugin.hue".into());
+        d.caps = crate::app::Load::Ready(Default::default());
+        a.plugins_tab.detail = Some(d);
+        a.apply_event(json!({
+            "type": "plugin_capabilities", "plugin_id": "plugin.hue",
+            "capabilities": {"spec": "1", "plugin_id": "plugin.hue",
+                             "actions": [{"id": "rescan", "label": "Rescan"}]}
+        }));
+        let caps = a.plugins_tab.detail.as_ref().unwrap().caps.ready().unwrap();
+        assert_eq!(caps.actions[0].id, "rescan");
+
+        // Another plugin's manifest leaves the open one alone.
+        a.apply_event(json!({
+            "type": "plugin_capabilities", "plugin_id": "plugin.other",
+            "capabilities": {"spec": "1", "plugin_id": "plugin.other", "actions": []}
+        }));
+        let caps = a.plugins_tab.detail.as_ref().unwrap().caps.ready().unwrap();
+        assert_eq!(caps.actions.len(), 1);
+    }
+
+    #[test]
+    fn a_schema_change_drops_the_cached_schema() {
+        let mut a = app_with_lamp();
+        a.devices_tab
+            .controls
+            .schemas
+            .insert("lamp".into(), crate::app::Load::Ready(None));
+        a.devices_tab
+            .controls
+            .schemas
+            .insert("other".into(), crate::app::Load::Ready(None));
+        a.apply_event(json!({
+            "type": "device_schema_changed", "device_id": "lamp",
+            "attributes": ["on", "brightness_pct", "color_temp"], "actions": []
+        }));
+        assert!(
+            !a.devices_tab.controls.schemas.contains_key("lamp"),
+            "asked for again"
+        );
+        assert!(
+            a.devices_tab.controls.schemas.contains_key("other"),
+            "others kept"
+        );
     }
 
     #[test]

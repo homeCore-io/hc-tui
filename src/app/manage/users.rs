@@ -69,6 +69,18 @@ impl App {
         }
     }
 
+    /// `P`: your own PIN for displays. A PIN says who is at a display, so it
+    /// must be yours and no one else's; homeCore checks your password.
+    pub fn open_set_pin(&mut self) {
+        let Some(u) = self.current_user.clone() else {
+            return;
+        };
+        let mut ed = UserEditor::new(UserEditMode::SetPin, UserEditField::CurrentPassword);
+        ed.id = Some(u.id);
+        ed.username = u.username;
+        self.manage.user_editor = Some(ed);
+    }
+
     /// Change-password always acts on the signed-in account.
     fn open_change_password(&mut self) {
         let Some(u) = self.current_user.clone() else {
@@ -148,6 +160,42 @@ impl App {
                             "Set. {} is signed out everywhere; give them the new one in person.",
                             ed.username
                         );
+                    },
+                );
+            }
+            UserEditMode::SetPin => {
+                let pin = ed.password.trim().to_string();
+                if !(4..=8).contains(&pin.len()) || !pin.chars().all(|c| c.is_ascii_digit()) {
+                    self.error = Some("a PIN is 4 to 8 digits".to_string());
+                    return;
+                }
+                if pin != ed.confirm_password.trim() {
+                    self.error = Some("the PINs do not match".to_string());
+                    return;
+                }
+                let password = ed.current_password.clone();
+                let id = ed.id.clone();
+                self.spawn(
+                    async move { c.set_pin(&pin, &password).await },
+                    move |app, res| match res {
+                        Ok(()) => {
+                            app.manage.user_editor = None;
+                            if let Some(u) =
+                                app.users.iter_mut().find(|u| Some(&u.id) == id.as_ref())
+                            {
+                                u.has_pin = true;
+                            }
+                            app.status =
+                                "PIN set: it unlocks the full app on a display, as you".into();
+                        }
+                        Err(e) => {
+                            let s = e.to_string();
+                            app.error = Some(if s.contains("409") {
+                                "that PIN is someone else's; choose another".into()
+                            } else {
+                                s
+                            });
+                        }
                     },
                 );
             }

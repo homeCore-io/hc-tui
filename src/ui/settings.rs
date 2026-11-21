@@ -109,6 +109,7 @@ pub fn draw_people(frame: &mut Frame<'_>, app: &App, area: Rect) {
         PeopleTab::Roles => draw_roles(frame, app, rows[1]),
         PeopleTab::ApiKeys => draw_api_keys(frame, app, rows[1]),
         PeopleTab::Sessions => draw_sessions(frame, app, rows[1]),
+        PeopleTab::Displays => draw_displays(frame, app, rows[1]),
     }
 }
 
@@ -260,6 +261,51 @@ fn draw_api_keys(frame: &mut Frame<'_>, app: &App, area: Rect) {
         format!("API keys ({n})")
     };
     render(frame, list(items, title), sel, area);
+}
+
+fn draw_displays(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let p = &app.manage.people;
+    if let Some(msg) = placeholder(&p.displays, "displays") {
+        return message(frame, msg, "Displays", area);
+    }
+    let list_ = p.displays.ready().map(Vec::as_slice).unwrap_or_default();
+    if list_.is_empty() {
+        return message(
+            frame,
+            "No displays. n makes one: a key for a hall tablet or kitchen panel, which may use the house and change nothing.".to_string(),
+            "Displays",
+            area,
+        );
+    }
+    let items: Vec<ListItem> = list_
+        .iter()
+        .map(|d| {
+            ListItem::new(vec![
+                Line::from(Span::styled(
+                    format!("{:<30}", truncate(&d.name, 30)),
+                    Style::default().fg(Color::White),
+                )),
+                Line::from(Span::styled(
+                    match d.last_used_at.as_deref() {
+                        Some(t) => format!("  last used {}", when(app, t)),
+                        None => "  never used yet".to_string(),
+                    },
+                    dim(),
+                )),
+            ])
+        })
+        .collect();
+    let n = items.len();
+    let sel = (n > 0).then(|| p.displays_sel.index().min(n - 1));
+    let mut state = ratatui::widgets::ListState::default();
+    state.select(sel);
+    frame.render_stateful_widget(
+        List::new(items)
+            .block(Block::default().borders(Borders::ALL).title("Displays"))
+            .highlight_style(highlight()),
+        area,
+        &mut state,
+    );
 }
 
 fn draw_sessions(frame: &mut Frame<'_>, app: &App, area: Rect) {
@@ -611,6 +657,17 @@ pub fn draw_system(frame: &mut Frame<'_>, app: &App, area: Rect) {
         None => app.temp_unit.symbol().to_string(),
     };
     lines.push(row("Temperature", vec![plain(unit)]));
+    if let Some(b) = &st.battery {
+        let pct = |k: &str| b.get(k).and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+        lines.push(row(
+            "Low battery",
+            vec![plain(format!(
+                "under {}%, cleared {}% above it (set in homecore.toml)",
+                pct("threshold_pct"),
+                pct("recover_band_pct")
+            ))],
+        ));
+    }
 
     // Core's log level.
     let level = match &st.log_level {
@@ -693,6 +750,7 @@ pub fn draw_system(frame: &mut Frame<'_>, app: &App, area: Rect) {
 /// The footer while a dialog is open.
 pub fn modal_hints(m: &SettingsModal) -> Vec<&'static str> {
     match m {
+        SettingsModal::DisplayName(_) => vec!["type its name", "Enter make it", "Esc cancel"],
         SettingsModal::NewKey(_) => vec![
             "type a label",
             "Tab label or scopes",
@@ -705,6 +763,17 @@ pub fn modal_hints(m: &SettingsModal) -> Vec<&'static str> {
         SettingsModal::Restore(_) => vec!["type the date", "Enter restore", "Esc cancel"],
         SettingsModal::Path(p) if p.purpose == PathPurpose::Calendar => {
             vec!["type a path", "Tab path or name", "Enter add", "Esc cancel"]
+        }
+        SettingsModal::Path(p) if p.purpose == PathPurpose::NewRuntime => {
+            vec!["Tab address or name", "Enter add", "Esc cancel"]
+        }
+        SettingsModal::Path(p) if p.purpose == PathPurpose::CalendarUrl => {
+            vec![
+                "type its address",
+                "Tab address or name",
+                "Enter add",
+                "Esc cancel",
+            ]
         }
         SettingsModal::Path(_) => vec!["type a path", "Enter check it", "Esc cancel"],
     }
@@ -734,8 +803,37 @@ pub fn draw_modal(frame: &mut Frame<'_>, app: &App) {
         return;
     };
     match m {
+        SettingsModal::DisplayName(f) => {
+            let inner = dialog(frame, 60, 35, "New display", Color::Cyan);
+            let r = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(2),
+                    Constraint::Length(3),
+                    Constraint::Min(1),
+                ])
+                .split(inner);
+            frame.render_widget(
+                Paragraph::new("A screen for the house. Its key may use the house and change nothing; it is shown once.")
+                    .style(dim())
+                    .wrap(Wrap { trim: true }),
+                r[0],
+            );
+            frame.render_widget(input(&f.name, "Name", true), r[1]);
+            let note = match (&f.error, f.busy) {
+                (Some(e), _) => Span::styled(e.clone(), Style::default().fg(Color::Red)),
+                (None, true) => Span::styled("making it...", dim()),
+                _ => Span::raw(""),
+            };
+            frame.render_widget(Paragraph::new(Line::from(note)), r[2]);
+        }
         SettingsModal::NewKey(f) => {
-            let inner = dialog(frame, 70, 70, "New API key", Color::Cyan);
+            let title = if f.editing.is_some() {
+                "Edit API key"
+            } else {
+                "New API key"
+            };
+            let inner = dialog(frame, 70, 70, title, Color::Cyan);
             let r = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
@@ -899,6 +997,14 @@ pub fn draw_modal(frame: &mut Frame<'_>, app: &App) {
                     "Add a calendar",
                     "A .ics file on this computer. A calendar with the same name is replaced (it asks).",
                 ),
+                PathPurpose::CalendarUrl => (
+                    "Add a calendar from a web address",
+                    "homeCore downloads the .ics at this address, keeps it, and fetches it again on its own.",
+                ),
+                PathPurpose::NewRuntime => (
+                    "Add a plugin runtime",
+                    "homeCore's address as the runtime reaches it (it goes into the key), and a name. The key is shown once.",
+                ),
             };
             let inner = dialog(frame, 70, 45, title, Color::Cyan);
             let r = Layout::default()
@@ -914,12 +1020,24 @@ pub fn draw_modal(frame: &mut Frame<'_>, app: &App) {
                 Paragraph::new(what).style(dim()).wrap(Wrap { trim: true }),
                 r[0],
             );
-            frame.render_widget(input(&f.path, "Path", f.field == PathField::Path), r[1]);
-            if f.purpose == PathPurpose::Calendar {
+            let path_label = if f.purpose == PathPurpose::CalendarUrl {
+                "Address"
+            } else {
+                "Path"
+            };
+            frame.render_widget(input(&f.path, path_label, f.field == PathField::Path), r[1]);
+            if matches!(
+                f.purpose,
+                PathPurpose::Calendar | PathPurpose::CalendarUrl | PathPurpose::NewRuntime
+            ) {
                 frame.render_widget(
                     input(
                         &f.name,
-                        "Name (empty takes the file's)",
+                        if f.purpose == PathPurpose::NewRuntime {
+                            "Name"
+                        } else {
+                            "Name (empty takes the file's)"
+                        },
                         f.field == PathField::Name,
                     ),
                     r[2],

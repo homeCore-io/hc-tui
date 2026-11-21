@@ -1,7 +1,7 @@
 //! Rooms: a table of rooms, and the selected room's devices below.
 
 use super::widgets::{heading, highlight};
-use crate::app::App;
+use crate::app::{App, Load};
 use crate::text::{char_len, truncate};
 use ratatui::{
     Frame,
@@ -153,6 +153,140 @@ fn draw_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
         lines.push(Line::from(spans));
     }
     frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// The box over Rooms: what Room on brings back, or where to merge a room.
+pub fn draw_room_overlay(frame: &mut Frame<'_>, app: &App) {
+    use crate::app::rooms::RoomOverlay;
+    use ratatui::widgets::{Clear, Wrap};
+    let Some(overlay) = &app.rooms.overlay else {
+        return;
+    };
+    let popup = super::widgets::centered_rect(60, 60, frame.area());
+    frame.render_widget(Clear, popup);
+    let (title, lines, keys) = match overlay {
+        RoomOverlay::Saved { name, lights } => {
+            let lines: Vec<Line> = match lights {
+                Load::Ready(None) => vec![Line::from(Span::styled(
+                    " Room off hasn't saved anything here. Room on turns every light on at full brightness.",
+                    Style::default().fg(Color::DarkGray),
+                ))],
+                Load::Ready(Some(snap)) => saved_lines(app, snap),
+                Load::Failed(e) => vec![Line::from(format!(" Couldn't read it: {e}"))],
+                _ => vec![Line::from(" loading...")],
+            };
+            (
+                format!(" Room on brings back · {name} "),
+                lines,
+                " Esc close",
+            )
+        }
+        RoomOverlay::Merge {
+            from_name,
+            targets,
+            sel,
+            ..
+        } => {
+            let lines = targets
+                .iter()
+                .enumerate()
+                .map(|(i, (_, n))| {
+                    let style = if i == *sel {
+                        Style::default().fg(Color::Black).bg(Color::Cyan)
+                    } else {
+                        Style::default()
+                    };
+                    Line::from(Span::styled(format!("  {n}  "), style))
+                })
+                .collect();
+            (
+                format!(" Merge {from_name} into "),
+                lines,
+                " j/k choose   Enter merge (asks first)   Esc cancel",
+            )
+        }
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(title)
+        .border_style(Style::default().fg(Color::Cyan));
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+    let parts = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(3), Constraint::Length(1)])
+        .split(inner);
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), parts[0]);
+    frame.render_widget(
+        Paragraph::new(keys).style(Style::default().fg(Color::DarkGray)),
+        parts[1],
+    );
+}
+
+/// Each saved light by name: on with its settings, or off; then when.
+fn saved_lines(app: &App, snap: &serde_json::Value) -> Vec<Line<'static>> {
+    let mut out = Vec::new();
+    if let Some(scenes) = snap.get("scenes").and_then(serde_json::Value::as_array)
+        && !scenes.is_empty()
+    {
+        let names: Vec<String> = scenes
+            .iter()
+            .filter_map(|s| s.as_str())
+            .map(|id| {
+                app.device_by_id(id)
+                    .map(|d| d.display_name().to_string())
+                    .unwrap_or_else(|| id.to_string())
+            })
+            .collect();
+        out.push(Line::from(format!(" Scenes first: {}", names.join(", "))));
+        out.push(Line::from(""));
+    }
+    for l in snap
+        .get("lights")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let id = l
+            .get("device_id")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        let name = app
+            .device_by_id(id)
+            .map(|d| d.display_name().to_string())
+            .unwrap_or_else(|| id.to_string());
+        let on = l
+            .get("on")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let how = if on {
+            let s = l.get("settings").and_then(serde_json::Value::as_object);
+            match s
+                .and_then(|s| s.get("brightness_pct"))
+                .and_then(serde_json::Value::as_f64)
+            {
+                Some(b) => format!("on, {}%", b.round()),
+                None => "on".to_string(),
+            }
+        } else {
+            "stays off".to_string()
+        };
+        out.push(Line::from(vec![
+            Span::raw(format!("  {name:<32} ")),
+            Span::styled(
+                how,
+                Style::default().fg(if on { Color::Green } else { Color::DarkGray }),
+            ),
+        ]));
+    }
+    if let Some(at) = snap.get("saved_at").and_then(serde_json::Value::as_str) {
+        out.push(Line::from(""));
+        out.push(Line::from(Span::styled(
+            format!(" Saved by Room off {}", super::widgets::short_ts(at)),
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+    out
 }
 
 #[cfg(test)]

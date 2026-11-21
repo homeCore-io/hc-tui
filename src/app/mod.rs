@@ -14,9 +14,11 @@ pub mod editors;
 pub mod events;
 pub mod helpers;
 pub mod helpers_tab;
+pub mod history_view;
 pub mod home;
 pub mod manage;
 pub mod media;
+pub mod orphans;
 pub mod picker;
 pub mod plugin_logs;
 pub mod plugin_manage;
@@ -689,6 +691,10 @@ impl App {
         if !self.authenticated {
             return;
         }
+        // Schemas are cached until they change; a sync (`r`, a reconnect) may
+        // follow a `device_schema_changed` this client never saw, so they are
+        // asked for again as each device is shown.
+        self.devices_tab.controls.schemas.clear();
         self.sync_seq += 1;
         let seq = self.sync_seq;
         self.syncing = true;
@@ -1295,6 +1301,17 @@ impl App {
                 self.confirm = None;
                 self.status = "Cancelled".to_string();
             }
+            KeyCode::Char(k)
+                if self
+                    .confirm
+                    .as_ref()
+                    .and_then(|c| c.alt.as_ref())
+                    .is_some_and(|(alt, _, _)| alt.eq_ignore_ascii_case(&k)) =>
+            {
+                if let Some((_, _, action)) = self.confirm.take().and_then(|c| c.alt) {
+                    self.run_confirmed(action);
+                }
+            }
             _ => {}
         }
     }
@@ -1303,7 +1320,14 @@ impl App {
         use editors::ConfirmAction as C;
         match action {
             C::DeleteDevice { id } => self.delete_device(id),
+            C::DeleteDevices { ids } => self.delete_devices(ids),
             C::DeleteArea { id, name } => self.delete_area(id, name),
+            C::MergeArea {
+                id,
+                name,
+                into,
+                into_name,
+            } => self.merge_area(id, name, into, into_name),
             C::DeleteRule { id, name } => self.delete_rule(id, name),
             C::DeleteRuleGroup { id, name } => self.delete_rule_group(id, name),
             C::DeleteUser { id, username } => self.delete_user(id, username),

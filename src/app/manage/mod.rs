@@ -26,6 +26,8 @@ pub struct EventsPanel {
 pub struct ManageTab {
     pub modes_sel: ListSel,
     pub mode_editor: Option<ModeEditor>,
+    /// The criteria mode whose definition is open (`d`), by id.
+    pub mode_detail: Option<String>,
     pub users_sel: ListSel,
     pub user_editor: Option<UserEditor>,
     pub matter: matter::MatterPanel,

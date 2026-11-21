@@ -364,6 +364,17 @@ impl HomeCoreClient {
 
     /// `POST /auth/change-password`. Core answers 204 and revokes every
     /// session, including this one.
+    /// `PUT /auth/pin`: your own PIN for displays, with your password.
+    /// 409 when someone else has it.
+    pub async fn set_pin(&self, pin: &str, password: &str) -> Result<()> {
+        self.send_empty(
+            Method::PUT,
+            "/auth/pin",
+            Some(serde_json::json!({ "pin": pin, "password": password })),
+        )
+        .await
+    }
+
     pub async fn change_password(&self, current_password: &str, new_password: &str) -> Result<()> {
         // A 401 here means the current password was wrong, not that the
         // session expired, so this request skips the refresh-and-retry.
@@ -453,6 +464,27 @@ impl HomeCoreClient {
         self.send_empty(Method::DELETE, &path, None).await
     }
 
+    /// `GET /areas/{id}/saved-lights`: what Room off saved, or `None` (204)
+    /// when it has saved nothing for the room.
+    pub async fn room_saved_lights(&self, id: &str) -> Result<Option<Value>> {
+        let path = format!("/areas/{}/saved-lights", seg(id));
+        let resp = self.request(Method::GET, &path, None).await?;
+        if resp.status() == StatusCode::NO_CONTENT {
+            return Ok(None);
+        }
+        parse_json(&path, resp).await.map(Some)
+    }
+
+    /// `POST /areas/{id}/merge {into}`: its devices move into `into`, which
+    /// also answers to its names from now on; the room is deleted.
+    pub async fn merge_area(&self, id: &str, into: &str) -> Result<()> {
+        let path = format!("/areas/{}/merge", seg(id));
+        let resp = self
+            .request(Method::POST, &path, Some(&json!({ "into": into })))
+            .await?;
+        check_status(resp).await.map(|_| ())
+    }
+
     /// `POST /areas/{id}/on` or `/off`: every light in the room.
     pub async fn room_switch(&self, id: &str, on: bool) -> Result<()> {
         let verb = if on { "on" } else { "off" };
@@ -501,6 +533,20 @@ impl HomeCoreClient {
             .await
     }
 
+    /// `GET /automations/variables`: the hub variables rules have set, by
+    /// name, sorted. In memory on homeCore: none after a restart until a rule
+    /// sets one.
+    pub async fn list_hub_variables(&self) -> Result<Vec<(String, Value)>> {
+        let v: Value = self.get_json("/automations/variables").await?;
+        let mut out: Vec<(String, Value)> = v
+            .get("hub")
+            .and_then(Value::as_object)
+            .map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+            .unwrap_or_default();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(out)
+    }
+
     pub async fn list_rule_groups(&self) -> Result<Vec<RuleGroup>> {
         self.get_json("/automations/groups").await
     }
@@ -540,9 +586,19 @@ impl HomeCoreClient {
         self.get_json(&format!("/events?limit={limit}")).await
     }
 
-    pub async fn list_audit(&self, limit: u32, offset: u32) -> Result<Vec<AuditEntry>> {
-        self.get_json(&format!("/audit?limit={limit}&offset={offset}"))
-            .await
+    /// `GET /audit`, with `filter` as extra query pairs (`event_type`,
+    /// `result`), filtered by homeCore over the whole log.
+    pub async fn list_audit(
+        &self,
+        limit: u32,
+        offset: u32,
+        filter: &[(&str, &str)],
+    ) -> Result<Vec<AuditEntry>> {
+        let mut path = format!("/audit?limit={limit}&offset={offset}");
+        for (k, v) in filter {
+            path.push_str(&format!("&{k}={}", urlencoding::encode(v)));
+        }
+        self.get_json(&path).await
     }
 
     /// Raw zip bytes from `POST /system/backup`.
@@ -645,6 +701,73 @@ impl HomeCoreClient {
     pub async fn get_plugin_capabilities(&self, plugin_id: &str) -> Result<Capabilities> {
         let path = format!("/plugins/{}/capabilities", seg(plugin_id));
         self.get_json(&path).await
+    }
+
+    /// `POST /plugins/{id}/upload/{action}`: run an action with a file. The
+    /// body is the file; `name` and every other param go in the query (as
+    /// strings, the way core passes them on). The reply is `command`'s.
+    pub async fn post_plugin_upload(
+        &self,
+        plugin_id: &str,
+        action: &str,
+        name: &str,
+        file: Vec<u8>,
+        params: &serde_json::Map<String, Value>,
+    ) -> Result<Value> {
+        let mut path = format!(
+            "/plugins/{}/upload/{}?name={}",
+            seg(plugin_id),
+            seg(action),
+            seg(name)
+        );
+        for (k, v) in params {
+            let v = match v {
+                Value::String(s) => s.clone(),
+                Value::Null => continue,
+                other => other.to_string(),
+            };
+            path.push_str(&format!("&{}={}", seg(k), seg(&v)));
+        }
+        let build = || -> Result<RequestBuilder> {
+            let rb = self
+                .http
+                .request(Method::POST, self.endpoint(&path))
+                .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+                // Up to 32 MiB, which 20 seconds may not carry; as long as a backup.
+                .timeout(BACKUP_TIMEOUT)
+                .body(file.clone());
+            self.authed(rb)
+        };
+        let mut resp = build()?
+            .send()
+            .await
+            .map_err(|e| anyhow!("request failed: upload: {}", e.without_url()))?;
+        if resp.status() == StatusCode::UNAUTHORIZED {
+            self.refresh_session().await?;
+            resp = build()?
+                .send()
+                .await
+                .map_err(|e| anyhow!("request failed: upload: {}", e.without_url()))?;
+        }
+        let resp = check_status(resp).await?;
+        let text = resp.text().await.unwrap_or_default();
+        Ok(serde_json::from_str(&text).unwrap_or(Value::Null))
+    }
+
+    /// `POST /plugins/{id}/query`: a read-only action, which core answers
+    /// for anyone who can read devices (`command` needs `plugins:write`).
+    pub async fn post_plugin_query(
+        &self,
+        plugin_id: &str,
+        action: &str,
+        params: Value,
+    ) -> Result<Value> {
+        let path = format!("/plugins/{}/query", seg(plugin_id));
+        let body = build_plugin_command_body(action, params);
+        let resp = self.request(Method::POST, &path, Some(&body)).await?;
+        let resp = check_status(resp).await?;
+        let text = resp.text().await.unwrap_or_default();
+        Ok(serde_json::from_str(&text).unwrap_or(Value::Null))
     }
 
     /// `POST /plugins/{id}/command`. The body is `{action, ...params}`.

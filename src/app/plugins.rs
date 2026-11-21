@@ -519,6 +519,29 @@ impl App {
         self.run_plugin_action(plugin_id, action);
     }
 
+    /// `f` on an action: the same as Enter, with a file to send. Nothing in a
+    /// manifest says which actions take one (WLED's `install_firmware_file`
+    /// says so in words), so any action can be run this way; the plugin
+    /// answers as it would to `command`.
+    pub fn run_selected_action_with_file(&mut self) {
+        let Some(d) = self.plugins_tab.detail.as_ref() else {
+            return;
+        };
+        if d.action_busy {
+            return;
+        }
+        let plugin_id = d.plugin_id.clone();
+        let Some(mut action) = self.selected_action().cloned() else {
+            return;
+        };
+        if action.requires_role == RequiresRole::Admin && !self.is_admin() {
+            self.set_action_status(format!("Action `{}` requires admin role.", action.id));
+            return;
+        }
+        action.params = Some(with_file_param(action.params.as_ref()));
+        self.plugins_tab.params = ParamForm::for_action(&plugin_id, &action);
+    }
+
     pub(crate) fn run_plugin_action(&mut self, plugin_id: String, action: Action) {
         self.run_plugin_action_with(plugin_id, action, json!({}));
     }
@@ -540,7 +563,7 @@ impl App {
         let c = self.client.clone();
         let id = action.id.clone();
         self.spawn(
-            async move { c.post_plugin_command(&plugin_id, &action.id, params).await },
+            async move { send_action(&c, &plugin_id, &action, params).await },
             move |app, res| {
                 let msg = match res {
                     // A reply that says it failed comes back as success.
@@ -571,7 +594,7 @@ impl App {
         let c = self.client.clone();
         let pid = plugin_id.clone();
         self.spawn(
-            async move { c.post_plugin_command(&pid, &action.id, params).await },
+            async move { send_action(&c, &pid, &action, params).await },
             move |app, res| {
                 let Some(s) = app.plugins_tab.streaming.as_mut() else {
                     return; // closed while starting
@@ -855,5 +878,219 @@ mod tests {
         assert_eq!(progress_percent(&json!({"percent": 40})), Some(40.0));
         assert_eq!(progress_percent(&json!({"pct": 140})), Some(100.0));
         assert_eq!(progress_percent(&json!({})), None);
+    }
+}
+
+/// The param a "run with a file" form keeps the local path in. Taken out
+/// before anything is sent; its name is one no plugin would use.
+pub(crate) const FILE_PARAM: &str = "_hc_tui_file";
+
+/// Start `action` the way it has to go: with a file to `/upload/{action}`
+/// when the form named one, a read-only action to `/query`, else `/command`.
+/// A streaming action answers each of them with its `request_id`.
+pub(crate) async fn send_action(
+    c: &crate::net::HomeCoreClient,
+    plugin_id: &str,
+    action: &Action,
+    mut params: Value,
+) -> anyhow::Result<Value> {
+    let file = params
+        .as_object_mut()
+        .and_then(|m| m.remove(FILE_PARAM))
+        .and_then(|v| v.as_str().map(str::to_string));
+    if let Some(path) = file {
+        let path = expand_home(&path);
+        let bytes = tokio::fs::read(&path)
+            .await
+            .map_err(|e| anyhow::anyhow!("can't read {}: {e}", path.display()))?;
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "file".into());
+        let rest = params.as_object().cloned().unwrap_or_default();
+        return c
+            .post_plugin_upload(plugin_id, &action.id, &name, bytes, &rest)
+            .await;
+    }
+    if uses_query(action) {
+        c.post_plugin_query(plugin_id, &action.id, params).await
+    } else {
+        c.post_plugin_command(plugin_id, &action.id, params).await
+    }
+}
+
+/// `~/x` as a path under the home directory; anything else as typed.
+fn expand_home(p: &str) -> std::path::PathBuf {
+    match (p.strip_prefix("~/"), std::env::var_os("HOME")) {
+        (Some(rest), Some(home)) => std::path::Path::new(&home).join(rest),
+        _ => std::path::PathBuf::from(p.trim()),
+    }
+}
+
+/// `action`'s params with a required "File to send" field added, for the
+/// "run with a file" form. Either way an action declares its params.
+pub(crate) fn with_file_param(params: Option<&Value>) -> Value {
+    let field = json!({
+        "type": "string",
+        "title": "File to send",
+        "description": "A path on this computer, such as ~/Downloads/firmware.bin",
+    });
+    let mut p = params.cloned().unwrap_or_else(|| json!({}));
+    if let Some(props) = p.get_mut("properties").and_then(Value::as_object_mut) {
+        props.insert(FILE_PARAM.into(), field);
+        let req = p
+            .as_object_mut()
+            .unwrap()
+            .entry("required")
+            .or_insert_with(|| json!([]));
+        if let Some(r) = req.as_array_mut() {
+            r.push(json!(FILE_PARAM));
+        }
+    } else if let Some(map) = p.as_object_mut() {
+        let mut f = field;
+        f["required"] = json!(true);
+        map.insert(FILE_PARAM.into(), f);
+    }
+    p
+}
+
+/// Whether `action` goes to `/plugins/{id}/query` rather than `/command`.
+///
+/// Core answers a read-only, non-streaming action there for anyone who can
+/// read devices; on `/command` it needs `plugins:write`, so a person without
+/// it would be refused an action they are allowed to run.
+pub(crate) fn uses_query(action: &Action) -> bool {
+    action.requires_role == RequiresRole::ReadOnly && !action.stream
+}
+
+#[cfg(test)]
+mod query_tests {
+    use super::*;
+
+    fn action(role: RequiresRole, stream: bool) -> Action {
+        let mut a: Action = serde_json::from_value(json!({"id": "a"})).unwrap();
+        a.requires_role = role;
+        a.stream = stream;
+        a
+    }
+
+    #[test]
+    fn only_a_read_only_non_streaming_action_is_a_query() {
+        assert!(uses_query(&action(RequiresRole::ReadOnly, false)));
+        assert!(!uses_query(&action(RequiresRole::ReadOnly, true)));
+        assert!(!uses_query(&action(RequiresRole::User, false)));
+        assert!(!uses_query(&action(RequiresRole::Admin, false)));
+        assert!(!uses_query(&action(RequiresRole::SignedIn, false)));
+    }
+
+    #[test]
+    fn a_file_form_adds_a_required_file_field_either_way_params_are_declared() {
+        // The flat map WLED uses.
+        let flat = with_file_param(Some(&json!({"device_id": {"type": "string"}})));
+        assert_eq!(flat[FILE_PARAM]["required"], json!(true));
+        assert!(flat.get("device_id").is_some(), "its own params kept");
+        // JSON Schema style.
+        let schema = with_file_param(Some(&json!({
+            "type": "object",
+            "properties": {"version": {"type": "string"}},
+            "required": ["version"]
+        })));
+        assert!(schema["properties"].get(FILE_PARAM).is_some());
+        assert_eq!(schema["required"], json!(["version", FILE_PARAM]));
+        // No params at all: just the file.
+        let none = with_file_param(None);
+        assert_eq!(none[FILE_PARAM]["title"], json!("File to send"));
+
+        let mut a = action(RequiresRole::Admin, true);
+        a.params = Some(flat);
+        let form = crate::app::plugin_settings::ParamForm::for_action("plugin.wled", &a)
+            .expect("a form with the file field");
+        assert!(!form.form.problems().is_empty(), "the file is required");
+    }
+}
+
+#[cfg(test)]
+mod upload_wire_tests {
+    //! What "run with a file" actually sends, read off the wire.
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[tokio::test]
+    async fn a_file_goes_as_the_body_with_its_name_and_params_in_the_query() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut got = Vec::new();
+            let mut buf = [0u8; 4096];
+            // Read until the whole body named by Content-Length is here.
+            loop {
+                let n = sock.read(&mut buf).await.unwrap();
+                got.extend_from_slice(&buf[..n]);
+                let text = String::from_utf8_lossy(&got).to_string();
+                if let Some(end) = text.find("\r\n\r\n") {
+                    let len = text
+                        .lines()
+                        .find_map(|l| {
+                            l.to_ascii_lowercase()
+                                .strip_prefix("content-length: ")
+                                .map(str::to_string)
+                        })
+                        .and_then(|v| v.trim().parse::<usize>().ok())
+                        .unwrap_or(0);
+                    if got.len() >= end + 4 + len {
+                        break;
+                    }
+                }
+                if n == 0 {
+                    break;
+                }
+            }
+            let body = b"{\"request_id\":\"r-1\"}";
+            let head = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n",
+                body.len()
+            );
+            sock.write_all(head.as_bytes()).await.unwrap();
+            sock.write_all(body).await.unwrap();
+            String::from_utf8_lossy(&got).to_string()
+        });
+
+        let dir = std::env::temp_dir().join(format!("hc_tui_upload_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("fw 1.bin");
+        std::fs::write(&file, b"FIRMWARE").unwrap();
+
+        let c = crate::net::HomeCoreClient::new(format!("http://{addr}"));
+        c.set_tokens("t0ken".into(), None, None);
+        let action: Action =
+            serde_json::from_value(json!({"id": "install_firmware_file"})).unwrap();
+        let params = json!({
+            FILE_PARAM: file.to_string_lossy(),
+            "device_id": "wled_desk",
+            "keep": true
+        });
+        let reply = send_action(&c, "plugin.wled", &action, params)
+            .await
+            .unwrap();
+        assert_eq!(reply["request_id"], "r-1");
+
+        let req = server.await.unwrap();
+        let first = req.lines().next().unwrap();
+        assert!(
+            first.starts_with(
+                "POST /api/v1/plugins/plugin.wled/upload/install_firmware_file?name=fw%201.bin"
+            ),
+            "{first}"
+        );
+        assert!(first.contains("&device_id=wled_desk"), "{first}");
+        assert!(first.contains("&keep=true"), "{first}");
+        assert!(!first.contains(FILE_PARAM), "the local path is never sent");
+        assert!(
+            req.to_ascii_lowercase()
+                .contains("content-type: application/octet-stream")
+        );
+        assert!(req.ends_with("FIRMWARE"), "the body is the file");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

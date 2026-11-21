@@ -17,14 +17,17 @@ pub enum PeopleTab {
     Roles,
     ApiKeys,
     Sessions,
+    /// Screens for the house: their own keys, no person's.
+    Displays,
 }
 
 impl PeopleTab {
-    pub const ALL: [PeopleTab; 4] = [
+    pub const ALL: [PeopleTab; 5] = [
         PeopleTab::People,
         PeopleTab::Roles,
         PeopleTab::ApiKeys,
         PeopleTab::Sessions,
+        PeopleTab::Displays,
     ];
 
     pub fn title(self) -> &'static str {
@@ -33,6 +36,7 @@ impl PeopleTab {
             Self::Roles => "Roles",
             Self::ApiKeys => "API keys",
             Self::Sessions => "Sessions",
+            Self::Displays => "Displays",
         }
     }
 }
@@ -46,6 +50,8 @@ pub struct PeoplePanel {
     pub keys_sel: ListSel,
     pub sessions: Load<Vec<SessionInfo>>,
     pub sessions_sel: ListSel,
+    pub displays: Load<Vec<crate::model::settings::Display>>,
+    pub displays_sel: ListSel,
 }
 
 /// Keys in use first, then stopped ones; newest first within each.
@@ -81,6 +87,7 @@ impl App {
             PeopleTab::Roles => self.load_roles(),
             PeopleTab::ApiKeys => self.load_api_keys(),
             PeopleTab::Sessions => self.load_sessions(),
+            PeopleTab::Displays => self.load_displays(),
         }
     }
 
@@ -208,6 +215,30 @@ impl App {
         self.manage.modal = Some(SettingsModal::NewKey(NewKeyForm::new(scopes)));
     }
 
+    /// `e` on a key: change its label or what it may do. Its secret stays.
+    pub fn open_edit_api_key(&mut self) {
+        let Some(k) = self.selected_api_key().cloned() else {
+            return;
+        };
+        if k.is_revoked() {
+            self.status = "A revoked key can't be changed".into();
+            return;
+        }
+        let mut held = self.grantable_scopes();
+        for s in &k.scopes {
+            if !held.contains(s) {
+                held.push(s.clone());
+            }
+        }
+        let mut form = NewKeyForm::new(held);
+        for (s, on) in form.scopes.iter_mut() {
+            *on = k.scopes.contains(s);
+        }
+        form.label = k.label.clone();
+        form.editing = Some(k.id.clone());
+        self.manage.modal = Some(SettingsModal::NewKey(form));
+    }
+
     pub(crate) fn save_new_api_key(&mut self) {
         let Some(SettingsModal::NewKey(form)) = self.manage.modal.as_mut() else {
             return;
@@ -224,6 +255,27 @@ impl App {
         }
         form.busy = true;
         let c = self.client.clone();
+        if let Some(id) = form.editing.clone() {
+            let sent = label.clone();
+            self.spawn(
+                async move { c.update_api_key(&id, &sent, &scopes).await },
+                move |app, res| match res {
+                    Ok(()) => {
+                        app.manage.modal = None;
+                        app.status = format!("Saved the key {label}");
+                        app.manage.people.keys = Load::Idle;
+                        app.load_api_keys();
+                    }
+                    Err(e) => {
+                        if let Some(SettingsModal::NewKey(f)) = app.manage.modal.as_mut() {
+                            f.busy = false;
+                            f.error = Some(e.to_string());
+                        }
+                    }
+                },
+            );
+            return;
+        }
         self.spawn(
             async move { c.create_api_key(&label, &scopes).await },
             |app, res| match res {
@@ -302,6 +354,81 @@ impl App {
     }
 
     // ── Sessions ─────────────────────────────────────────────────────────
+
+    pub(crate) fn load_displays(&mut self) {
+        if self.manage.people.displays.ready().is_none() {
+            self.manage.people.displays = Load::Loading;
+        }
+        let c = self.client.clone();
+        self.spawn(async move { c.list_displays().await }, |app, res| {
+            app.manage.people.displays = match res {
+                Ok(mut v) => {
+                    v.retain(|d| !d.revoked);
+                    v.sort_by_key(|d| d.name.to_lowercase());
+                    Load::Ready(v)
+                }
+                Err(e) => Load::Failed(e.to_string()),
+            };
+            let ids = app.display_ids();
+            app.manage.people.displays_sel.resolve(&ids);
+        });
+    }
+
+    fn display_ids(&self) -> Vec<String> {
+        self.manage
+            .people
+            .displays
+            .ready()
+            .map(|v| v.iter().map(|d| d.id.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    pub fn move_display(&mut self, delta: isize) {
+        let ids = self.display_ids();
+        self.manage.people.displays_sel.move_by(delta, &ids);
+    }
+
+    fn selected_display(&self) -> Option<&crate::model::settings::Display> {
+        let id = self.manage.people.displays_sel.id()?;
+        self.manage
+            .people
+            .displays
+            .ready()?
+            .iter()
+            .find(|d| d.id == id)
+    }
+
+    /// `n`: name a new display; its key is shown once.
+    pub fn open_new_display(&mut self) {
+        self.manage.modal = Some(super::settings_modal::SettingsModal::DisplayName(
+            super::settings_modal::DisplayNameForm::default(),
+        ));
+    }
+
+    pub fn ask_delete_display(&mut self) {
+        let Some(d) = self.selected_display() else {
+            return;
+        };
+        let (id, name) = (d.id.clone(), d.name.clone());
+        self.ask(Confirm::new(
+            format!("Delete the display {name}?"),
+            "It is signed out on its next request, and its key stops working.",
+            ConfirmAction::Settings(SettingsConfirm::DeleteDisplay { id, name }),
+        ));
+    }
+
+    pub(crate) fn delete_display(&mut self, id: String, name: String) {
+        let c = self.client.clone();
+        self.spawn_ok(
+            "delete display",
+            async move { c.delete_display(&id).await },
+            move |app, ()| {
+                app.status = format!("Deleted the display {name}");
+                app.manage.people.displays = Load::Idle;
+                app.load_displays();
+            },
+        );
+    }
 
     pub(crate) fn load_sessions(&mut self) {
         if self.manage.people.sessions.is_loading() {
@@ -565,7 +692,11 @@ mod tests {
         a.people_step_tab(1);
         assert_eq!(a.manage.people.tab, PeopleTab::Roles);
         a.people_step_tab(-2);
-        assert_eq!(a.manage.people.tab, PeopleTab::Sessions);
+        assert_eq!(
+            a.manage.people.tab,
+            PeopleTab::Displays,
+            "wraps to the last"
+        );
     }
 
     #[test]

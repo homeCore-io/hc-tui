@@ -20,6 +20,7 @@ pub enum SettingsConfirm {
     DeleteCalendar { id: String },
     ReplaceCalendar { path: PathBuf, name: String },
     RestartCore,
+    DeleteDisplay { id: String, name: String },
 }
 
 /// An open Settings dialog. Only one at a time.
@@ -29,6 +30,15 @@ pub enum SettingsModal {
     Secret(NewApiKey),
     Restore(RestoreForm),
     Path(PathForm),
+    /// Naming a new display.
+    DisplayName(DisplayNameForm),
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct DisplayNameForm {
+    pub name: String,
+    pub busy: bool,
+    pub error: Option<String>,
 }
 
 impl std::fmt::Debug for SettingsModal {
@@ -38,6 +48,7 @@ impl std::fmt::Debug for SettingsModal {
             Self::Secret(k) => write!(f, "Secret({k:?})"),
             Self::Restore(r) => write!(f, "Restore({:?})", r.source),
             Self::Path(p) => write!(f, "Path({:?})", p.purpose),
+            Self::DisplayName(_) => f.write_str("DisplayName"),
         }
     }
 }
@@ -59,6 +70,8 @@ pub struct NewKeyForm {
     pub cursor: usize,
     pub busy: bool,
     pub error: Option<String>,
+    /// The key being edited (`e`), by id; `None` makes a new one.
+    pub editing: Option<String>,
 }
 
 impl NewKeyForm {
@@ -77,6 +90,7 @@ impl NewKeyForm {
             cursor: 0,
             busy: false,
             error: None,
+            editing: None,
         }
     }
 
@@ -154,6 +168,10 @@ pub fn restore_date(plan: &RestorePlan, file_name: &str) -> String {
 pub enum PathPurpose {
     RestoreFile,
     Calendar,
+    /// A calendar homeCore downloads, from the address typed as the path.
+    CalendarUrl,
+    /// A new plugin runtime: homeCore's address as it reaches it, and a name.
+    NewRuntime,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -216,6 +234,41 @@ impl App {
             return;
         }
         match modal {
+            SettingsModal::DisplayName(f) => {
+                if f.busy {
+                    return;
+                }
+                f.error = None;
+                if key.code != KeyCode::Enter {
+                    edit_text(&mut f.name, key);
+                    return;
+                }
+                let name = f.name.trim().to_string();
+                if name.is_empty() {
+                    f.error = Some("Give it a name, such as Hall tablet".into());
+                    return;
+                }
+                f.busy = true;
+                let c = self.client.clone();
+                self.spawn(
+                    async move { c.create_display(&name).await },
+                    |app, res| match res {
+                        Ok(k) => {
+                            app.status =
+                                format!("Made the display {}: its key is shown once", k.label);
+                            app.manage.modal = Some(SettingsModal::Secret(k));
+                            app.manage.people.displays = Load::Idle;
+                            app.load_displays();
+                        }
+                        Err(e) => {
+                            if let Some(SettingsModal::DisplayName(f)) = app.manage.modal.as_mut() {
+                                f.busy = false;
+                                f.error = Some(e.to_string());
+                            }
+                        }
+                    },
+                );
+            }
             SettingsModal::Secret(_) => {
                 if key.code == KeyCode::Enter {
                     self.manage.modal = None;
@@ -272,7 +325,12 @@ impl App {
                 }
                 f.error = None;
                 match key.code {
-                    KeyCode::Tab | KeyCode::BackTab if f.purpose == PathPurpose::Calendar => {
+                    KeyCode::Tab | KeyCode::BackTab
+                        if matches!(
+                            f.purpose,
+                            PathPurpose::Calendar | PathPurpose::CalendarUrl
+                        ) =>
+                    {
                         f.field = match f.field {
                             PathField::Path => PathField::Name,
                             PathField::Name => PathField::Path,
@@ -302,6 +360,7 @@ impl App {
             S::DeleteCalendar { id } => self.delete_calendar(id),
             S::ReplaceCalendar { path, name } => self.upload_calendar(path, name),
             S::RestartCore => self.restart_core(),
+            S::DeleteDisplay { id, name } => self.delete_display(id, name),
         }
     }
 
@@ -352,7 +411,64 @@ impl App {
             return;
         };
         if f.path.trim().is_empty() {
-            f.error = Some("Type the file's path".to_string());
+            f.error = Some(if f.purpose == PathPurpose::CalendarUrl {
+                "Type the calendar's address".to_string()
+            } else {
+                "Type the file's path".to_string()
+            });
+            return;
+        }
+        if f.purpose == PathPurpose::NewRuntime {
+            let url = f.path.trim().to_string();
+            let name = f.name.trim().to_string();
+            if name.is_empty() {
+                f.error = Some("Give it a name, such as Python runtime 1".into());
+                return;
+            }
+            f.busy = true;
+            let c = self.client.clone();
+            self.spawn(
+                async move { c.add_runtime(&name, &url).await },
+                |app, res| match res {
+                    Ok(key) => {
+                        app.manage.modal = None;
+                        app.status = "Added the runtime: paste its key into its page".into();
+                        app.plugins_tab.manage.issued = Some(key);
+                        app.load_runtimes();
+                    }
+                    Err(e) => {
+                        if let Some(SettingsModal::Path(f)) = app.manage.modal.as_mut() {
+                            f.busy = false;
+                            f.error = Some(e.to_string());
+                        }
+                    }
+                },
+            );
+            return;
+        }
+        if f.purpose == PathPurpose::CalendarUrl {
+            let url = f.path.trim().to_string();
+            let name = Some(f.name.trim().to_string()).filter(|n| !n.is_empty());
+            f.busy = true;
+            let c = self.client.clone();
+            self.spawn(
+                async move { c.fetch_calendar(&url, name.as_deref()).await },
+                |app, res| match res {
+                    Ok((id, n)) => {
+                        app.manage.modal = None;
+                        app.manage.backup.status = format!(
+                            "Added \"{id}\": {n} events. homeCore fetches it again on its own."
+                        );
+                        app.load_calendars();
+                    }
+                    Err(e) => {
+                        if let Some(SettingsModal::Path(f)) = app.manage.modal.as_mut() {
+                            f.busy = false;
+                            f.error = Some(e.to_string());
+                        }
+                    }
+                },
+            );
             return;
         }
         let path = expand_path(&f.path);
@@ -422,6 +538,8 @@ impl App {
                     self.upload_calendar(path, name);
                 }
             }
+            // Sent above, before a path is made of it.
+            PathPurpose::CalendarUrl | PathPurpose::NewRuntime => {}
         }
     }
 

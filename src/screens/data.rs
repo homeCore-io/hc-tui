@@ -15,6 +15,14 @@ impl Screen for DataScreen {
     }
 
     fn bindings(&self, app: &App) -> Vec<Binding> {
+        if app.manage.backup.events.is_some() {
+            return vec![Binding::new(
+                &[KeyCode::Esc],
+                "Esc",
+                "close",
+                App::close_calendar_events,
+            )];
+        }
         let mut v = moves(|a| a.move_data(-1), |a| a.move_data(1)).to_vec();
         match app.selected_data_row() {
             Some(DataRow::Kept(_)) => {
@@ -30,6 +38,12 @@ impl Screen for DataScreen {
                 v.push(Binding::new(ENTER, "Enter", a.verb(), App::data_enter));
             }
             Some(DataRow::Calendar(_)) => {
+                v.push(Binding::new(
+                    ENTER,
+                    "Enter",
+                    "upcoming events",
+                    App::data_enter,
+                ));
                 v.push(Binding::new(
                     DELETE,
                     "x",

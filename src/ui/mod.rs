@@ -7,6 +7,7 @@ pub mod controls;
 pub mod devices;
 pub mod help;
 pub mod helpers;
+pub mod history;
 pub mod home;
 mod layout;
 pub mod lists;

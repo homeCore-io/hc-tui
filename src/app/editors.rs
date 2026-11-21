@@ -40,9 +40,18 @@ pub enum ConfirmAction {
     DeleteDevice {
         id: String,
     },
+    DeleteDevices {
+        ids: Vec<String>,
+    },
     DeleteArea {
         id: String,
         name: String,
+    },
+    MergeArea {
+        id: String,
+        name: String,
+        into: String,
+        into_name: String,
     },
     DeleteRule {
         id: String,
@@ -84,6 +93,11 @@ pub struct Confirm {
     pub message: String,
     pub detail: Option<String>,
     pub action: ConfirmAction,
+    /// A second way to say yes, on its own key, for a question with two
+    /// answers besides no: `(key, what it does, action)`.
+    pub alt: Option<(char, String, ConfirmAction)>,
+    /// What `y` does, when "Yes" alone would not say.
+    pub yes: Option<String>,
 }
 
 impl Confirm {
@@ -97,7 +111,21 @@ impl Confirm {
             message: message.into(),
             detail: None,
             action,
+            alt: None,
+            yes: None,
         }
+    }
+
+    /// Say what `y` does.
+    pub fn with_yes(mut self, label: impl Into<String>) -> Self {
+        self.yes = Some(label.into());
+        self
+    }
+
+    /// Offer `key` as a second yes, doing `action`; `label` says what.
+    pub fn with_alt(mut self, key: char, label: impl Into<String>, action: ConfirmAction) -> Self {
+        self.alt = Some((key, label.into(), action));
+        self
     }
 
     pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
@@ -222,6 +250,8 @@ pub enum UserEditMode {
     ChangePassword,
     /// An admin gives someone else a new password.
     SetPassword,
+    /// Your own PIN for displays: your password, then the PIN twice.
+    SetPin,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -276,6 +306,7 @@ impl UserEditor {
             UserEditMode::EditRole => &[F::Role],
             UserEditMode::ChangePassword => &[F::CurrentPassword, F::Password, F::ConfirmPassword],
             UserEditMode::SetPassword => &[F::Password, F::ConfirmPassword],
+            UserEditMode::SetPin => &[F::CurrentPassword, F::Password, F::ConfirmPassword],
         }
     }
 

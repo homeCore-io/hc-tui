@@ -53,6 +53,17 @@ impl HomeCoreClient {
 
     /// `POST /auth/api-keys/{id}/rotate`: a new secret, shown once; the
     /// old one stops working.
+    /// `PATCH /auth/api-keys/{id}`: a new label and scopes; the secret stays.
+    pub async fn update_api_key(&self, id: &str, label: &str, scopes: &[String]) -> Result<()> {
+        let path = format!("/auth/api-keys/{}", seg(id));
+        self.send_empty(
+            Method::PATCH,
+            &path,
+            Some(json!({ "label": label, "scopes": scopes })),
+        )
+        .await
+    }
+
     pub async fn rotate_api_key(&self, id: &str) -> Result<NewApiKey> {
         let path = format!("/auth/api-keys/{}/rotate", seg(id));
         self.send_json(Method::POST, &path, None).await
@@ -131,6 +142,36 @@ impl HomeCoreClient {
         ))
     }
 
+    /// `POST /calendars/fetch`: core downloads the `.ics` at `url` and keeps
+    /// it (and refreshes it). Returns the calendar's name and its events.
+    pub async fn fetch_calendar(&self, url: &str, name: Option<&str>) -> Result<(String, usize)> {
+        let mut body = json!({ "url": url });
+        if let Some(n) = name {
+            body["name"] = json!(n);
+        }
+        let v: Value = self
+            .send_json(Method::POST, "/calendars/fetch", Some(body))
+            .await?;
+        Ok((
+            v.get("calendar_id")
+                .or_else(|| v.get("id"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            v.get("event_count").and_then(Value::as_u64).unwrap_or(0) as usize,
+        ))
+    }
+
+    /// `GET /calendars/{id}/events`: the next `limit` occurrences from now.
+    pub async fn calendar_events(&self, id: &str, limit: usize) -> Result<Vec<Value>> {
+        let path = format!("/calendars/{}/events?limit={limit}", seg(id));
+        let v: Value = self.get_json(&path).await?;
+        Ok(v.get("events")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_else(|| v.as_array().cloned().unwrap_or_default()))
+    }
+
     /// `DELETE /calendars/{id}`. Returns the names of rules that still
     /// check it.
     pub async fn delete_calendar(&self, id: &str) -> Result<Vec<String>> {
@@ -175,8 +216,53 @@ impl HomeCoreClient {
         self.get_json("/ws/connections").await
     }
 
+    pub async fn list_displays(&self) -> Result<Vec<crate::model::settings::Display>> {
+        self.get_json("/displays").await
+    }
+
+    /// `POST /displays`: a display and its key, in `token`, shown once.
+    pub async fn create_display(&self, name: &str) -> Result<NewApiKey> {
+        let mut k: NewApiKey = self
+            .send_json(Method::POST, "/displays", Some(json!({ "name": name })))
+            .await?;
+        k.label = name.to_string();
+        Ok(k)
+    }
+
+    /// `DELETE /displays/{id}`: it is signed out on its next request.
+    pub async fn delete_display(&self, id: &str) -> Result<()> {
+        let path = format!("/displays/{}", seg(id));
+        self.send_empty(Method::DELETE, &path, None).await
+    }
+
     pub async fn house_temperature(&self) -> Result<HouseTemperature> {
         self.get_json("/system/temperature-unit").await
+    }
+
+    /// `PUT /system/temperature-unit` (admin): `"°C"` or `"°F"`, saved in
+    /// homecore.toml.
+    pub async fn set_temperature_unit(&self, unit: &str) -> Result<HouseTemperature> {
+        self.send_json(
+            Method::PUT,
+            "/system/temperature-unit",
+            Some(json!({ "temperature_unit": unit })),
+        )
+        .await
+    }
+
+    /// `GET /system/battery_settings`: when a battery counts as low.
+    pub async fn battery_settings(&self) -> Result<Value> {
+        self.get_json("/system/battery_settings").await
+    }
+
+    /// `POST /notify/test` (admin) to every channel (`all`).
+    pub async fn notify_test(&self) -> Result<Value> {
+        self.send_json(
+            Method::POST,
+            "/notify/test",
+            Some(json!({ "channel": "all", "message": "A test from hc-tui" })),
+        )
+        .await
     }
 
     /// `POST /system/restart`, then wait until core answers with a new
