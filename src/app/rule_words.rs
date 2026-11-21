@@ -630,3 +630,43 @@ mod tests {
         assert_eq!(duration_words(0), "0s");
     }
 }
+
+/// A criteria mode's definition in words: when it goes on, when it goes
+/// off, and how often it is checked. `None` when it has none.
+pub fn criteria_words(definition: &Value, name_of: NameOf<'_>) -> Option<(String, String, String)> {
+    let c = definition.get("criteria")?;
+    let on = condition_words(c.get("on_condition")?, name_of);
+    let off = match c.get("off_behavior").and_then(Value::as_str) {
+        Some("explicit") => match c.get("off_condition").filter(|v| !v.is_null()) {
+            Some(oc) => condition_words(oc, name_of),
+            None => "when its off condition holds".to_string(),
+        },
+        _ => "when that stops being true".to_string(),
+    };
+    let every = match c.get("reevaluate_every_n_minutes").and_then(Value::as_u64) {
+        Some(0) | None => "as things change".to_string(),
+        Some(1) => "as things change, and every minute".to_string(),
+        Some(n) => format!("as things change, and every {n} minutes"),
+    };
+    Some((on, off, every))
+}
+
+#[cfg(test)]
+mod criteria_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn a_criteria_mode_reads_as_when_it_goes_on_and_off() {
+        let d = json!({"criteria": {
+            "on_condition": {"DeviceState": {"device_id": "t1", "attribute": "temperature", "op": "Gt", "value": 22}},
+            "off_behavior": "inverse",
+            "reevaluate_every_n_minutes": 5
+        }, "generated_rule_ids": []});
+        let (on, off, every) = criteria_words(&d, &|_| "Indoor Sensor".to_string()).unwrap();
+        assert!(on.contains("Indoor Sensor"), "{on}");
+        assert_eq!(off, "when that stops being true");
+        assert_eq!(every, "as things change, and every 5 minutes");
+        assert!(criteria_words(&json!(null), &|s| s.to_string()).is_none());
+    }
+}

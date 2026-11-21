@@ -64,7 +64,9 @@ It is built with:
   has. homeCore scenes can be made, edited and deleted: pick devices
   and each is taken as it is now (its first few everyday settings, or
   just off). A plugin's scenes only run.
-- Modes: Space turns a manual mode on or off; solar modes follow the
+- Modes: a criteria mode says what turns it on (`d` shows when it goes on
+  and off, and how often it is checked; changing it is left to the app).
+  Space turns a manual mode on or off; solar modes follow the
   sun and show their next change (`until sunset 16:46`). A mode's name,
   and a solar mode's events and offsets, can be edited.
 - Helpers: every kind of helper core has (switch, timer, counter,

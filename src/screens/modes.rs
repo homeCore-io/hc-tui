@@ -3,6 +3,7 @@
 use super::{Binding, DELETE, ENTER, NEW, SPACE, Screen, ScreenId, moves};
 use crate::app::App;
 use crate::app::home::{HomeItem, ItemKind};
+use crossterm::event::KeyCode;
 use ratatui::{Frame, layout::Rect};
 
 pub struct ModesScreen;
@@ -13,7 +14,23 @@ impl Screen for ModesScreen {
     }
 
     fn bindings(&self, app: &App) -> Vec<Binding> {
+        if app.manage.mode_detail.is_some() {
+            return vec![Binding::new(
+                &[KeyCode::Esc],
+                "Esc",
+                "close",
+                App::close_mode_definition,
+            )];
+        }
         let mut v = moves(|a| a.move_mode(-1), |a| a.move_mode(1)).to_vec();
+        if app.selected_mode().is_some_and(|m| m.definition.is_some()) {
+            v.push(Binding::new(
+                &[KeyCode::Char('d')],
+                "d",
+                "what turns it on and off",
+                App::open_mode_definition,
+            ));
+        }
         if app.can("devices:command") {
             v.push(Binding::new(
                 SPACE,
