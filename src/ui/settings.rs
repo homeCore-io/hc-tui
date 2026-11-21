@@ -706,6 +706,14 @@ pub fn modal_hints(m: &SettingsModal) -> Vec<&'static str> {
         SettingsModal::Path(p) if p.purpose == PathPurpose::Calendar => {
             vec!["type a path", "Tab path or name", "Enter add", "Esc cancel"]
         }
+        SettingsModal::Path(p) if p.purpose == PathPurpose::CalendarUrl => {
+            vec![
+                "type its address",
+                "Tab address or name",
+                "Enter add",
+                "Esc cancel",
+            ]
+        }
         SettingsModal::Path(_) => vec!["type a path", "Enter check it", "Esc cancel"],
     }
 }
@@ -899,6 +907,10 @@ pub fn draw_modal(frame: &mut Frame<'_>, app: &App) {
                     "Add a calendar",
                     "A .ics file on this computer. A calendar with the same name is replaced (it asks).",
                 ),
+                PathPurpose::CalendarUrl => (
+                    "Add a calendar from a web address",
+                    "homeCore downloads the .ics at this address, keeps it, and fetches it again on its own.",
+                ),
             };
             let inner = dialog(frame, 70, 45, title, Color::Cyan);
             let r = Layout::default()
@@ -914,8 +926,13 @@ pub fn draw_modal(frame: &mut Frame<'_>, app: &App) {
                 Paragraph::new(what).style(dim()).wrap(Wrap { trim: true }),
                 r[0],
             );
-            frame.render_widget(input(&f.path, "Path", f.field == PathField::Path), r[1]);
-            if f.purpose == PathPurpose::Calendar {
+            let path_label = if f.purpose == PathPurpose::CalendarUrl {
+                "Address"
+            } else {
+                "Path"
+            };
+            frame.render_widget(input(&f.path, path_label, f.field == PathField::Path), r[1]);
+            if matches!(f.purpose, PathPurpose::Calendar | PathPurpose::CalendarUrl) {
                 frame.render_widget(
                     input(
                         &f.name,

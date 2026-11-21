@@ -154,6 +154,8 @@ pub fn restore_date(plan: &RestorePlan, file_name: &str) -> String {
 pub enum PathPurpose {
     RestoreFile,
     Calendar,
+    /// A calendar homeCore downloads, from the address typed as the path.
+    CalendarUrl,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -272,7 +274,12 @@ impl App {
                 }
                 f.error = None;
                 match key.code {
-                    KeyCode::Tab | KeyCode::BackTab if f.purpose == PathPurpose::Calendar => {
+                    KeyCode::Tab | KeyCode::BackTab
+                        if matches!(
+                            f.purpose,
+                            PathPurpose::Calendar | PathPurpose::CalendarUrl
+                        ) =>
+                    {
                         f.field = match f.field {
                             PathField::Path => PathField::Name,
                             PathField::Name => PathField::Path,
@@ -352,7 +359,36 @@ impl App {
             return;
         };
         if f.path.trim().is_empty() {
-            f.error = Some("Type the file's path".to_string());
+            f.error = Some(if f.purpose == PathPurpose::CalendarUrl {
+                "Type the calendar's address".to_string()
+            } else {
+                "Type the file's path".to_string()
+            });
+            return;
+        }
+        if f.purpose == PathPurpose::CalendarUrl {
+            let url = f.path.trim().to_string();
+            let name = Some(f.name.trim().to_string()).filter(|n| !n.is_empty());
+            f.busy = true;
+            let c = self.client.clone();
+            self.spawn(
+                async move { c.fetch_calendar(&url, name.as_deref()).await },
+                |app, res| match res {
+                    Ok((id, n)) => {
+                        app.manage.modal = None;
+                        app.manage.backup.status = format!(
+                            "Added \"{id}\": {n} events. homeCore fetches it again on its own."
+                        );
+                        app.load_calendars();
+                    }
+                    Err(e) => {
+                        if let Some(SettingsModal::Path(f)) = app.manage.modal.as_mut() {
+                            f.busy = false;
+                            f.error = Some(e.to_string());
+                        }
+                    }
+                },
+            );
             return;
         }
         let path = expand_path(&f.path);
@@ -422,6 +458,8 @@ impl App {
                     self.upload_calendar(path, name);
                 }
             }
+            // Sent above, before a path is made of it.
+            PathPurpose::CalendarUrl => {}
         }
     }
 

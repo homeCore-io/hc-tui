@@ -131,6 +131,36 @@ impl HomeCoreClient {
         ))
     }
 
+    /// `POST /calendars/fetch`: core downloads the `.ics` at `url` and keeps
+    /// it (and refreshes it). Returns the calendar's name and its events.
+    pub async fn fetch_calendar(&self, url: &str, name: Option<&str>) -> Result<(String, usize)> {
+        let mut body = json!({ "url": url });
+        if let Some(n) = name {
+            body["name"] = json!(n);
+        }
+        let v: Value = self
+            .send_json(Method::POST, "/calendars/fetch", Some(body))
+            .await?;
+        Ok((
+            v.get("calendar_id")
+                .or_else(|| v.get("id"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            v.get("event_count").and_then(Value::as_u64).unwrap_or(0) as usize,
+        ))
+    }
+
+    /// `GET /calendars/{id}/events`: the next `limit` occurrences from now.
+    pub async fn calendar_events(&self, id: &str, limit: usize) -> Result<Vec<Value>> {
+        let path = format!("/calendars/{}/events?limit={limit}", seg(id));
+        let v: Value = self.get_json(&path).await?;
+        Ok(v.get("events")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_else(|| v.as_array().cloned().unwrap_or_default()))
+    }
+
     /// `DELETE /calendars/{id}`. Returns the names of rules that still
     /// check it.
     pub async fn delete_calendar(&self, id: &str) -> Result<Vec<String>> {

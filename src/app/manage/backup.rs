@@ -32,6 +32,7 @@ pub enum BackupAction {
     ImportRules,
     ImportScenes,
     AddCalendar,
+    FetchCalendar,
 }
 
 impl BackupAction {
@@ -44,6 +45,7 @@ impl BackupAction {
             Self::ImportRules => "import_rules",
             Self::ImportScenes => "import_scenes",
             Self::AddCalendar => "add_calendar",
+            Self::FetchCalendar => "fetch_calendar",
         }
     }
 
@@ -64,6 +66,7 @@ impl BackupAction {
                 tilde(&imports_dir().join("scenes.json"))
             ),
             Self::AddCalendar => "Add a calendar from a .ics file".into(),
+            Self::FetchCalendar => "Add a calendar from a web address".into(),
         }
     }
 
@@ -75,6 +78,7 @@ impl BackupAction {
             Self::ExportRules | Self::ExportScenes => "export",
             Self::ImportRules | Self::ImportScenes => "import",
             Self::AddCalendar => "choose a file",
+            Self::FetchCalendar => "type its address",
         }
     }
 }
@@ -113,6 +117,8 @@ pub struct BackupPanel {
     pub status: String,
     pub kept: Load<KeptBackups>,
     pub calendars: Load<Vec<Calendar>>,
+    /// A calendar's upcoming events (Enter on it), when open.
+    pub events: Option<(String, Load<Vec<Value>>)>,
 }
 
 fn stamp() -> String {
@@ -185,6 +191,10 @@ impl App {
                     DataSection::Calendars,
                     DataRow::Action(BackupAction::AddCalendar),
                 ));
+                out.push((
+                    DataSection::Calendars,
+                    DataRow::Action(BackupAction::FetchCalendar),
+                ));
             }
         }
         out
@@ -234,7 +244,7 @@ impl App {
         self.load_calendars();
     }
 
-    fn load_calendars(&mut self) {
+    pub(crate) fn load_calendars(&mut self) {
         if !(self.can("automations:read") || self.is_admin())
             || self.manage.backup.calendars.is_loading()
         {
@@ -253,11 +263,33 @@ impl App {
     }
 
     /// Enter: download a kept backup, or run the action.
+    /// Enter on a calendar: its next events.
+    pub fn open_calendar_events(&mut self, id: String) {
+        self.manage.backup.events = Some((id.clone(), Load::Loading));
+        let c = self.client.clone();
+        self.spawn(
+            async move { c.calendar_events(&id, 50).await },
+            |app, res| {
+                if let Some((_, l)) = app.manage.backup.events.as_mut() {
+                    *l = match res {
+                        Ok(v) => Load::Ready(v),
+                        Err(e) => Load::Failed(e.to_string()),
+                    };
+                }
+            },
+        );
+    }
+
+    pub fn close_calendar_events(&mut self) {
+        self.manage.backup.events = None;
+    }
+
     pub fn data_enter(&mut self) {
         match self.selected_data_row() {
             Some(DataRow::Kept(name)) => self.download_kept(name),
             Some(DataRow::Action(a)) => self.data_action(a),
-            Some(DataRow::Calendar(_)) | None => {}
+            Some(DataRow::Calendar(id)) => self.open_calendar_events(id),
+            None => {}
         }
     }
 
@@ -285,6 +317,10 @@ impl App {
             }
             BackupAction::AddCalendar => {
                 self.manage.modal = Some(SettingsModal::Path(PathForm::new(PathPurpose::Calendar)))
+            }
+            BackupAction::FetchCalendar => {
+                self.manage.modal =
+                    Some(SettingsModal::Path(PathForm::new(PathPurpose::CalendarUrl)))
             }
             _ => self.run_backup_action(action),
         }
@@ -444,9 +480,9 @@ impl App {
                         let n = c.import_scenes(v).await?;
                         Ok(format!("Imported {n} scene(s) from {}", path.display()))
                     }
-                    BackupAction::RestoreFile | BackupAction::AddCalendar => {
-                        Err(anyhow!("not run in the background"))
-                    }
+                    BackupAction::RestoreFile
+                    | BackupAction::AddCalendar
+                    | BackupAction::FetchCalendar => Err(anyhow!("not run in the background")),
                 }
             },
             move |app, res: Result<String>| {
@@ -524,7 +560,9 @@ mod tests {
         assert_eq!(rows[1], "a:restore_file");
         assert_eq!(rows[2], "k:homecore-backup-20261117T210247Z.zip");
         assert!(rows.contains(&"c:bins".to_string()));
-        assert_eq!(rows.last().unwrap(), "a:add_calendar");
+        let n = rows.len();
+        assert_eq!(rows[n - 2], "a:add_calendar");
+        assert_eq!(rows[n - 1], "a:fetch_calendar");
     }
 
     #[test]

@@ -143,6 +143,53 @@ fn num(v: f64) -> String {
     }
 }
 
+/// Enter on a calendar (Data & backups): its next events.
+pub fn draw_calendar_events(frame: &mut Frame<'_>, app: &App) {
+    let Some((id, events)) = &app.manage.backup.events else {
+        return;
+    };
+    let popup = centered_rect(70, 60, frame.area());
+    frame.render_widget(Clear, popup);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" Coming up · {id} "))
+        .border_style(Style::default().fg(Color::Cyan));
+    let dim = Style::default().fg(Color::DarkGray);
+    let mut lines: Vec<Line> = match events {
+        Load::Ready(list) if list.is_empty() => {
+            vec![Line::from(Span::styled(" Nothing coming up.", dim))]
+        }
+        Load::Ready(list) => list
+            .iter()
+            .map(|e| {
+                let s = |k: &str| e.get(k).and_then(serde_json::Value::as_str).unwrap_or("");
+                let when = short_ts(s("start"));
+                let until = match s("end") {
+                    "" => String::new(),
+                    end => format!(" to {}", short_ts(end)),
+                };
+                Line::from(vec![
+                    Span::styled(format!(" {when}{until}  "), dim),
+                    Span::raw(s("summary").to_string()),
+                ])
+            })
+            .collect(),
+        Load::Failed(e) => vec![Line::from(format!(" Couldn't read it: {e}"))],
+        _ => vec![Line::from(Span::styled(" loading...", dim))],
+    };
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        " The next 50 from now.   Esc close",
+        dim,
+    )));
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(block)
+            .wrap(Wrap { trim: false }),
+        popup,
+    );
+}
+
 /// `o` on Devices: what no plugin manages any more, for removing by hand.
 pub fn draw_orphans(frame: &mut Frame<'_>, app: &App) {
     let Some(o) = &app.devices_tab.orphans else {

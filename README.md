@@ -255,8 +255,9 @@ Screens:
     out.
 - Data & backups: `n` back up now; on a kept backup `Enter` downloads
   it and `R` restores it (type the backup's date to go ahead); `Enter`
-  runs an action (restore from a file, export, import); `x` deletes a
-  calendar. Downloads and exports go to `~/.homecore/exports`, 0600. A
+  runs an action (restore from a file, export, import, add a calendar from
+  a file or a web address, which homeCore then fetches again on its own);
+  on a calendar `Enter` shows its next events and `x` deletes it. Downloads and exports go to `~/.homecore/exports`, 0600. A
   restore is staged for core's next start, and you're asked about
   restarting.
 - Logs: `Space`/`p` pause, `e`/`w`/`i`/`d` level (error, warn, info,
@@ -300,7 +301,8 @@ This client uses:
   `POST /system/restart` (admin)
 - `GET /system/backups`, `GET /system/backups/{name}`,
   `POST /system/backups/{name}/restore`, `POST /system/restore` (admin)
-- `GET /calendars`, `POST /calendars/upload`, `DELETE /calendars/{id}`
+- `GET /calendars`, `POST /calendars/upload`, `POST /calendars/fetch`,
+  `GET /calendars/{id}/events`, `DELETE /calendars/{id}`
 - `GET /auth/roles`, `GET|POST /auth/api-keys`,
   `DELETE /auth/api-keys/{id}`, `POST /auth/api-keys/{id}/rotate`,
   `GET /auth/sessions`, `DELETE /auth/sessions/{id}`
