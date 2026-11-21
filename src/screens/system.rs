@@ -14,7 +14,26 @@ impl Screen for SystemScreen {
     }
 
     fn bindings(&self, app: &App) -> Vec<Binding> {
+        if app.manage.status.vocab.is_some() {
+            return vec![
+                Binding::new(
+                    &[KeyCode::Char('r')],
+                    "r",
+                    "check again",
+                    App::open_vocabulary_check,
+                ),
+                Binding::new(&[KeyCode::Esc], "Esc", "close", App::close_vocabulary_check),
+            ];
+        }
         let mut v = Vec::new();
+        if app.can("devices:read") && app.can("automations:read") {
+            v.push(Binding::new(
+                &[KeyCode::Char('c')],
+                "c",
+                "check what devices take",
+                App::open_vocabulary_check,
+            ));
+        }
         if app.can_set_log_level() {
             v.push(Binding::new(
                 &[KeyCode::Right],

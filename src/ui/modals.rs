@@ -34,6 +34,7 @@ pub fn draw_overlays(frame: &mut Frame<'_>, app: &App) {
         draw_variables(frame, app);
     }
     super::history::draw_history_view(frame, app);
+    draw_vocabulary(frame, app);
     draw_filter_bar(frame, app);
     super::settings::draw_modal(frame, app);
     super::home::draw_picker(frame, app);
@@ -395,6 +396,67 @@ pub(crate) fn variable_text(v: &serde_json::Value) -> String {
         serde_json::Value::String(s) => s.clone(),
         other => other.to_string(),
     }
+}
+
+fn draw_vocabulary(frame: &mut Frame<'_>, app: &App) {
+    let Some(vocab) = &app.manage.status.vocab else {
+        return;
+    };
+    let popup = centered_rect(80, 70, frame.area());
+    frame.render_widget(Clear, popup);
+    let outer = Block::default()
+        .borders(Borders::ALL)
+        .title(" What devices won't take ")
+        .border_style(Style::default().fg(Color::Cyan));
+    let inner = outer.inner(popup);
+    frame.render_widget(outer, popup);
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(3), Constraint::Length(1)])
+        .split(inner);
+    let lines: Vec<Line> = match vocab {
+        Load::Ready(items) if items.is_empty() => vec![Line::from(Span::styled(
+            " Nothing to fix: every automation, scene and device uses names and units devices take.",
+            Style::default().fg(Color::Green),
+        ))],
+        Load::Ready(items) => items
+            .iter()
+            .flat_map(|f| {
+                let color = match f.severity.as_str() {
+                    "broken" => Color::Red,
+                    "unit" | "rename" => Color::Yellow,
+                    _ => Color::Gray,
+                };
+                let device = app
+                    .device_by_id(&f.device_id)
+                    .map(|d| d.display_name().to_string())
+                    .unwrap_or_else(|| f.device_id.clone());
+                [
+                    Line::from(vec![
+                        Span::styled(
+                            format!(" {:<11}", f.severity),
+                            Style::default().fg(color).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(f.place_text(), Style::default().fg(Color::White)),
+                        Span::styled(format!(" · {device}"), Style::default().fg(Color::DarkGray)),
+                    ]),
+                    Line::from(format!("             {}", f.message)),
+                    Line::from(""),
+                ]
+            })
+            .collect(),
+        Load::Failed(e) => vec![Line::from(format!(" Couldn't check: {e}"))],
+        _ => vec![Line::from(Span::styled(
+            " checking...",
+            Style::default().fg(Color::DarkGray),
+        ))],
+    };
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), layout[0]);
+    frame.render_widget(
+        Paragraph::new(" r check again  |  Esc close  |  a report: it changes nothing")
+            .style(Style::default().fg(Color::DarkGray)),
+        layout[1],
+    );
 }
 
 fn draw_variables(frame: &mut Frame<'_>, app: &App) {

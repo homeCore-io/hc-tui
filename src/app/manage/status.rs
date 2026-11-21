@@ -7,6 +7,36 @@ use crate::model::settings::{
     step_log_level,
 };
 
+/// One finding of `GET /system/vocabulary-check`.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct VocabFinding {
+    #[serde(default)]
+    pub severity: String,
+    #[serde(default)]
+    pub place: serde_json::Value,
+    #[serde(default)]
+    pub device_id: String,
+    #[serde(default)]
+    pub message: String,
+}
+
+impl VocabFinding {
+    /// Where it is, in words: an automation or scene by name, or the device.
+    pub fn place_text(&self) -> String {
+        let kind = self
+            .place
+            .get("kind")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        let name = self.place.get("name").and_then(serde_json::Value::as_str);
+        match (kind, name) {
+            ("automation", Some(n)) => format!("automation {n}"),
+            ("scene", Some(n)) => format!("scene {n}"),
+            _ => "the device itself".to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct StatusPanel {
     pub loading: bool,
@@ -20,6 +50,8 @@ pub struct StatusPanel {
     pub house_temp: Option<HouseTemperature>,
     /// Set while a restart runs.
     pub restarting: Option<String>,
+    /// The vocabulary check overlay (`c`), when open.
+    pub vocab: Option<Load<Vec<VocabFinding>>>,
 }
 
 /// Plugins as the System screen counts them: running, meant to run but
@@ -99,6 +131,34 @@ impl App {
     }
 
     /// Whether this user may change core's log level.
+    /// `c` on System: what automations, scenes and devices say that devices
+    /// won't take. A report; it changes nothing.
+    pub fn open_vocabulary_check(&mut self) {
+        self.manage.status.vocab = Some(Load::Loading);
+        let c = self.client.clone();
+        self.spawn(
+            async move {
+                let v: serde_json::Value = c.get_json("/system/vocabulary-check").await?;
+                Ok(serde_json::from_value::<Vec<VocabFinding>>(
+                    v.get("findings").cloned().unwrap_or_default(),
+                )
+                .unwrap_or_default())
+            },
+            |app, res: anyhow::Result<Vec<VocabFinding>>| {
+                if app.manage.status.vocab.is_some() {
+                    app.manage.status.vocab = Some(match res {
+                        Ok(v) => Load::Ready(v),
+                        Err(e) => Load::Failed(e.to_string()),
+                    });
+                }
+            },
+        );
+    }
+
+    pub fn close_vocabulary_check(&mut self) {
+        self.manage.status.vocab = None;
+    }
+
     pub fn can_set_log_level(&self) -> bool {
         self.can("plugins:write") || self.is_admin()
     }
