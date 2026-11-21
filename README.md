@@ -195,6 +195,7 @@ Screens:
   add, `Esc` done), `x` take off Home, `J`/`K` move, `h` rename the
   heading (`Tab` in the box adds a new heading instead).
 - Rooms: `Space` room on/off, `Enter` its devices (`Esc` comes back),
+  `s` what Room on would bring back, `M` merge into another room (asks first),
   `n` new room, `e` rename, `x` delete.
 - Devices: `←/→` tab, `Tab` into the controls (`Shift+Tab` back,
   `←/→` change, `Space` switch or press, `Esc` out), `Space`/`t` on/off,

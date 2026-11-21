@@ -453,6 +453,27 @@ impl HomeCoreClient {
         self.send_empty(Method::DELETE, &path, None).await
     }
 
+    /// `GET /areas/{id}/saved-lights`: what Room off saved, or `None` (204)
+    /// when it has saved nothing for the room.
+    pub async fn room_saved_lights(&self, id: &str) -> Result<Option<Value>> {
+        let path = format!("/areas/{}/saved-lights", seg(id));
+        let resp = self.request(Method::GET, &path, None).await?;
+        if resp.status() == StatusCode::NO_CONTENT {
+            return Ok(None);
+        }
+        parse_json(&path, resp).await.map(Some)
+    }
+
+    /// `POST /areas/{id}/merge {into}`: its devices move into `into`, which
+    /// also answers to its names from now on; the room is deleted.
+    pub async fn merge_area(&self, id: &str, into: &str) -> Result<()> {
+        let path = format!("/areas/{}/merge", seg(id));
+        let resp = self
+            .request(Method::POST, &path, Some(&json!({ "into": into })))
+            .await?;
+        check_status(resp).await.map(|_| ())
+    }
+
     /// `POST /areas/{id}/on` or `/off`: every light in the room.
     pub async fn room_switch(&self, id: &str, on: bool) -> Result<()> {
         let verb = if on { "on" } else { "off" };

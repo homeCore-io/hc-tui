@@ -1320,6 +1320,12 @@ impl App {
         match action {
             C::DeleteDevice { id } => self.delete_device(id),
             C::DeleteArea { id, name } => self.delete_area(id, name),
+            C::MergeArea {
+                id,
+                name,
+                into,
+                into_name,
+            } => self.merge_area(id, name, into, into_name),
             C::DeleteRule { id, name } => self.delete_rule(id, name),
             C::DeleteRuleGroup { id, name } => self.delete_rule_group(id, name),
             C::DeleteUser { id, username } => self.delete_user(id, username),

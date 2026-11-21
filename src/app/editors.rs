@@ -44,6 +44,12 @@ pub enum ConfirmAction {
         id: String,
         name: String,
     },
+    MergeArea {
+        id: String,
+        name: String,
+        into: String,
+        into_name: String,
+    },
     DeleteRule {
         id: String,
         name: String,
