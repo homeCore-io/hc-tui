@@ -611,6 +611,17 @@ pub fn draw_system(frame: &mut Frame<'_>, app: &App, area: Rect) {
         None => app.temp_unit.symbol().to_string(),
     };
     lines.push(row("Temperature", vec![plain(unit)]));
+    if let Some(b) = &st.battery {
+        let pct = |k: &str| b.get(k).and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+        lines.push(row(
+            "Low battery",
+            vec![plain(format!(
+                "under {}%, cleared {}% above it (set in homecore.toml)",
+                pct("threshold_pct"),
+                pct("recover_band_pct")
+            ))],
+        ));
+    }
 
     // Core's log level.
     let level = match &st.log_level {

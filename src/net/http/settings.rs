@@ -209,6 +209,32 @@ impl HomeCoreClient {
         self.get_json("/system/temperature-unit").await
     }
 
+    /// `PUT /system/temperature-unit` (admin): `"°C"` or `"°F"`, saved in
+    /// homecore.toml.
+    pub async fn set_temperature_unit(&self, unit: &str) -> Result<HouseTemperature> {
+        self.send_json(
+            Method::PUT,
+            "/system/temperature-unit",
+            Some(json!({ "temperature_unit": unit })),
+        )
+        .await
+    }
+
+    /// `GET /system/battery_settings`: when a battery counts as low.
+    pub async fn battery_settings(&self) -> Result<Value> {
+        self.get_json("/system/battery_settings").await
+    }
+
+    /// `POST /notify/test` (admin) to every channel (`all`).
+    pub async fn notify_test(&self) -> Result<Value> {
+        self.send_json(
+            Method::POST,
+            "/notify/test",
+            Some(json!({ "channel": "all", "message": "A test from hc-tui" })),
+        )
+        .await
+    }
+
     /// `POST /system/restart`, then wait until core answers with a new
     /// `started_at`: the old process answers for a moment after agreeing.
     /// Returns the seconds it took.

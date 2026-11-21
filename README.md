@@ -266,7 +266,9 @@ Screens:
 - Audit: `Enter` detail, `]` next page, `[` previous page, `f` shows
   everything, sign-ins, changes, refused or failed (homeCore filters the
   whole log, not just the page).
-- System: `c` checks automations, scenes and devices against what devices
+- System: `u` switches the household between °C and °F, `N` sends a test
+  notification to every channel (both admin); it also says when a battery
+  counts as low. `c` checks automations, scenes and devices against what devices
   take (a report; it changes nothing); `←/→` core's log level, until it restarts (`plugins:write`);
   `R` restart core (admin, asks first).
 - `/` searches People, API keys, Data & backups, Logs, Events and Audit.

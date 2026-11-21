@@ -49,6 +49,23 @@ impl Screen for SystemScreen {
             );
         }
         if app.is_admin() {
+            v.extend([
+                Binding::new(
+                    &[KeyCode::Char('u')],
+                    "u",
+                    "°C or °F for the household",
+                    App::switch_temperature_unit,
+                ),
+                Binding::new(
+                    &[KeyCode::Char('N')],
+                    "N",
+                    "send a test notification",
+                    App::send_test_notification,
+                )
+                .more(),
+            ]);
+        }
+        if app.is_admin() {
             v.push(Binding::new(
                 &[KeyCode::Char('R')],
                 "R",
