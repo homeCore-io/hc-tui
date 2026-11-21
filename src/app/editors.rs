@@ -84,6 +84,11 @@ pub struct Confirm {
     pub message: String,
     pub detail: Option<String>,
     pub action: ConfirmAction,
+    /// A second way to say yes, on its own key, for a question with two
+    /// answers besides no: `(key, what it does, action)`.
+    pub alt: Option<(char, String, ConfirmAction)>,
+    /// What `y` does, when "Yes" alone would not say.
+    pub yes: Option<String>,
 }
 
 impl Confirm {
@@ -97,7 +102,21 @@ impl Confirm {
             message: message.into(),
             detail: None,
             action,
+            alt: None,
+            yes: None,
         }
+    }
+
+    /// Say what `y` does.
+    pub fn with_yes(mut self, label: impl Into<String>) -> Self {
+        self.yes = Some(label.into());
+        self
+    }
+
+    /// Offer `key` as a second yes, doing `action`; `label` says what.
+    pub fn with_alt(mut self, key: char, label: impl Into<String>, action: ConfirmAction) -> Self {
+        self.alt = Some((key, label.into(), action));
+        self
     }
 
     pub fn with_detail(mut self, detail: impl Into<String>) -> Self {

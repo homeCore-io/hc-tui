@@ -253,6 +253,29 @@ impl App {
                     p.status = status.to_string();
                 }
             }
+            "plugin_offline" => {
+                if let Some(pid) = s(&event, "plugin_id")
+                    && let Some(p) = self.plugins.iter_mut().find(|p| p.plugin_id == pid)
+                {
+                    p.status = "offline".to_string();
+                }
+            }
+            // A new plugin, or one back after a restart, may bring devices,
+            // schemas and settings with it: resync. Rare enough to be cheap.
+            "plugin_registered" => self.start_sync(),
+            // New actions or settings from a plugin: the open detail view takes
+            // them from the event, as if it had asked.
+            "plugin_capabilities" => {
+                if let (Some(pid), Some(caps)) = (
+                    s(&event, "plugin_id"),
+                    parse::<crate::model::Capabilities>(event.get("capabilities")),
+                ) && let Some(d) = self.plugins_tab.detail.as_mut()
+                    && d.plugin_id == pid
+                    && !matches!(d.caps, super::Load::Idle)
+                {
+                    d.caps = super::Load::Ready(caps);
+                }
+            }
             "alert_raised" | "alert_acknowledged" => {
                 if let Some(alert) = parse::<crate::model::Alert>(event.get("alert")) {
                     self.upsert_alert(alert);
@@ -395,6 +418,35 @@ mod tests {
         // No `current` at all: nothing changes.
         a.apply_event(json!({"type": "device_state_changed", "device_id": "lamp"}));
         assert_eq!(a.devices[0].attributes.len(), 2);
+    }
+
+    #[test]
+    fn plugin_events_update_the_plugin_without_a_refresh() {
+        let mut a = signed_in(Role::Admin);
+        a.plugins.push(
+            serde_json::from_value(json!({"plugin_id": "plugin.hue", "status": "active"})).unwrap(),
+        );
+        a.apply_event(json!({"type": "plugin_offline", "plugin_id": "plugin.hue"}));
+        assert_eq!(a.plugins[0].status, "offline");
+
+        let mut d = crate::app::plugins::PluginDetail::new("plugin.hue".into());
+        d.caps = crate::app::Load::Ready(Default::default());
+        a.plugins_tab.detail = Some(d);
+        a.apply_event(json!({
+            "type": "plugin_capabilities", "plugin_id": "plugin.hue",
+            "capabilities": {"spec": "1", "plugin_id": "plugin.hue",
+                             "actions": [{"id": "rescan", "label": "Rescan"}]}
+        }));
+        let caps = a.plugins_tab.detail.as_ref().unwrap().caps.ready().unwrap();
+        assert_eq!(caps.actions[0].id, "rescan");
+
+        // Another plugin's manifest leaves the open one alone.
+        a.apply_event(json!({
+            "type": "plugin_capabilities", "plugin_id": "plugin.other",
+            "capabilities": {"spec": "1", "plugin_id": "plugin.other", "actions": []}
+        }));
+        let caps = a.plugins_tab.detail.as_ref().unwrap().caps.ready().unwrap();
+        assert_eq!(caps.actions.len(), 1);
     }
 
     #[test]

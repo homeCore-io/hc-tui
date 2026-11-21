@@ -403,6 +403,10 @@ pub struct Placement {
     pub version: String,
     #[serde(default)]
     pub placed_at: String,
+    /// The interpreter it runs on, as core words it (`"python 3.14.10"`), for a
+    /// plugin that needs one. Sent since core v0.1.119.
+    #[serde(default)]
+    pub interpreter: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -458,6 +462,18 @@ fn ago_words(d: chrono::Duration) -> String {
 }
 
 /// The plugins placed on `runtime_id`.
+/// " on Python 3.14.10" for a placement with an interpreter, else "".
+pub fn interpreter_note(p: &Placement) -> String {
+    match p.interpreter.as_deref().map(str::trim) {
+        Some(i) if !i.is_empty() => {
+            let mut c = i.chars();
+            let first = c.next().map(|f| f.to_uppercase().collect::<String>());
+            format!(" on {}{}", first.unwrap_or_default(), c.as_str())
+        }
+        _ => String::new(),
+    }
+}
+
 pub fn placed_on<'a>(placements: &'a [Placement], runtime_id: &str) -> Vec<&'a Placement> {
     placements
         .iter()
@@ -469,6 +485,20 @@ pub fn placed_on<'a>(placements: &'a [Placement], runtime_id: &str) -> Vec<&'a P
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_placement_says_which_python_it_runs_on() {
+        let p: Placement = serde_json::from_value(json!({
+            "runtime_id": "rt-1", "plugin_id": "plugin.x", "version": "0.1.0",
+            "interpreter": "python 3.14.10"
+        }))
+        .unwrap();
+        assert_eq!(interpreter_note(&p), " on Python 3.14.10");
+        // Older cores send no interpreter at all.
+        let old: Placement =
+            serde_json::from_value(json!({"runtime_id": "rt-1", "plugin_id": "plugin.x"})).unwrap();
+        assert_eq!(interpreter_note(&old), "");
+    }
 
     fn rec(v: Value) -> PluginRecord {
         serde_json::from_value(v).unwrap()

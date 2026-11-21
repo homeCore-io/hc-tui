@@ -50,9 +50,21 @@ pub struct AlertsTab {
 /// Something on Alerts waiting for `y`.
 #[derive(Debug, Clone)]
 pub enum AlertConfirm {
-    Press { id: String, label: String },
-    DeleteRule { id: String, name: String },
-    RemoveIgnore { id: String, what: String },
+    Press {
+        id: String,
+        label: String,
+    },
+    /// `delete_automations`: what becomes of the automations only this
+    /// rule starts — deleted, or kept turned off.
+    DeleteRule {
+        id: String,
+        name: String,
+        delete_automations: bool,
+    },
+    RemoveIgnore {
+        id: String,
+        what: String,
+    },
 }
 
 /// A kind of alert in words.
@@ -449,18 +461,25 @@ impl App {
         );
     }
 
+    /// `x` on a rule: find what it starts first, so the question can say,
+    /// and offer deleting those automations as well as keeping them.
     pub fn ask_delete_alert_rule(&mut self) {
         let Some(r) = self.selected_alert_rule() else {
             return;
         };
         let (id, name) = (r.id.clone(), r.name.clone());
-        self.ask(Confirm::new(
-            "Delete alert rule?",
-            format!(
-                "{name} will be deleted and its alerts clear. Automations it starts stay, turned off."
-            ),
-            ConfirmAction::Alerts(AlertConfirm::DeleteRule { id, name }),
-        ));
+        let c = self.client.clone();
+        let target = id.clone();
+        self.status = format!("Checking what {name} starts...");
+        self.spawn(
+            async move { c.alert_rule_automations(&target).await },
+            move |app, res| {
+                app.status.clear();
+                // Unable to ask: say nothing about them, keep them if any.
+                let starts = res.unwrap_or_default();
+                app.ask(delete_alert_rule_confirm(id, name, &starts));
+            },
+        );
     }
 
     // ── Ignored ──────────────────────────────────────────────────────────
@@ -493,11 +512,15 @@ impl App {
         let c = self.client.clone();
         match action {
             AlertConfirm::Press { id, label } => self.press_alert(id, label),
-            AlertConfirm::DeleteRule { id, name } => {
+            AlertConfirm::DeleteRule {
+                id,
+                name,
+                delete_automations,
+            } => {
                 let target = id.clone();
                 self.spawn_ok(
                     "delete alert rule",
-                    async move { c.delete_alert_rule(&target).await },
+                    async move { c.delete_alert_rule(&target, delete_automations).await },
                     move |app, ()| {
                         if let Load::Ready(v) = &mut app.alerts_tab.rules {
                             v.retain(|r| r.id != id);
@@ -664,5 +687,96 @@ mod tests {
         a.on_key(key(crossterm::event::KeyCode::Left));
         a.on_key(key(crossterm::event::KeyCode::Left));
         assert_eq!(a.alerts_tab.sub, AlertsSub::Ignored);
+    }
+}
+
+/// The question `x` on an alert rule asks, given what the rule starts.
+///
+/// Automations with another trigger run on whatever is chosen, so only the
+/// ones this rule alone starts are named: `y` keeps them, turned off, and
+/// `d` deletes them too. A rule that starts none is a plain yes or no.
+pub(crate) fn delete_alert_rule_confirm(
+    id: String,
+    name: String,
+    starts: &[crate::net::alerts_api::AlertRuleStarts],
+) -> Confirm {
+    let only: Vec<&str> = starts
+        .iter()
+        .filter(|s| !s.keeps_running)
+        .map(|s| s.name.as_str())
+        .collect();
+    let action = |delete_automations| {
+        ConfirmAction::Alerts(AlertConfirm::DeleteRule {
+            id: id.clone(),
+            name: name.clone(),
+            delete_automations,
+        })
+    };
+    if only.is_empty() {
+        return Confirm::new(
+            "Delete alert rule?",
+            format!("{name} will be deleted and its alerts clear."),
+            action(false),
+        );
+    }
+    let what = if only.len() == 1 {
+        "1 automation runs only on it".to_string()
+    } else {
+        format!("{} automations run only on it", only.len())
+    };
+    Confirm::new(
+        "Delete alert rule?",
+        format!("{name} will be deleted and its alerts clear. {what}."),
+        action(false),
+    )
+    .with_detail(only.join(", "))
+    .with_yes("Delete, keep them turned off")
+    .with_alt('d', "Delete them too", action(true))
+}
+
+#[cfg(test)]
+mod delete_rule_tests {
+    use super::*;
+    use crate::net::alerts_api::AlertRuleStarts;
+
+    fn starts(name: &str, keeps_running: bool) -> AlertRuleStarts {
+        AlertRuleStarts {
+            name: name.into(),
+            keeps_running,
+        }
+    }
+
+    fn deletes(a: &ConfirmAction) -> Option<bool> {
+        match a {
+            ConfirmAction::Alerts(AlertConfirm::DeleteRule {
+                delete_automations, ..
+            }) => Some(*delete_automations),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn a_rule_that_starts_nothing_is_a_plain_question() {
+        let c = delete_alert_rule_confirm("r".into(), "Leak".into(), &[starts("Lights", true)]);
+        assert!(
+            c.alt.is_none(),
+            "an automation with another trigger runs on"
+        );
+        assert_eq!(deletes(&c.action), Some(false));
+    }
+
+    #[test]
+    fn automations_it_alone_starts_are_named_and_either_kept_or_deleted() {
+        let c = delete_alert_rule_confirm(
+            "r".into(),
+            "Leak".into(),
+            &[starts("Shut valve", false), starts("Lights", true)],
+        );
+        assert!(c.message.contains("1 automation runs only on it"));
+        assert_eq!(c.detail.as_deref(), Some("Shut valve"));
+        assert_eq!(deletes(&c.action), Some(false), "y keeps them, turned off");
+        let (key, _, alt) = c.alt.as_ref().unwrap();
+        assert_eq!(*key, 'd');
+        assert_eq!(deletes(alt), Some(true), "d deletes them too");
     }
 }

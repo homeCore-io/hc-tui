@@ -647,6 +647,57 @@ impl HomeCoreClient {
         self.get_json(&path).await
     }
 
+    /// `POST /plugins/{id}/upload/{action}`: run an action with a file. The
+    /// body is the file; `name` and every other param go in the query (as
+    /// strings, the way core passes them on). The reply is `command`'s.
+    pub async fn post_plugin_upload(
+        &self,
+        plugin_id: &str,
+        action: &str,
+        name: &str,
+        file: Vec<u8>,
+        params: &serde_json::Map<String, Value>,
+    ) -> Result<Value> {
+        let mut path = format!(
+            "/plugins/{}/upload/{}?name={}",
+            seg(plugin_id),
+            seg(action),
+            seg(name)
+        );
+        for (k, v) in params {
+            let v = match v {
+                Value::String(s) => s.clone(),
+                Value::Null => continue,
+                other => other.to_string(),
+            };
+            path.push_str(&format!("&{}={}", seg(k), seg(&v)));
+        }
+        let build = || -> Result<RequestBuilder> {
+            let rb = self
+                .http
+                .request(Method::POST, self.endpoint(&path))
+                .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+                // Up to 32 MiB, which 20 seconds may not carry; as long as a backup.
+                .timeout(BACKUP_TIMEOUT)
+                .body(file.clone());
+            self.authed(rb)
+        };
+        let mut resp = build()?
+            .send()
+            .await
+            .map_err(|e| anyhow!("request failed: upload: {}", e.without_url()))?;
+        if resp.status() == StatusCode::UNAUTHORIZED {
+            self.refresh_session().await?;
+            resp = build()?
+                .send()
+                .await
+                .map_err(|e| anyhow!("request failed: upload: {}", e.without_url()))?;
+        }
+        let resp = check_status(resp).await?;
+        let text = resp.text().await.unwrap_or_default();
+        Ok(serde_json::from_str(&text).unwrap_or(Value::Null))
+    }
+
     /// `POST /plugins/{id}/query`: a read-only action, which core answers
     /// for anyone who can read devices (`command` needs `plugins:write`).
     pub async fn post_plugin_query(

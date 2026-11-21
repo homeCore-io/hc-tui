@@ -77,7 +77,9 @@ It is built with:
   shows where it came from (its alert rule and where that rule tells,
   or the plugin) and what can be done: acknowledge, press its button,
   ignore its device. Alert rules can be turned on or off and deleted;
-  making them is left to the app. Kept live from the event stream,
+  deleting one that alone starts automations names them and asks whether
+  to keep them, turned off, or delete them too. Making rules is left to
+  the app. Kept live from the event stream,
   with the open count on the sidebar.
 - Automations: what starts each one in words (`sunset -15m`,
   `Garage Door open 10m`, `time 17:00`), its last run and group, a mark
@@ -97,12 +99,16 @@ It is built with:
     level; only what changed is written, in place, so comments and keys
     the form does not know stay in the file. Secrets are never shown.
     Actions that take parameters ask for them first; dangerous ones ask
-    before they run. Logs streams the plugin's own log while the tab is
+    before they run. `f` runs one with a file from this computer (such as
+    WLED's firmware install), asking for its path with the other
+    parameters. Read-only actions run for anyone who can read devices.
+    Logs streams the plugin's own log while the tab is
     open.
   - Catalog: plugins in the registry that are not installed, and
     install. When more than one runtime can run one, hc-tui asks which.
   - Runtimes (admins): each plugin runtime, how it is doing, its host
-    version and the plugins placed on it; Reset login makes it a new key,
+    version and the plugins placed on it, with the Python each runs on;
+    Reset login makes it a new key,
     shown once.
   - Matter, when the Matter plugin is installed: commission, reinterview
     and remove nodes.
@@ -220,7 +226,7 @@ Screens:
   restart, `U` update (when there is one), `x` uninstall. In the detail
   `←/→` moves between its tabs; Settings: `Enter` edit, `Space` change a
   choice, `u` undo a change, `Ctrl+S` save, `Esc` discard; Actions:
-  `Enter` run; Logs: `Space` pause, `e`/`w`/`i`/`d` level, `c` clear.
+  `Enter` run, `f` run with a file; Logs: `Space` pause, `e`/`w`/`i`/`d` level, `c` clear.
   Catalog: `i` install. Runtimes: `Enter` detail, `R` reset login.
   Matter: `c` commission, `i` reinterview, `x` remove a node.
 - People: `←/→` tab (People, Roles, API keys, Sessions).
@@ -295,7 +301,9 @@ This client uses:
   `GET /plugins/{id}/config/schema`, `POST /plugins/{id}/command`,
   `GET /plugins/{id}/command/{rid}/stream` (SSE), `POST /plugins/install`,
   `GET /registry/plugins`, `GET /plugin-runtimes`,
-  `GET /plugin-runtimes/placements`, `POST /plugin-runtimes/{id}/reset`;
+  `GET /plugin-runtimes/placements`, `POST /plugin-runtimes/{id}/reset`,
+  `POST /plugins/{id}/query` (read-only actions), `POST /plugins/{id}/upload/{action}`,
+  `GET /alert-rules/{id}/automations`;
   a plugin's log is `GET /logs/stream?plugin_id=` (WebSocket, admin)
 - `GET /plugins/matter/nodes`, `POST /plugins/matter/commission`,
   `POST /plugins/matter/reinterview`, `DELETE /plugins/matter/nodes/{id}`

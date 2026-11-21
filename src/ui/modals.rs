@@ -109,8 +109,12 @@ fn draw_confirm(frame: &mut Frame<'_>, app: &App) {
             layout[1],
         );
     }
+    let mut keys = format!("No (n or Esc)     y  {}", c.yes.as_deref().unwrap_or("Yes"));
+    if let Some((k, label, _)) = &c.alt {
+        keys.push_str(&format!("     {k}  {label}"));
+    }
     frame.render_widget(
-        Paragraph::new("No (n or Esc)     y  Yes")
+        Paragraph::new(keys)
             .style(Style::default().fg(Color::Yellow))
             .alignment(Alignment::Center),
         layout[2],

@@ -1299,6 +1299,17 @@ impl App {
                 self.confirm = None;
                 self.status = "Cancelled".to_string();
             }
+            KeyCode::Char(k)
+                if self
+                    .confirm
+                    .as_ref()
+                    .and_then(|c| c.alt.as_ref())
+                    .is_some_and(|(alt, _, _)| alt.eq_ignore_ascii_case(&k)) =>
+            {
+                if let Some((_, _, action)) = self.confirm.take().and_then(|c| c.alt) {
+                    self.run_confirmed(action);
+                }
+            }
             _ => {}
         }
     }

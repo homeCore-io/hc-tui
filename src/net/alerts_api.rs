@@ -9,6 +9,16 @@ use reqwest::Method;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+/// An automation an alert rule starts (`GET /alert-rules/{id}/automations`).
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct AlertRuleStarts {
+    #[serde(default)]
+    pub name: String,
+    /// It has another trigger, and runs on without this rule's.
+    #[serde(default)]
+    pub keeps_running: bool,
+}
+
 /// An alert rule (core's `AlertRule`): a device in a state, maybe only at
 /// some hours, maybe only once it has lasted. The rest of its fields are
 /// kept as they came, so turning it on or off sends it back whole.
@@ -95,10 +105,23 @@ impl HomeCoreClient {
         self.send_json(Method::PUT, &path, Some(json!(rule))).await
     }
 
-    /// `DELETE /alert-rules/{id}?automations=disable`: automations it
-    /// starts stay, turned off.
-    pub async fn delete_alert_rule(&self, id: &str) -> Result<()> {
-        let path = format!("/alert-rules/{}?automations=disable", seg(id));
+    /// `GET /alert-rules/{id}/automations`: what it starts, and whether
+    /// each runs on without it. What a delete asks about.
+    pub async fn alert_rule_automations(&self, id: &str) -> Result<Vec<AlertRuleStarts>> {
+        let path = format!("/alert-rules/{}/automations", seg(id));
+        self.get_json(&path).await
+    }
+
+    /// `DELETE /alert-rules/{id}?automations=disable|delete`: what becomes
+    /// of the automations it alone starts. Those with another trigger run on
+    /// either way.
+    pub async fn delete_alert_rule(&self, id: &str, delete_automations: bool) -> Result<()> {
+        let then = if delete_automations {
+            "delete"
+        } else {
+            "disable"
+        };
+        let path = format!("/alert-rules/{}?automations={then}", seg(id));
         self.send_empty(Method::DELETE, &path, None).await
     }
 
