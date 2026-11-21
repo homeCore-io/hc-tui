@@ -33,6 +33,12 @@ pub enum PluginConfirm {
         runtime_id: String,
         name: String,
     },
+    UpdatePython {
+        runtime_id: String,
+        kind: String,
+        series: String,
+        to: String,
+    },
     RunAction {
         plugin_id: String,
         action: Box<Action>,
@@ -56,6 +62,8 @@ pub struct PluginManage {
     pub registry: Load<Vec<RegistryPlugin>>,
     pub runtimes: Load<Vec<Runtime>>,
     pub placements: Vec<Placement>,
+    /// Each runtime's interpreters and any update waiting.
+    pub interpreters: Vec<pa::Interpreter>,
     pub catalog_sel: ListSel,
     pub runtime_sel: ListSel,
     /// The runtime whose detail is open.
@@ -129,12 +137,16 @@ impl App {
             async move {
                 let r = c.list_runtimes().await;
                 let p = c.list_placements().await;
-                Ok::<_, anyhow::Error>((r, p))
+                let i = c.list_interpreters().await;
+                Ok::<_, anyhow::Error>((r, p, i))
             },
             |app, res| {
-                let Ok((r, p)) = res else {
+                let Ok((r, p, i)) = res else {
                     return;
                 };
+                if let Ok(i) = i {
+                    app.plugins_tab.manage.interpreters = i;
+                }
                 app.plugins_tab.manage.runtimes = match r {
                     Ok(v) => Load::Ready(v),
                     Err(e) => Load::Failed(e.to_string()),
@@ -328,6 +340,12 @@ impl App {
             PluginConfirm::RemoveRuntime { runtime_id, name } => {
                 self.remove_runtime(runtime_id, name)
             }
+            PluginConfirm::UpdatePython {
+                runtime_id,
+                kind,
+                series,
+                to,
+            } => self.update_python(runtime_id, kind, series, to),
             PluginConfirm::RunAction {
                 plugin_id,
                 action,
@@ -510,6 +528,70 @@ impl App {
     }
 
     /// `R` on a runtime: ask, then make it a new key.
+    /// `U` on a runtime: move its plugins to the newest patch of their Python,
+    /// after naming what restarts.
+    pub fn ask_update_python(&mut self) {
+        if self.needs_admin("updating a runtime's Python") {
+            return;
+        }
+        let Some(r) = self
+            .detail_runtime()
+            .or_else(|| self.selected_runtime())
+            .cloned()
+        else {
+            return;
+        };
+        let Some(i) = pa::interpreters_of(&self.plugins_tab.manage.interpreters, &r.runtime_id)
+            .into_iter()
+            .find(|i| i.update.is_some())
+            .cloned()
+        else {
+            self.status = "No Python update is waiting for this runtime".into();
+            return;
+        };
+        let to = i.update.clone().unwrap_or_default();
+        let name = if r.name.is_empty() {
+            r.runtime_id.clone()
+        } else {
+            r.name.clone()
+        };
+        self.ask(
+            Confirm::new(
+                format!("Update {} to {to}?", i.name()),
+                format!("On {name}, these restart on it: {}.", i.plugins.join(", ")),
+                ConfirmAction::Plugins(PluginConfirm::UpdatePython {
+                    runtime_id: r.runtime_id,
+                    kind: i.kind,
+                    series: i.series,
+                    to,
+                }),
+            )
+            .with_detail("Their versions and settings stay; the runtime builds their new environments first."),
+        );
+    }
+
+    fn update_python(&mut self, runtime_id: String, kind: String, series: String, to: String) {
+        self.status = format!("Updating to Python {to}...");
+        let c = self.client.clone();
+        self.spawn_ok(
+            "update Python",
+            async move { c.update_interpreter(&runtime_id, &kind, &series).await },
+            move |app, v| {
+                let now = v
+                    .get("version")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or(&to)
+                    .to_string();
+                let n = v
+                    .get("plugins")
+                    .and_then(serde_json::Value::as_array)
+                    .map_or(0, Vec::len);
+                app.status = format!("{n} plugin(s) now on Python {now}");
+                app.load_runtimes();
+            },
+        );
+    }
+
     /// `n` on Runtimes: name a new runtime; its key is shown once.
     pub fn open_add_runtime(&mut self) {
         if self.needs_admin("adding a runtime") {

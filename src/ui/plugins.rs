@@ -811,14 +811,18 @@ fn draw_runtimes(frame: &mut Frame<'_>, app: &App, area: Rect) {
         .map(|r| {
             let (status, tone) = pa::runtime_status(r, now);
             let n = pa::placed_on(placements, &r.runtime_id).len();
+            let update = pa::interpreters_of(&app.plugins_tab.manage.interpreters, &r.runtime_id)
+                .iter()
+                .any(|i| i.update.is_some());
             Row::new(vec![
                 Cell::from(format!(
-                    "  {}",
+                    "  {}{}",
                     if r.name.is_empty() {
                         &r.runtime_id
                     } else {
                         &r.name
-                    }
+                    },
+                    if update { "  · update" } else { "" }
                 )),
                 Cell::from(r.kind.clone()).style(dim()),
                 Cell::from(status).style(Style::default().fg(tone_color(tone))),
@@ -913,6 +917,35 @@ fn draw_runtime_detail(frame: &mut Frame<'_>, app: &App, r: &pa::Runtime, area: 
                 .map(|m| format!("up to {m} plugins"))
                 .unwrap_or_else(|| "any number of plugins".into()),
         ),
+        Line::from(""),
+        Line::from(Span::styled("  Python", heading())),
+    ]);
+    let interps = pa::interpreters_of(&app.plugins_tab.manage.interpreters, &r.runtime_id);
+    if interps.is_empty() {
+        lines.push(Line::from(Span::styled("  None in use yet", dim())));
+    }
+    for i in interps {
+        let note = match (&i.update, i.eol) {
+            (Some(u), _) => format!(
+                ": {u} is out. U updates it, restarting {}",
+                i.plugins.join(", ")
+            ),
+            (None, true) => {
+                ": no longer gets fixes; rebuild its plugins for a newer Python".to_string()
+            }
+            (None, false) => ": up to date".to_string(),
+        };
+        let style = if i.update.is_some() || i.eol {
+            Style::default().fg(Color::Yellow)
+        } else {
+            dim()
+        };
+        lines.push(Line::from(vec![
+            Span::raw(format!("  {} ({})", i.name(), i.series)),
+            Span::styled(note, style),
+        ]));
+    }
+    lines.extend([
         Line::from(""),
         Line::from(Span::styled("  Plugins on it", heading())),
     ]);

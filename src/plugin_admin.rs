@@ -462,6 +462,53 @@ fn ago_words(d: chrono::Duration) -> String {
 }
 
 /// The plugins placed on `runtime_id`.
+/// An interpreter series a runtime's plugins run on (`GET
+/// /plugin-runtimes/interpreters`), and the newer patch waiting, if any.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Interpreter {
+    pub runtime_id: String,
+    #[serde(default)]
+    pub kind: String,
+    /// `cp312`: what an update keeps to.
+    #[serde(default)]
+    pub series: String,
+    /// The patches in use now.
+    #[serde(default)]
+    pub versions: Vec<String>,
+    /// The newest patch of the series, when it is newer than one in use.
+    #[serde(default)]
+    pub update: Option<String>,
+    /// The series gets no more fixes upstream.
+    #[serde(default)]
+    pub eol: bool,
+    /// What an update restarts.
+    #[serde(default)]
+    pub plugins: Vec<String>,
+}
+
+impl Interpreter {
+    /// "Python 3.12.15", or the series when no patch is known.
+    pub fn name(&self) -> String {
+        let kind = {
+            let mut c = self.kind.chars();
+            c.next()
+                .map(|f| f.to_uppercase().collect::<String>() + c.as_str())
+                .unwrap_or_default()
+        };
+        match self.versions.as_slice() {
+            [] => format!("{kind} {}", self.series),
+            v => format!("{kind} {}", v.join(", ")),
+        }
+    }
+}
+
+/// A runtime's interpreters, the ones with an update first.
+pub fn interpreters_of<'a>(all: &'a [Interpreter], runtime_id: &str) -> Vec<&'a Interpreter> {
+    let mut v: Vec<&Interpreter> = all.iter().filter(|i| i.runtime_id == runtime_id).collect();
+    v.sort_by_key(|i| i.update.is_none());
+    v
+}
+
 /// " on Python 3.14.10" for a placement with an interpreter, else "".
 pub fn interpreter_note(p: &Placement) -> String {
     match p.interpreter.as_deref().map(str::trim) {
@@ -485,6 +532,22 @@ pub fn placed_on<'a>(placements: &'a [Placement], runtime_id: &str) -> Vec<&'a P
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_runtimes_pythons_come_with_any_update_first() {
+        let all: Vec<Interpreter> = serde_json::from_value(json!([
+            {"runtime_id": "rt-1", "kind": "python", "series": "cp313", "versions": ["3.13.18"],
+             "update": null, "eol": false, "plugins": ["plugin.a"]},
+            {"runtime_id": "rt-1", "kind": "python", "series": "cp312", "versions": ["3.12.15"],
+             "update": "3.12.16", "eol": false, "plugins": ["plugin.mcp"]},
+            {"runtime_id": "rt-2", "kind": "python", "series": "cp314", "versions": ["3.14.10"]}
+        ]))
+        .unwrap();
+        let mine = interpreters_of(&all, "rt-1");
+        assert_eq!(mine.len(), 2);
+        assert_eq!(mine[0].update.as_deref(), Some("3.12.16"));
+        assert_eq!(mine[0].name(), "Python 3.12.15");
+    }
 
     #[test]
     fn a_placement_says_which_python_it_runs_on() {

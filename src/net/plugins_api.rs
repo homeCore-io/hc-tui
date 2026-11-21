@@ -198,6 +198,39 @@ impl HomeCoreClient {
 
     /// `POST /plugin-runtimes/{id}/reset`: a new key, the old one stops
     /// working at once.
+    /// `GET /plugin-runtimes/interpreters`: each runtime's interpreters and
+    /// any update waiting. Empty when homeCore has no registry to ask.
+    pub async fn list_interpreters(&self) -> Result<Vec<crate::plugin_admin::Interpreter>> {
+        let resp = self
+            .request(Method::GET, "/plugin-runtimes/interpreters", None)
+            .await?;
+        if resp.status() == reqwest::StatusCode::SERVICE_UNAVAILABLE {
+            return Ok(Vec::new());
+        }
+        let v: Value = super::http::parse_json("/plugin-runtimes/interpreters", resp).await?;
+        Ok(
+            serde_json::from_value(v.get("interpreters").cloned().unwrap_or_default())
+                .unwrap_or_default(),
+        )
+    }
+
+    /// `POST /plugin-runtimes/{id}/interpreters/update`: move one series to its
+    /// newest patch, restarting the plugins on it.
+    pub async fn update_interpreter(
+        &self,
+        runtime_id: &str,
+        kind: &str,
+        series: &str,
+    ) -> Result<Value> {
+        let path = format!("/plugin-runtimes/{}/interpreters/update", seg(runtime_id));
+        self.ok_answer(
+            Method::POST,
+            &path,
+            Some(serde_json::json!({ "kind": kind, "series": series })),
+        )
+        .await
+    }
+
     /// `POST /plugin-runtimes`: a new runtime and its key, shown once.
     pub async fn add_runtime(&self, name: &str, homecore_url: &str) -> Result<IssuedKey> {
         let body =
