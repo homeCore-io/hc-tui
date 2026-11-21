@@ -28,6 +28,12 @@ impl Screen for AuditScreen {
             Binding::new(&[KeyCode::Char('[')], "[", "previous page", |a| {
                 a.on_key_audit(press(KeyCode::Char('[')))
             }),
+            Binding::new(
+                &[KeyCode::Char('f')],
+                "f",
+                "show: everything, sign-ins, changes, refused, failed",
+                App::step_audit_filter,
+            ),
         ]
     }
 

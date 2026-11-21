@@ -575,9 +575,19 @@ impl HomeCoreClient {
         self.get_json(&format!("/events?limit={limit}")).await
     }
 
-    pub async fn list_audit(&self, limit: u32, offset: u32) -> Result<Vec<AuditEntry>> {
-        self.get_json(&format!("/audit?limit={limit}&offset={offset}"))
-            .await
+    /// `GET /audit`, with `filter` as extra query pairs (`event_type`,
+    /// `result`), filtered by homeCore over the whole log.
+    pub async fn list_audit(
+        &self,
+        limit: u32,
+        offset: u32,
+        filter: &[(&str, &str)],
+    ) -> Result<Vec<AuditEntry>> {
+        let mut path = format!("/audit?limit={limit}&offset={offset}");
+        for (k, v) in filter {
+            path.push_str(&format!("&{k}={}", urlencoding::encode(v)));
+        }
+        self.get_json(&path).await
     }
 
     /// Raw zip bytes from `POST /system/backup`.

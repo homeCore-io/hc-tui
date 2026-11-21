@@ -4,9 +4,52 @@ use crate::app::{App, ListSel};
 use crate::model::AuditEntry;
 use crossterm::event::{KeyCode, KeyEvent};
 
+/// What the Audit list shows, chosen with `f`; homeCore does the filtering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AuditFilter {
+    #[default]
+    All,
+    SignIns,
+    Changes,
+    Refused,
+    Failed,
+}
+
+impl AuditFilter {
+    pub const ALL: [AuditFilter; 5] = [
+        Self::All,
+        Self::SignIns,
+        Self::Changes,
+        Self::Refused,
+        Self::Failed,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::All => "everything",
+            Self::SignIns => "sign-ins",
+            Self::Changes => "changes",
+            Self::Refused => "refused",
+            Self::Failed => "failed",
+        }
+    }
+
+    /// The query pairs that ask homeCore for it.
+    pub fn query(self) -> &'static [(&'static str, &'static str)] {
+        match self {
+            Self::All => &[],
+            Self::SignIns => &[("event_type", "auth.*")],
+            Self::Changes => &[("event_type", "!auth.*")],
+            Self::Refused => &[("result", "denied")],
+            Self::Failed => &[("result", "error")],
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct AuditPanel {
     pub entries: Vec<AuditEntry>,
+    pub filter: AuditFilter,
     pub loading: bool,
     pub error: Option<String>,
     pub offset: u32,
@@ -26,6 +69,7 @@ impl Default for AuditPanel {
             limit: 100,
             sel: ListSel::default(),
             expanded: None,
+            filter: AuditFilter::All,
         }
     }
 }
@@ -65,15 +109,27 @@ impl App {
         self.manage.audit.entries.iter().find(|e| e.key() == key)
     }
 
+    /// `f`: the next filter, from the first page.
+    pub fn step_audit_filter(&mut self) {
+        let all = AuditFilter::ALL;
+        let i = all
+            .iter()
+            .position(|f| *f == self.manage.audit.filter)
+            .unwrap_or(0);
+        self.manage.audit.filter = all[(i + 1) % all.len()];
+        self.manage.audit.offset = 0;
+        self.refresh_audit();
+    }
+
     pub(crate) fn refresh_audit(&mut self) {
         let a = &mut self.manage.audit;
         a.loading = true;
         a.error = None;
         a.expanded = None;
-        let (limit, offset) = (a.limit, a.offset);
+        let (limit, offset, filter) = (a.limit, a.offset, a.filter);
         let c = self.client.clone();
         self.spawn(
-            async move { c.list_audit(limit, offset).await },
+            async move { c.list_audit(limit, offset, filter.query()).await },
             move |app, res| {
                 let a = &mut app.manage.audit;
                 a.loading = false;
@@ -82,9 +138,10 @@ impl App {
                         a.entries = rows;
                         a.sel.reset();
                         app.status = format!(
-                            "Audit page {} ({} entries)",
+                            "Audit page {} ({} entries, {})",
                             offset / limit.max(1) + 1,
-                            app.manage.audit.entries.len()
+                            app.manage.audit.entries.len(),
+                            filter.label()
                         );
                     }
                     Err(e) => {

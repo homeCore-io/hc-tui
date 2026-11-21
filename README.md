@@ -263,7 +263,9 @@ Screens:
 - Logs: `Space`/`p` pause, `e`/`w`/`i`/`d` level (error, warn, info,
   debug), `c` clear. `/` searches the lines kept so far.
 - Events: `f` event type.
-- Audit: `Enter` detail, `]` next page, `[` previous page.
+- Audit: `Enter` detail, `]` next page, `[` previous page, `f` shows
+  everything, sign-ins, changes, refused or failed (homeCore filters the
+  whole log, not just the page).
 - System: `c` checks automations, scenes and devices against what devices
   take (a report; it changes nothing); `←/→` core's log level, until it restarts (`plugins:write`);
   `R` restart core (admin, asks first).
