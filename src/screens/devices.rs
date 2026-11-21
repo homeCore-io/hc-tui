@@ -5,7 +5,7 @@
 //! ←/→ change the one with focus; Esc leaves them. With no control in
 //! focus, ←/→ change the tab.
 
-use super::{Binding, DELETE, ENTER, PAGE_DOWN, PAGE_UP, SPACE, Screen, ScreenId, moves};
+use super::{Binding, DELETE, ENTER, ESC, PAGE_DOWN, PAGE_UP, SPACE, Screen, ScreenId, moves};
 use crate::app::home::{HomeItem, ItemKind, is_helper, is_mode_device};
 use crate::app::{App, DeviceSubPanel};
 use crossterm::event::KeyCode;
@@ -31,6 +31,22 @@ impl Screen for DevicesScreen {
     }
 
     fn bindings(&self, app: &App) -> Vec<Binding> {
+        if app.devices_tab.history_view.is_some() {
+            let mut v = moves(|a| a.move_history_attr(-1), |a| a.move_history_attr(1)).to_vec();
+            v.extend([
+                Binding::new(LEFT, "←", "shorter", |a| a.step_history_range(-1)),
+                Binding::new(RIGHT, "→", "longer", |a| a.step_history_range(1)),
+                Binding::new(
+                    &[KeyCode::Char('r')],
+                    "r",
+                    "refresh",
+                    App::load_history_view,
+                )
+                .more(),
+                Binding::new(ESC, "Esc", "close", App::close_history_view),
+            ]);
+            return v;
+        }
         let mut v = moves(|a| a.move_device_cursor(-1), |a| a.move_device_cursor(1)).to_vec();
         v.extend([
             Binding::new(PAGE_DOWN, "PgDn", "page down", |a| a.move_device_cursor(10)).more(),
@@ -193,6 +209,14 @@ impl Screen for DevicesScreen {
             }
         } else if write {
             v.push(Binding::new(DELETE, "x", "remove", App::ask_delete_device).more());
+        }
+        if sub.is_list() && app.selected_device().is_some() {
+            v.push(Binding::new(
+                &[KeyCode::Char('h')],
+                "h",
+                "history",
+                App::open_history_view,
+            ));
         }
         v
     }

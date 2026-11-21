@@ -33,6 +33,7 @@ pub fn draw_overlays(frame: &mut Frame<'_>, app: &App) {
     if app.rules_tab.variables.is_some() {
         draw_variables(frame, app);
     }
+    super::history::draw_history_view(frame, app);
     draw_filter_bar(frame, app);
     super::settings::draw_modal(frame, app);
     super::home::draw_picker(frame, app);

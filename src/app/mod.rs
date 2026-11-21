@@ -14,6 +14,7 @@ pub mod editors;
 pub mod events;
 pub mod helpers;
 pub mod helpers_tab;
+pub mod history_view;
 pub mod home;
 pub mod manage;
 pub mod media;

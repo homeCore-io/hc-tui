@@ -139,6 +139,8 @@ pub struct DevicesTab {
     pub media_sel: ListSel,
     pub editor: Option<DeviceEditor>,
     pub controls: super::controls::ControlsState,
+    /// The history explorer (`h`), when open.
+    pub history_view: Option<super::history_view::HistoryView>,
 }
 
 // ── Attribute readers ───────────────────────────────────────────────────────
