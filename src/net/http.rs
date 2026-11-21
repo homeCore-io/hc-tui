@@ -364,6 +364,17 @@ impl HomeCoreClient {
 
     /// `POST /auth/change-password`. Core answers 204 and revokes every
     /// session, including this one.
+    /// `PUT /auth/pin`: your own PIN for displays, with your password.
+    /// 409 when someone else has it.
+    pub async fn set_pin(&self, pin: &str, password: &str) -> Result<()> {
+        self.send_empty(
+            Method::PUT,
+            "/auth/pin",
+            Some(serde_json::json!({ "pin": pin, "password": password })),
+        )
+        .await
+    }
+
     pub async fn change_password(&self, current_password: &str, new_password: &str) -> Result<()> {
         // A 401 here means the current password was wrong, not that the
         // session expired, so this request skips the refresh-and-retry.

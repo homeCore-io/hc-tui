@@ -58,6 +58,15 @@ impl Screen for PeopleScreen {
                     .selected_user()
                     .zip(app.current_user.as_ref())
                     .is_none_or(|(sel, me)| sel.id == me.id);
+                v.push(
+                    Binding::new(
+                        &[KeyCode::Char('P')],
+                        "P",
+                        "set your PIN for displays",
+                        App::open_set_pin,
+                    )
+                    .more(),
+                );
                 v.push(Binding::new(
                     &[KeyCode::Char('p')],
                     "p",

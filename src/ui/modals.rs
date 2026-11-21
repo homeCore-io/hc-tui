@@ -204,6 +204,7 @@ fn draw_user_editor(frame: &mut Frame<'_>, app: &App) {
         UserEditMode::EditRole => "Change Role",
         UserEditMode::ChangePassword => "Change Password",
         UserEditMode::SetPassword => "Set Their Password",
+        UserEditMode::SetPin => "Your PIN for displays",
     };
     let inner = modal(frame, 64, 60, title);
     let f = |x: UserEditField| ed.field == x;
@@ -254,6 +255,27 @@ fn draw_user_editor(frame: &mut Frame<'_>, app: &App) {
                 "Tab field | Enter save (signs them out everywhere) | Esc cancel",
                 r[3],
             );
+        }
+        UserEditMode::SetPin => {
+            let r = rows(inner, 4);
+            frame.render_widget(
+                Paragraph::new("At a display, your PIN unlocks the full app as you for five minutes. 4 to 8 digits, and not anyone else's.")
+                    .wrap(ratatui::widgets::Wrap { trim: true }),
+                r[0],
+            );
+            let cur = mask(&ed.current_password, "*");
+            frame.render_widget(
+                input(&cur, "Your password", f(UserEditField::CurrentPassword)),
+                r[1],
+            );
+            let pin = mask(&ed.password, "*");
+            frame.render_widget(input(&pin, "PIN", f(UserEditField::Password)), r[2]);
+            let again = mask(&ed.confirm_password, "*");
+            frame.render_widget(
+                input(&again, "PIN again", f(UserEditField::ConfirmPassword)),
+                r[3],
+            );
+            help(frame, "Tab/↑↓ field | Enter save | Esc cancel", r[4]);
         }
         UserEditMode::ChangePassword => {
             let r = rows(inner, 4);

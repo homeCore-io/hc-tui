@@ -647,7 +647,11 @@ mod tests {
         a.people_step_tab(1);
         assert_eq!(a.manage.people.tab, PeopleTab::Roles);
         a.people_step_tab(-2);
-        assert_eq!(a.manage.people.tab, PeopleTab::Displays, "wraps to the last");
+        assert_eq!(
+            a.manage.people.tab,
+            PeopleTab::Displays,
+            "wraps to the last"
+        );
     }
 
     #[test]

@@ -250,6 +250,8 @@ pub enum UserEditMode {
     ChangePassword,
     /// An admin gives someone else a new password.
     SetPassword,
+    /// Your own PIN for displays: your password, then the PIN twice.
+    SetPin,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -304,6 +306,7 @@ impl UserEditor {
             UserEditMode::EditRole => &[F::Role],
             UserEditMode::ChangePassword => &[F::CurrentPassword, F::Password, F::ConfirmPassword],
             UserEditMode::SetPassword => &[F::Password, F::ConfirmPassword],
+            UserEditMode::SetPin => &[F::CurrentPassword, F::Password, F::ConfirmPassword],
         }
     }
 
