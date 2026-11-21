@@ -17,14 +17,17 @@ pub enum AlertsSub {
     Open,
     Acknowledged,
     Rules,
+    /// The kinds of alert plugins raise, each on or off.
+    Kinds,
     Ignored,
 }
 
 impl AlertsSub {
-    pub const ALL: [AlertsSub; 4] = [
+    pub const ALL: [AlertsSub; 5] = [
         AlertsSub::Open,
         AlertsSub::Acknowledged,
         AlertsSub::Rules,
+        AlertsSub::Kinds,
         AlertsSub::Ignored,
     ];
 
@@ -33,6 +36,7 @@ impl AlertsSub {
             Self::Open => "Open",
             Self::Acknowledged => "Acknowledged",
             Self::Rules => "Rules",
+            Self::Kinds => "Plugin kinds",
             Self::Ignored => "Ignored",
         }
     }
@@ -45,6 +49,8 @@ pub struct AlertsTab {
     pub rules_sel: ListSel,
     pub ignores: Load<Vec<AlertIgnore>>,
     pub ignores_sel: ListSel,
+    pub kinds: Load<Vec<crate::net::alerts_api::AlertKind>>,
+    pub kinds_sel: ListSel,
 }
 
 /// Something on Alerts waiting for `y`.
@@ -289,7 +295,89 @@ impl App {
                 let ids = self.alert_ignore_ids();
                 self.alerts_tab.ignores_sel.move_by(delta, &ids);
             }
+            AlertsSub::Kinds => {
+                let ids = self.alert_kind_ids();
+                self.alerts_tab.kinds_sel.move_by(delta, &ids);
+            }
         }
+    }
+
+    fn alert_kind_ids(&self) -> Vec<String> {
+        self.alerts_tab
+            .kinds
+            .ready()
+            .map(|v| v.iter().map(|k| k.key()).collect())
+            .unwrap_or_default()
+    }
+
+    pub fn selected_alert_kind(&self) -> Option<&crate::net::alerts_api::AlertKind> {
+        let id = self.alerts_tab.kinds_sel.id()?;
+        self.alerts_tab
+            .kinds
+            .ready()?
+            .iter()
+            .find(|k| k.key() == id)
+    }
+
+    pub fn load_alert_kinds(&mut self) {
+        if self.alerts_tab.kinds.ready().is_none() {
+            self.alerts_tab.kinds = Load::Loading;
+        }
+        let c = self.client.clone();
+        self.spawn(async move { c.list_alert_kinds().await }, |app, res| {
+            app.alerts_tab.kinds = match res {
+                Ok(mut v) => {
+                    v.sort_by(|a, b| (&a.plugin_id, &a.label).cmp(&(&b.plugin_id, &b.label)));
+                    Load::Ready(v)
+                }
+                Err(e) => Load::Failed(e.to_string()),
+            };
+            let ids = app.alert_kind_ids();
+            app.alerts_tab.kinds_sel.move_by(0, &ids);
+        });
+    }
+
+    /// Space on a kind: turn it off, or back on. Where it notifies is kept.
+    pub fn toggle_alert_kind(&mut self) {
+        let Some(k) = self.selected_alert_kind().cloned() else {
+            return;
+        };
+        self.save_alert_kind(k.clone(), Some(!k.enabled), k.notify.clone());
+    }
+
+    /// `d` on a kind: back to what the plugin chose, on or off and where.
+    pub fn reset_alert_kind(&mut self) {
+        let Some(k) = self.selected_alert_kind().cloned() else {
+            return;
+        };
+        self.save_alert_kind(k, None, None);
+    }
+
+    fn save_alert_kind(
+        &mut self,
+        k: crate::net::alerts_api::AlertKind,
+        enabled: Option<bool>,
+        notify: Option<String>,
+    ) {
+        let c = self.client.clone();
+        let label = k.label.clone();
+        self.spawn_ok(
+            "save alert kind",
+            async move {
+                c.set_alert_kind(&k.plugin_id, &k.topic, enabled, notify.as_deref())
+                    .await
+            },
+            move |app, ()| {
+                app.status = match enabled {
+                    Some(true) => format!("{label}: on"),
+                    Some(false) => format!("{label}: off"),
+                    None => format!("{label}: back to the plugin's choice"),
+                };
+                app.load_alert_kinds();
+                // A kind turned off clears its alerts.
+                app.reload_alerts();
+            },
+        );
     }
 
     /// ←/→: the next or previous sub-tab.
@@ -303,6 +391,9 @@ impl App {
         self.alerts_tab.sub = all[((i + delta) % n + n) as usize % all.len()];
         if matches!(self.alerts_tab.sub, AlertsSub::Rules | AlertsSub::Ignored) {
             self.load_alert_lists();
+        }
+        if self.alerts_tab.sub == AlertsSub::Kinds {
+            self.load_alert_kinds();
         }
     }
 

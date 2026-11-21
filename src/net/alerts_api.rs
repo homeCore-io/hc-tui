@@ -9,6 +9,32 @@ use reqwest::Method;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+/// A kind of alert a plugin can raise (`GET /alerts/kinds`), with the house's
+/// choice for it.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct AlertKind {
+    pub plugin_id: String,
+    pub topic: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub severity: String,
+    #[serde(default)]
+    pub default_on: bool,
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub notify: Option<String>,
+}
+
+impl AlertKind {
+    pub fn key(&self) -> String {
+        format!("{}/{}", self.plugin_id, self.topic)
+    }
+}
+
 /// An automation an alert rule starts (`GET /alert-rules/{id}/automations`).
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct AlertRuleStarts {
@@ -123,6 +149,27 @@ impl HomeCoreClient {
         };
         let path = format!("/alert-rules/{}?automations={then}", seg(id));
         self.send_empty(Method::DELETE, &path, None).await
+    }
+
+    pub async fn list_alert_kinds(&self) -> Result<Vec<AlertKind>> {
+        self.get_json("/alerts/kinds").await
+    }
+
+    /// `PUT /alerts/kinds/{plugin}/{topic}`. `None` is the plugin's default.
+    pub async fn set_alert_kind(
+        &self,
+        plugin_id: &str,
+        topic: &str,
+        enabled: Option<bool>,
+        notify: Option<&str>,
+    ) -> Result<()> {
+        let path = format!("/alerts/kinds/{}/{}", seg(plugin_id), seg(topic));
+        self.send_empty(
+            Method::PUT,
+            &path,
+            Some(json!({"enabled": enabled, "notify": notify})),
+        )
+        .await
     }
 
     pub async fn list_alert_ignores(&self) -> Result<Vec<AlertIgnore>> {

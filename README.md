@@ -76,6 +76,8 @@ It is built with:
 - Alerts: Open, Acknowledged, Rules and Ignored. The selected alert
   shows where it came from (its alert rule and where that rule tells,
   or the plugin) and what can be done: acknowledge, press its button,
+  ignore its device. Plugin kinds lists the kinds of alert each plugin can
+  raise: `Space` turns one off or on, `d` goes back to the plugin's choice.
   ignore its device. Alert rules can be turned on or off and deleted;
   deleting one that alone starts automations names them and asks whether
   to keep them, turned off, or delete them too. Making rules is left to
@@ -308,7 +310,8 @@ This client uses:
   `GET /registry/plugins`, `GET /plugin-runtimes`,
   `GET /plugin-runtimes/placements`, `POST /plugin-runtimes/{id}/reset`,
   `POST /plugins/{id}/query` (read-only actions), `POST /plugins/{id}/upload/{action}`,
-  `GET /alert-rules/{id}/automations`;
+  `GET /alert-rules/{id}/automations`, `GET /alerts/kinds`,
+  `PUT /alerts/kinds/{plugin_id}/{topic}`;
   a plugin's log is `GET /logs/stream?plugin_id=` (WebSocket, admin)
 - `GET /plugins/matter/nodes`, `POST /plugins/matter/commission`,
   `POST /plugins/matter/reinterview`, `DELETE /plugins/matter/nodes/{id}`
