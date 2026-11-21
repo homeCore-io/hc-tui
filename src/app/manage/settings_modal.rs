@@ -170,6 +170,8 @@ pub enum PathPurpose {
     Calendar,
     /// A calendar homeCore downloads, from the address typed as the path.
     CalendarUrl,
+    /// A new plugin runtime: homeCore's address as it reaches it, and a name.
+    NewRuntime,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -416,6 +418,34 @@ impl App {
             });
             return;
         }
+        if f.purpose == PathPurpose::NewRuntime {
+            let url = f.path.trim().to_string();
+            let name = f.name.trim().to_string();
+            if name.is_empty() {
+                f.error = Some("Give it a name, such as Python runtime 1".into());
+                return;
+            }
+            f.busy = true;
+            let c = self.client.clone();
+            self.spawn(
+                async move { c.add_runtime(&name, &url).await },
+                |app, res| match res {
+                    Ok(key) => {
+                        app.manage.modal = None;
+                        app.status = "Added the runtime: paste its key into its page".into();
+                        app.plugins_tab.manage.issued = Some(key);
+                        app.load_runtimes();
+                    }
+                    Err(e) => {
+                        if let Some(SettingsModal::Path(f)) = app.manage.modal.as_mut() {
+                            f.busy = false;
+                            f.error = Some(e.to_string());
+                        }
+                    }
+                },
+            );
+            return;
+        }
         if f.purpose == PathPurpose::CalendarUrl {
             let url = f.path.trim().to_string();
             let name = Some(f.name.trim().to_string()).filter(|n| !n.is_empty());
@@ -509,7 +539,7 @@ impl App {
                 }
             }
             // Sent above, before a path is made of it.
-            PathPurpose::CalendarUrl => {}
+            PathPurpose::CalendarUrl | PathPurpose::NewRuntime => {}
         }
     }
 

@@ -198,6 +198,26 @@ impl HomeCoreClient {
 
     /// `POST /plugin-runtimes/{id}/reset`: a new key, the old one stops
     /// working at once.
+    /// `POST /plugin-runtimes`: a new runtime and its key, shown once.
+    pub async fn add_runtime(&self, name: &str, homecore_url: &str) -> Result<IssuedKey> {
+        let body =
+            serde_json::json!({ "name": name, "kind": "python", "homecore_url": homecore_url });
+        let v = self
+            .ok_answer(Method::POST, "/plugin-runtimes", Some(body))
+            .await?;
+        serde_json::from_value(v)
+            .map_err(|e| anyhow!("/plugin-runtimes: unexpected response ({e})"))
+    }
+
+    /// `DELETE /plugin-runtimes/{id}`: uninstalls what is placed on it, then
+    /// removes it, which ends its key.
+    pub async fn remove_runtime(&self, runtime_id: &str) -> Result<()> {
+        let path = format!("/plugin-runtimes/{}", seg(runtime_id));
+        self.ok_answer(Method::DELETE, &path, None)
+            .await
+            .map(|_| ())
+    }
+
     pub async fn reset_runtime(&self, runtime_id: &str) -> Result<IssuedKey> {
         let path = format!("/plugin-runtimes/{}/reset", seg(runtime_id));
         let v = self.ok_answer(Method::POST, &path, None).await?;

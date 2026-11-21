@@ -764,6 +764,9 @@ pub fn modal_hints(m: &SettingsModal) -> Vec<&'static str> {
         SettingsModal::Path(p) if p.purpose == PathPurpose::Calendar => {
             vec!["type a path", "Tab path or name", "Enter add", "Esc cancel"]
         }
+        SettingsModal::Path(p) if p.purpose == PathPurpose::NewRuntime => {
+            vec!["Tab address or name", "Enter add", "Esc cancel"]
+        }
         SettingsModal::Path(p) if p.purpose == PathPurpose::CalendarUrl => {
             vec![
                 "type its address",
@@ -998,6 +1001,10 @@ pub fn draw_modal(frame: &mut Frame<'_>, app: &App) {
                     "Add a calendar from a web address",
                     "homeCore downloads the .ics at this address, keeps it, and fetches it again on its own.",
                 ),
+                PathPurpose::NewRuntime => (
+                    "Add a plugin runtime",
+                    "homeCore's address as the runtime reaches it (it goes into the key), and a name. The key is shown once.",
+                ),
             };
             let inner = dialog(frame, 70, 45, title, Color::Cyan);
             let r = Layout::default()
@@ -1019,11 +1026,18 @@ pub fn draw_modal(frame: &mut Frame<'_>, app: &App) {
                 "Path"
             };
             frame.render_widget(input(&f.path, path_label, f.field == PathField::Path), r[1]);
-            if matches!(f.purpose, PathPurpose::Calendar | PathPurpose::CalendarUrl) {
+            if matches!(
+                f.purpose,
+                PathPurpose::Calendar | PathPurpose::CalendarUrl | PathPurpose::NewRuntime
+            ) {
                 frame.render_widget(
                     input(
                         &f.name,
-                        "Name (empty takes the file's)",
+                        if f.purpose == PathPurpose::NewRuntime {
+                            "Name"
+                        } else {
+                            "Name (empty takes the file's)"
+                        },
                         f.field == PathField::Name,
                     ),
                     r[2],

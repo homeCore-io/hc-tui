@@ -223,6 +223,21 @@ fn runtime_bindings(app: &App, admin: bool) -> Vec<Binding> {
             "reset login",
             App::ask_reset_runtime,
         ));
+        v.extend([
+            Binding::new(
+                &[KeyCode::Char('n')],
+                "n",
+                "add a runtime",
+                App::open_add_runtime,
+            ),
+            Binding::new(
+                &[KeyCode::Char('x')],
+                "x",
+                "remove it",
+                App::ask_remove_runtime,
+            )
+            .more(),
+        ]);
     }
     v
 }
