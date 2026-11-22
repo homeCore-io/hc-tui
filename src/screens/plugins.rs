@@ -204,6 +204,12 @@ fn runtime_bindings(app: &App, admin: bool) -> Vec<Binding> {
                 "reset login",
                 App::ask_reset_runtime,
             ));
+            v.push(Binding::new(
+                &[KeyCode::Char('U')],
+                "U",
+                "update Python",
+                App::ask_update_python,
+            ));
         }
         v.push(Binding::new(ESC, "Esc", "back", App::close_runtime_detail));
         return v;
@@ -223,6 +229,15 @@ fn runtime_bindings(app: &App, admin: bool) -> Vec<Binding> {
             "reset login",
             App::ask_reset_runtime,
         ));
+        v.push(
+            Binding::new(
+                &[KeyCode::Char('U')],
+                "U",
+                "update Python",
+                App::ask_update_python,
+            )
+            .more(),
+        );
         v.extend([
             Binding::new(
                 &[KeyCode::Char('n')],

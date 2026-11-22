@@ -241,7 +241,9 @@ Screens:
   `←/→` moves between its tabs; Settings: `Enter` edit, `Space` change a
   choice, `u` undo a change, `Ctrl+S` save, `Esc` discard; Actions:
   `Enter` run, `f` run with a file; Logs: `Space` pause, `e`/`w`/`i`/`d` level, `c` clear.
-  Catalog: `i` install. Runtimes: `Enter` detail, `R` reset login, `n` add
+  Catalog: `i` install. Runtimes: `Enter` detail (with each Python in use
+  and any update waiting), `U` update Python (restarts the plugins it names),
+  `R` reset login, `n` add
   a runtime (its key is shown once), `x` remove one (its plugins are
   uninstalled; the confirm names them) — admin.
   Matter: `c` commission, `i` reinterview, `x` remove a node.
