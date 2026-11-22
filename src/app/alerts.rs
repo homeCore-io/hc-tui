@@ -51,6 +51,48 @@ pub struct AlertsTab {
     pub ignores_sel: ListSel,
     pub kinds: Load<Vec<crate::net::alerts_api::AlertKind>>,
     pub kinds_sel: ListSel,
+    /// `n` on a kind: where its alerts are sent.
+    pub channel_chooser: Option<ChannelChooser>,
+}
+
+/// One place an alert kind can be sent: `None` is not sent.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChannelOption {
+    pub value: Option<String>,
+    pub label: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ChannelChooser {
+    pub kind: crate::net::alerts_api::AlertKind,
+    pub options: Vec<ChannelOption>,
+    pub sel: usize,
+}
+
+/// What a kind can be sent to: not at all, each channel, or all of them; a
+/// channel it names that homeCore no longer has is kept, and says so. The
+/// index is the kind's own choice.
+pub fn channel_options(channels: &[String], current: Option<&str>) -> (Vec<ChannelOption>, usize) {
+    let opt = |value: Option<&str>, label: String| ChannelOption {
+        value: value.map(str::to_string),
+        label,
+    };
+    let mut v = vec![opt(None, "Not sent: shown in homeCore only".into())];
+    v.extend(channels.iter().map(|c| opt(Some(c), c.clone())));
+    if let Some(c) = current
+        && c != "all"
+        && !channels.iter().any(|x| x == c)
+    {
+        v.push(opt(Some(c), format!("{c} (not configured in homeCore)")));
+    }
+    if !channels.is_empty() {
+        v.push(opt(Some("all"), "all: every channel".into()));
+    }
+    let sel = v
+        .iter()
+        .position(|o| o.value.as_deref() == current)
+        .unwrap_or(0);
+    (v, sel)
 }
 
 /// Something on Alerts waiting for `y`.
@@ -342,7 +384,70 @@ impl App {
         let Some(k) = self.selected_alert_kind().cloned() else {
             return;
         };
-        self.save_alert_kind(k.clone(), Some(!k.enabled), k.notify.clone());
+        self.save_alert_kind(k.clone(), Some(!k.enabled), k.notify.clone(), None);
+    }
+
+    /// `n` on a kind: choose where its alerts are sent, from homeCore's
+    /// channels.
+    pub fn open_kind_channel(&mut self) {
+        let Some(k) = self.selected_alert_kind().cloned() else {
+            return;
+        };
+        let c = self.client.clone();
+        self.spawn_ok(
+            "list notification channels",
+            async move { c.list_notify_channels().await },
+            move |app, channels| {
+                let Some(channels) = channels else {
+                    app.status = "This homeCore can't list its notification channels: it needs v0.1.123 or later".into();
+                    return;
+                };
+                if channels.is_empty() && k.notify.is_none() {
+                    app.status = "homeCore has no notification channels: add [[notify.channels]] to homecore.toml".into();
+                    return;
+                }
+                let (options, sel) = channel_options(&channels, k.notify.as_deref());
+                app.alerts_tab.channel_chooser = Some(ChannelChooser {
+                    kind: k,
+                    options,
+                    sel,
+                });
+            },
+        );
+    }
+
+    /// Keys of the channel chooser. True when it is open.
+    pub(crate) fn on_key_channel_chooser(&mut self, key: crossterm::event::KeyEvent) -> bool {
+        use crossterm::event::KeyCode;
+        let Some(ch) = self.alerts_tab.channel_chooser.as_mut() else {
+            return false;
+        };
+        let n = ch.options.len();
+        match key.code {
+            KeyCode::Esc => self.alerts_tab.channel_chooser = None,
+            KeyCode::Down | KeyCode::Char('j') | KeyCode::Tab if n > 0 => ch.sel = (ch.sel + 1) % n,
+            KeyCode::Up | KeyCode::Char('k') | KeyCode::BackTab if n > 0 => {
+                ch.sel = (ch.sel + n - 1) % n
+            }
+            KeyCode::Enter => {
+                if let Some(ch) = self.alerts_tab.channel_chooser.take()
+                    && let Some(o) = ch.options.get(ch.sel).cloned()
+                {
+                    let k = ch.kind;
+                    // On or off stays as it is; following the plugin's default
+                    // when it already matches.
+                    let enabled = (k.enabled != k.default_on).then_some(k.enabled);
+                    let said = match &o.value {
+                        None => format!("{}: not sent", k.label),
+                        Some(c) if c == "all" => format!("{}: sent to every channel", k.label),
+                        Some(c) => format!("{}: sent to {c}", k.label),
+                    };
+                    self.save_alert_kind(k, enabled, o.value, Some(said));
+                }
+            }
+            _ => {}
+        }
+        true
     }
 
     /// `d` on a kind: back to what the plugin chose, on or off and where.
@@ -350,7 +455,7 @@ impl App {
         let Some(k) = self.selected_alert_kind().cloned() else {
             return;
         };
-        self.save_alert_kind(k, None, None);
+        self.save_alert_kind(k, None, None, None);
     }
 
     fn save_alert_kind(
@@ -358,6 +463,7 @@ impl App {
         k: crate::net::alerts_api::AlertKind,
         enabled: Option<bool>,
         notify: Option<String>,
+        said: Option<String>,
     ) {
         let c = self.client.clone();
         let label = k.label.clone();
@@ -368,10 +474,11 @@ impl App {
                     .await
             },
             move |app, ()| {
-                app.status = match enabled {
-                    Some(true) => format!("{label}: on"),
-                    Some(false) => format!("{label}: off"),
-                    None => format!("{label}: back to the plugin's choice"),
+                app.status = match (said, enabled) {
+                    (Some(s), _) => s,
+                    (None, Some(true)) => format!("{label}: on"),
+                    (None, Some(false)) => format!("{label}: off"),
+                    (None, None) => format!("{label}: back to the plugin's choice"),
                 };
                 app.load_alert_kinds();
                 // A kind turned off clears its alerts.
@@ -644,6 +751,45 @@ mod tests {
     use crate::app::test_support::*;
     use crate::model::Role;
     use serde_json::json;
+
+    #[test]
+    fn a_kind_is_sent_nowhere_to_a_channel_or_to_all() {
+        let chs = vec!["mail".to_string(), "phone".to_string()];
+        let (v, sel) = channel_options(&chs, None);
+        let values: Vec<Option<&str>> = v.iter().map(|o| o.value.as_deref()).collect();
+        assert_eq!(values, [None, Some("mail"), Some("phone"), Some("all")]);
+        assert_eq!(sel, 0);
+        assert_eq!(channel_options(&chs, Some("phone")).1, 2);
+        assert_eq!(channel_options(&chs, Some("all")).1, 3);
+    }
+
+    #[test]
+    fn a_channel_homecore_no_longer_has_is_kept_and_says_so() {
+        let chs = vec!["mail".to_string()];
+        let (v, sel) = channel_options(&chs, Some("old"));
+        assert_eq!(v[sel].value.as_deref(), Some("old"));
+        assert!(v[sel].label.contains("not configured"));
+        // No channels at all: nothing to send to, not even all.
+        let (v, _) = channel_options(&[], Some("old"));
+        assert!(v.iter().all(|o| o.value.as_deref() != Some("all")));
+    }
+
+    #[test]
+    fn the_channel_chooser_moves_and_closes() {
+        use crossterm::event::KeyCode;
+        let mut a = signed_in(Role::Admin);
+        let (options, sel) = channel_options(&["mail".to_string()], None);
+        a.alerts_tab.channel_chooser = Some(ChannelChooser {
+            kind: Default::default(),
+            options,
+            sel,
+        });
+        assert!(a.on_key_channel_chooser(key(KeyCode::Char('j'))));
+        assert_eq!(a.alerts_tab.channel_chooser.as_ref().unwrap().sel, 1);
+        assert!(a.on_key_channel_chooser(key(KeyCode::Esc)));
+        assert!(a.alerts_tab.channel_chooser.is_none());
+        assert!(!a.on_key_channel_chooser(key(KeyCode::Char('j'))));
+    }
 
     fn alert(v: Value) -> Alert {
         serde_json::from_value(v).unwrap()

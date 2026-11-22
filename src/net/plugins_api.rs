@@ -196,8 +196,6 @@ impl HomeCoreClient {
         }
     }
 
-    /// `POST /plugin-runtimes/{id}/reset`: a new key, the old one stops
-    /// working at once.
     /// `GET /plugin-runtimes/interpreters`: each runtime's interpreters and
     /// any update waiting. Empty when homeCore has no registry to ask.
     pub async fn list_interpreters(&self) -> Result<Vec<crate::plugin_admin::Interpreter>> {
@@ -266,6 +264,8 @@ impl HomeCoreClient {
             .map(|_| ())
     }
 
+    /// `POST /plugin-runtimes/{id}/reset`: a new key, the old one stops
+    /// working at once.
     pub async fn reset_runtime(&self, runtime_id: &str) -> Result<IssuedKey> {
         let path = format!("/plugin-runtimes/{}/reset", seg(runtime_id));
         let v = self.ok_answer(Method::POST, &path, None).await?;

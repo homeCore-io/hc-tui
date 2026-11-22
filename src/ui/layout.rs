@@ -262,6 +262,9 @@ pub fn modal_hints(app: &App) -> Option<Vec<&'static str>> {
     if let Some(h) = super::plugins::modal_hints(app) {
         return Some(h);
     }
+    if app.alerts_tab.channel_chooser.is_some() {
+        return Some(vec!["j/k move", "Enter send it there", "Esc cancel"]);
+    }
     if let Some(h) = super::scenes::modal_hints(app) {
         return Some(h);
     }

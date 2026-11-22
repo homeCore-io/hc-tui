@@ -69,6 +69,12 @@ impl Screen for AlertsScreen {
                             App::toggle_alert_kind,
                         ),
                         Binding::new(
+                            &[KeyCode::Char('n')],
+                            "n",
+                            "where it's sent",
+                            App::open_kind_channel,
+                        ),
+                        Binding::new(
                             &[KeyCode::Char('d')],
                             "d",
                             "the plugin's choice",

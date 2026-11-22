@@ -368,7 +368,7 @@ fn draw_kinds(frame: &mut Frame<'_>, app: &App, area: Rect) {
                 } else {
                     dim
                 }),
-                Cell::from(k.notify.clone().unwrap_or_else(|| "default channel".into())).style(dim),
+                Cell::from(k.notify.clone().unwrap_or_else(|| "not sent".into())).style(dim),
             ])
         })
         .collect();
@@ -456,4 +456,29 @@ fn draw_ignores(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let mut state = TableState::default();
     state.select(sel_row);
     frame.render_stateful_widget(table, area, &mut state);
+}
+
+/// `n` on a kind: where its alerts go.
+pub fn draw_channel_chooser(frame: &mut Frame<'_>, app: &App) {
+    use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState};
+    let Some(c) = &app.alerts_tab.channel_chooser else {
+        return;
+    };
+    let popup = super::widgets::centered_rect(50, 40, frame.area());
+    frame.render_widget(Clear, popup);
+    let items: Vec<ListItem> = c
+        .options
+        .iter()
+        .map(|o| ListItem::new(format!("  {}", o.label)))
+        .collect();
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(format!(" Where are {} alerts sent? ", c.kind.label)),
+        )
+        .highlight_style(highlight());
+    let mut state = ListState::default();
+    state.select(Some(c.sel));
+    frame.render_stateful_widget(list, popup, &mut state);
 }
