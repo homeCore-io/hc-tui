@@ -210,6 +210,12 @@ fn runtime_bindings(app: &App, admin: bool) -> Vec<Binding> {
                 "update Python",
                 App::ask_update_python,
             ));
+            v.push(Binding::new(
+                &[KeyCode::Char('e')],
+                "e",
+                "name and limit",
+                App::open_edit_runtime,
+            ));
         }
         v.push(Binding::new(ESC, "Esc", "back", App::close_runtime_detail));
         return v;
@@ -245,6 +251,13 @@ fn runtime_bindings(app: &App, admin: bool) -> Vec<Binding> {
                 "add a runtime",
                 App::open_add_runtime,
             ),
+            Binding::new(
+                &[KeyCode::Char('e')],
+                "e",
+                "name and limit",
+                App::open_edit_runtime,
+            )
+            .more(),
             Binding::new(
                 &[KeyCode::Char('x')],
                 "x",
@@ -448,6 +461,67 @@ mod tests {
             !a.plugin_subs().contains(&PluginsSub::Runtimes),
             "runtimes need plugins:write"
         );
+    }
+
+    #[test]
+    fn e_on_a_runtime_edits_its_name_and_limit() {
+        use crate::app::manage::settings_modal::{PathField, PathPurpose, SettingsModal};
+        let mut a = signed_in(Role::Admin);
+        states(&mut a);
+        a.plugins_tab.manage.runtimes = Load::Ready(
+            serde_json::from_value(json!([{"runtime_id": "rt-1", "name": "Py", "max_plugins": 3}]))
+                .unwrap(),
+        );
+        a.plugins_tab.detail = None;
+        a.plugins_tab.manage.runtime_detail = None;
+        a.plugins_tab.sub = PluginsSub::Runtimes;
+        a.on_key(key(KeyCode::Char('e')));
+        let form = |a: &App| match a.manage.modal.as_ref() {
+            Some(SettingsModal::Path(f)) => f.clone(),
+            other => panic!("no runtime form: {other:?}"),
+        };
+        let f = form(&a);
+        assert_eq!(f.purpose, PathPurpose::EditRuntime);
+        assert_eq!(
+            (f.target.as_str(), f.name.as_str(), f.path.as_str()),
+            ("rt-1", "Py", "3")
+        );
+        assert_eq!(f.field, PathField::Name);
+        // Tab reaches the limit; a word there is refused before anything is sent.
+        a.on_key(key(KeyCode::Tab));
+        a.on_key(key(KeyCode::Backspace));
+        a.on_key(key(KeyCode::Char('x')));
+        a.on_key(key(KeyCode::Enter));
+        let f = form(&a);
+        assert_eq!(f.field, PathField::Path);
+        assert!(!f.busy);
+        assert!(f.error.is_some_and(|e| e.contains("number of plugins")));
+    }
+
+    #[test]
+    fn tab_reaches_a_new_runtimes_address() {
+        use crate::app::manage::settings_modal::{PathField, SettingsModal};
+        let mut a = signed_in(Role::Admin);
+        states(&mut a);
+        a.plugins_tab.detail = None;
+        a.plugins_tab.manage.runtime_detail = None;
+        a.plugins_tab.sub = PluginsSub::Runtimes;
+        a.on_key(key(KeyCode::Char('n')));
+        a.on_key(key(KeyCode::Tab));
+        assert!(matches!(
+            a.manage.modal.as_ref(),
+            Some(SettingsModal::Path(f)) if f.field == PathField::Path
+        ));
+    }
+
+    #[test]
+    fn people_without_admin_cannot_edit_a_runtime() {
+        let mut a = signed_in(Role::Observer);
+        states(&mut a);
+        a.plugins_tab.detail = None;
+        a.plugins_tab.sub = PluginsSub::Runtimes;
+        a.open_edit_runtime();
+        assert!(a.manage.modal.is_none());
     }
 
     #[test]

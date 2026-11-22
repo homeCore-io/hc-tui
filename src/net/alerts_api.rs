@@ -151,6 +151,20 @@ impl HomeCoreClient {
         self.send_empty(Method::DELETE, &path, None).await
     }
 
+    /// `GET /notify/channels`: the channel names an alert can be sent to.
+    /// `None` from a homeCore too old to list them.
+    pub async fn list_notify_channels(&self) -> Result<Option<Vec<String>>> {
+        let resp = self.request(Method::GET, "/notify/channels", None).await?;
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        let v: Value = super::http::parse_json("/notify/channels", resp).await?;
+        Ok(Some(
+            serde_json::from_value(v.get("channels").cloned().unwrap_or_default())
+                .unwrap_or_default(),
+        ))
+    }
+
     pub async fn list_alert_kinds(&self) -> Result<Vec<AlertKind>> {
         self.get_json("/alerts/kinds").await
     }

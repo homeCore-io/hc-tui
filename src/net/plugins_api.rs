@@ -196,8 +196,6 @@ impl HomeCoreClient {
         }
     }
 
-    /// `POST /plugin-runtimes/{id}/reset`: a new key, the old one stops
-    /// working at once.
     /// `GET /plugin-runtimes/interpreters`: each runtime's interpreters and
     /// any update waiting. Empty when homeCore has no registry to ask.
     pub async fn list_interpreters(&self) -> Result<Vec<crate::plugin_admin::Interpreter>> {
@@ -251,6 +249,23 @@ impl HomeCoreClient {
             .map(|_| ())
     }
 
+    /// `PATCH /plugin-runtimes/{id}`: its name, and its plugin limit
+    /// (`None` removes it). Lowering the limit removes nothing.
+    pub async fn update_runtime(
+        &self,
+        runtime_id: &str,
+        name: &str,
+        max_plugins: Option<u32>,
+    ) -> Result<()> {
+        let path = format!("/plugin-runtimes/{}", seg(runtime_id));
+        let body = serde_json::json!({ "name": name, "max_plugins": max_plugins });
+        self.ok_answer(Method::PATCH, &path, Some(body))
+            .await
+            .map(|_| ())
+    }
+
+    /// `POST /plugin-runtimes/{id}/reset`: a new key, the old one stops
+    /// working at once.
     pub async fn reset_runtime(&self, runtime_id: &str) -> Result<IssuedKey> {
         let path = format!("/plugin-runtimes/{}/reset", seg(runtime_id));
         let v = self.ok_answer(Method::POST, &path, None).await?;

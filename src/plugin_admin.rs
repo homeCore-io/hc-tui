@@ -394,6 +394,19 @@ pub struct RuntimeList {
     pub runtimes: Vec<Runtime>,
 }
 
+/// A runtime's plugin limit as typed: empty or 0 is no limit.
+pub fn parse_plugin_limit(s: &str) -> Result<Option<u32>, String> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Ok(None);
+    }
+    match s.parse::<u32>() {
+        Ok(0) => Ok(None),
+        Ok(n) => Ok(Some(n)),
+        Err(_) => Err("The limit is a number of plugins, or empty for none".into()),
+    }
+}
+
 /// Which plugin runs on which runtime.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Placement {
@@ -717,6 +730,15 @@ mod tests {
         r.last_seen_at = None;
         r.outdated = false;
         assert_eq!(runtime_status(&r, now).0, "Waiting for it to connect");
+    }
+
+    #[test]
+    fn a_plugin_limit_is_a_number_and_empty_or_zero_is_none() {
+        assert_eq!(parse_plugin_limit(""), Ok(None));
+        assert_eq!(parse_plugin_limit(" 0 "), Ok(None));
+        assert_eq!(parse_plugin_limit("4"), Ok(Some(4)));
+        assert!(parse_plugin_limit("four").is_err());
+        assert!(parse_plugin_limit("-1").is_err());
     }
 
     #[test]

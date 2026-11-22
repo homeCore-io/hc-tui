@@ -1061,7 +1061,7 @@ impl App {
             self.on_key_streaming(key);
             return;
         }
-        if self.on_key_plugins_modal(key) {
+        if self.on_key_plugins_modal(key) || self.on_key_channel_chooser(key) {
             return;
         }
         if self.on_key_device_modals(key) {

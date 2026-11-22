@@ -75,12 +75,13 @@ It is built with:
   live. `n` makes one (a kind, then that kind's settings), `Enter`
   changes its name and settings (`PATCH /glue/{id}` sends only what
   changed), `x` deletes it and names the automations that use it.
-- Alerts: Open, Acknowledged, Rules and Ignored. The selected alert
+- Alerts: Open, Acknowledged, Rules, Plugin kinds and Ignored. The selected alert
   shows where it came from (its alert rule and where that rule tells,
   or the plugin) and what can be done: acknowledge, press its button,
   ignore its device. Plugin kinds lists the kinds of alert each plugin can
-  raise: `Space` turns one off or on, `d` goes back to the plugin's choice.
-  ignore its device. Alert rules can be turned on or off and deleted;
+  raise: `Space` turns one off or on, `n` chooses where its alerts are
+  sent (not sent, one of homeCore's notification channels, or all of
+  them), `d` goes back to the plugin's choice. Alert rules can be turned on or off and deleted;
   deleting one that alone starts automations names them and asks whether
   to keep them, turned off, or delete them too. Making rules is left to
   the app. Kept live from the event stream,
@@ -121,8 +122,8 @@ It is built with:
     install. When more than one runtime can run one, hc-tui asks which.
   - Runtimes (admins): each plugin runtime, how it is doing, its host
     version and the plugins placed on it, with the Python each runs on;
-    Reset login makes it a new key,
-    shown once.
+    Reset login makes it a new key, shown once. Its name and how many
+    plugins it may hold can be changed.
   - Matter, when the Matter plugin is installed: commission, reinterview
     and remove nodes.
 - Temperatures are shown in the unit set on homeCore
@@ -232,9 +233,11 @@ Screens:
   delete), `f` filter, `s` only those that need fixing. In the RON:
   `j`/`k` scroll, `r` refresh, `R`, `t`, `u` and `F` as above, `Esc`
   back.
-- Alerts: `←`/`→` Open, Acknowledged, Rules, Ignored. On an alert: `a`
-  acknowledge, `p` run its action, `i` ignore its device. Rules:
-  `Space` on/off, `x` delete. Ignored: `x` show them again.
+- Alerts: `←`/`→` Open, Acknowledged, Rules, Plugin kinds, Ignored. On an
+  alert: `a` acknowledge, `p` run its action, `i` ignore its device.
+  Rules: `Space` on/off, `x` delete. Plugin kinds: `Space` off/on, `n`
+  where it's sent (needs core v0.1.123), `d` the plugin's choice.
+  Ignored: `x` show them again.
 - Plugins: `←/→` tabs (Installed, Catalog, Runtimes, Matter). Installed:
   `Enter` detail, and for admins `Space` on/off, `s` start or stop, `R`
   restart, `U` update (when there is one), `x` uninstall. In the detail
@@ -243,7 +246,7 @@ Screens:
   `Enter` run, `f` run with a file; Logs: `Space` pause, `e`/`w`/`i`/`d` level, `c` clear.
   Catalog: `i` install. Runtimes: `Enter` detail (with each Python in use
   and any update waiting), `U` update Python (restarts the plugins it names),
-  `R` reset login, `n` add
+  `R` reset login, `e` name and plugin limit (empty for none), `n` add
   a runtime (its key is shown once), `x` remove one (its plugins are
   uninstalled; the confirm names them) — admin.
   Matter: `c` commission, `i` reinterview, `x` remove a node.
@@ -334,7 +337,7 @@ This client uses:
   `GET /plugin-runtimes/placements`, `POST /plugin-runtimes/{id}/reset`,
   `POST /plugins/{id}/query` (read-only actions), `POST /plugins/{id}/upload/{action}`,
   `GET /alert-rules/{id}/automations`, `GET /alerts/kinds`,
-  `PUT /alerts/kinds/{plugin_id}/{topic}`;
+  `PUT /alerts/kinds/{plugin_id}/{topic}`, `GET /notify/channels`;
   a plugin's log is `GET /logs/stream?plugin_id=` (WebSocket, admin)
 - `GET /plugins/matter/nodes`, `POST /plugins/matter/commission`,
   `POST /plugins/matter/reinterview`, `DELETE /plugins/matter/nodes/{id}`

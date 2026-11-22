@@ -767,6 +767,9 @@ pub fn modal_hints(m: &SettingsModal) -> Vec<&'static str> {
         SettingsModal::Path(p) if p.purpose == PathPurpose::NewRuntime => {
             vec!["Tab address or name", "Enter add", "Esc cancel"]
         }
+        SettingsModal::Path(p) if p.purpose == PathPurpose::EditRuntime => {
+            vec!["Tab name or limit", "Enter save", "Esc cancel"]
+        }
         SettingsModal::Path(p) if p.purpose == PathPurpose::CalendarUrl => {
             vec![
                 "type its address",
@@ -1005,6 +1008,10 @@ pub fn draw_modal(frame: &mut Frame<'_>, app: &App) {
                     "Add a plugin runtime",
                     "homeCore's address as the runtime reaches it (it goes into the key), and a name. The key is shown once.",
                 ),
+                PathPurpose::EditRuntime => (
+                    "Change a runtime",
+                    "Its name, and how many plugins it may hold. Lowering the limit removes nothing; it only stops new plugins going there.",
+                ),
             };
             let inner = dialog(frame, 70, 45, title, Color::Cyan);
             let r = Layout::default()
@@ -1020,20 +1027,26 @@ pub fn draw_modal(frame: &mut Frame<'_>, app: &App) {
                 Paragraph::new(what).style(dim()).wrap(Wrap { trim: true }),
                 r[0],
             );
-            let path_label = if f.purpose == PathPurpose::CalendarUrl {
-                "Address"
-            } else {
-                "Path"
+            let path_label = match f.purpose {
+                PathPurpose::CalendarUrl | PathPurpose::NewRuntime => "Address",
+                PathPurpose::EditRuntime => "Plugin limit (empty for none)",
+                _ => "Path",
             };
             frame.render_widget(input(&f.path, path_label, f.field == PathField::Path), r[1]);
             if matches!(
                 f.purpose,
-                PathPurpose::Calendar | PathPurpose::CalendarUrl | PathPurpose::NewRuntime
+                PathPurpose::Calendar
+                    | PathPurpose::CalendarUrl
+                    | PathPurpose::NewRuntime
+                    | PathPurpose::EditRuntime
             ) {
                 frame.render_widget(
                     input(
                         &f.name,
-                        if f.purpose == PathPurpose::NewRuntime {
+                        if matches!(
+                            f.purpose,
+                            PathPurpose::NewRuntime | PathPurpose::EditRuntime
+                        ) {
                             "Name"
                         } else {
                             "Name (empty takes the file's)"
@@ -1044,7 +1057,14 @@ pub fn draw_modal(frame: &mut Frame<'_>, app: &App) {
                 );
             }
             let bottom = if f.busy {
-                Line::from(Span::styled("Reading it...", dim()))
+                Line::from(Span::styled(
+                    if f.purpose == PathPurpose::EditRuntime {
+                        "Saving..."
+                    } else {
+                        "Reading it..."
+                    },
+                    dim(),
+                ))
             } else {
                 error_line(&f.error)
             };
