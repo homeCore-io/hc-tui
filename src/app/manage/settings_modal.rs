@@ -172,6 +172,8 @@ pub enum PathPurpose {
     CalendarUrl,
     /// A new plugin runtime: homeCore's address as it reaches it, and a name.
     NewRuntime,
+    /// A runtime's name, and its plugin limit typed as the path.
+    EditRuntime,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -187,6 +189,8 @@ pub struct PathForm {
     /// The calendar's name; empty takes the file's.
     pub name: String,
     pub field: PathField,
+    /// The runtime an `EditRuntime` form changes.
+    pub target: String,
     pub busy: bool,
     pub error: Option<String>,
 }
@@ -198,6 +202,7 @@ impl PathForm {
             path: String::new(),
             name: String::new(),
             field: PathField::Path,
+            target: String::new(),
             busy: false,
             error: None,
         }
@@ -328,7 +333,10 @@ impl App {
                     KeyCode::Tab | KeyCode::BackTab
                         if matches!(
                             f.purpose,
-                            PathPurpose::Calendar | PathPurpose::CalendarUrl
+                            PathPurpose::Calendar
+                                | PathPurpose::CalendarUrl
+                                | PathPurpose::NewRuntime
+                                | PathPurpose::EditRuntime
                         ) =>
                     {
                         f.field = match f.field {
@@ -410,6 +418,43 @@ impl App {
         let Some(SettingsModal::Path(f)) = self.manage.modal.as_mut() else {
             return;
         };
+        if f.purpose == PathPurpose::EditRuntime {
+            let name = f.name.trim().to_string();
+            if name.is_empty() {
+                f.error = Some("A runtime needs a name".into());
+                return;
+            }
+            let limit = match crate::plugin_admin::parse_plugin_limit(&f.path) {
+                Ok(l) => l,
+                Err(e) => {
+                    f.error = Some(e);
+                    return;
+                }
+            };
+            f.busy = true;
+            let id = f.target.clone();
+            let c = self.client.clone();
+            self.spawn(
+                async move { c.update_runtime(&id, &name, limit).await.map(|()| name) },
+                move |app, res| match res {
+                    Ok(name) => {
+                        app.manage.modal = None;
+                        app.status = match limit {
+                            Some(n) => format!("{name} now holds up to {n} plugins"),
+                            None => format!("{name} holds any number of plugins"),
+                        };
+                        app.load_runtimes();
+                    }
+                    Err(e) => {
+                        if let Some(SettingsModal::Path(f)) = app.manage.modal.as_mut() {
+                            f.busy = false;
+                            f.error = Some(e.to_string());
+                        }
+                    }
+                },
+            );
+            return;
+        }
         if f.path.trim().is_empty() {
             f.error = Some(if f.purpose == PathPurpose::CalendarUrl {
                 "Type the calendar's address".to_string()
@@ -539,7 +584,7 @@ impl App {
                 }
             }
             // Sent above, before a path is made of it.
-            PathPurpose::CalendarUrl | PathPurpose::NewRuntime => {}
+            PathPurpose::CalendarUrl | PathPurpose::NewRuntime | PathPurpose::EditRuntime => {}
         }
     }
 

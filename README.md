@@ -121,8 +121,8 @@ It is built with:
     install. When more than one runtime can run one, hc-tui asks which.
   - Runtimes (admins): each plugin runtime, how it is doing, its host
     version and the plugins placed on it, with the Python each runs on;
-    Reset login makes it a new key,
-    shown once.
+    Reset login makes it a new key, shown once. Its name and how many
+    plugins it may hold can be changed.
   - Matter, when the Matter plugin is installed: commission, reinterview
     and remove nodes.
 - Temperatures are shown in the unit set on homeCore
@@ -243,7 +243,7 @@ Screens:
   `Enter` run, `f` run with a file; Logs: `Space` pause, `e`/`w`/`i`/`d` level, `c` clear.
   Catalog: `i` install. Runtimes: `Enter` detail (with each Python in use
   and any update waiting), `U` update Python (restarts the plugins it names),
-  `R` reset login, `n` add
+  `R` reset login, `e` name and plugin limit (empty for none), `n` add
   a runtime (its key is shown once), `x` remove one (its plugins are
   uninstalled; the confirm names them) — admin.
   Matter: `c` commission, `i` reinterview, `x` remove a node.

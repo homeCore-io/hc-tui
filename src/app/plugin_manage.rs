@@ -606,6 +606,32 @@ impl App {
         self.manage.modal = Some(super::manage::settings_modal::SettingsModal::Path(f));
     }
 
+    /// `e` on a runtime: its name and plugin limit.
+    pub fn open_edit_runtime(&mut self) {
+        if self.needs_admin("changing a runtime") {
+            return;
+        }
+        let Some(r) = self
+            .detail_runtime()
+            .or_else(|| self.selected_runtime())
+            .cloned()
+        else {
+            return;
+        };
+        let mut f = super::manage::settings_modal::PathForm::new(
+            super::manage::settings_modal::PathPurpose::EditRuntime,
+        );
+        f.target = r.runtime_id.clone();
+        f.name = if r.name.is_empty() {
+            r.runtime_id
+        } else {
+            r.name
+        };
+        f.path = r.max_plugins.map(|n| n.to_string()).unwrap_or_default();
+        f.field = super::manage::settings_modal::PathField::Name;
+        self.manage.modal = Some(super::manage::settings_modal::SettingsModal::Path(f));
+    }
+
     /// `x` on a runtime: say what removing it uninstalls, then ask.
     pub fn ask_remove_runtime(&mut self) {
         if self.needs_admin("removing a runtime") {
