@@ -120,6 +120,7 @@ pub fn kind_words(kind: &str) -> &'static str {
     match kind {
         "wet" => "something wet",
         "smoke" => "smoke",
+        "carbon_monoxide" => "carbon monoxide",
         "offline" => "offline",
         "jammed" => "a jammed lock",
         "low_battery" => "low battery",
@@ -170,7 +171,7 @@ pub fn describe_ignore(
         let k = kind_words(k);
         match &device {
             Some(d) => format!("{} on {d}", capital(k)),
-            None if k == "smoke" => "Every smoke alert".into(),
+            None if k == "smoke" || k == "carbon monoxide" => format!("Every {k} alert"),
             None => format!("Every {k}"),
         }
     } else {

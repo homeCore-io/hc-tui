@@ -221,6 +221,7 @@ const SHOWN_ATTRS: &[&str] = &[
     "illuminance",
     "co2_ppm",
     "smoke",
+    "co_detected",
     "co",
     "water_detected",
     "tamper",
@@ -602,6 +603,7 @@ fn draw_device_detail(frame: &mut Frame<'_>, app: &App, area: Rect) {
     }
     for (key, label) in [
         ("smoke", "Smoke"),
+        ("co_detected", "Carbon monoxide"),
         ("co", "CO"),
         ("water_detected", "Water"),
         ("tamper", "Tamper"),
