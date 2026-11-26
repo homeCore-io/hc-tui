@@ -499,15 +499,27 @@ pub struct Interpreter {
     pub plugins: Vec<String>,
 }
 
-impl Interpreter {
-    /// "Python 3.12.15", or the series when no patch is known.
-    pub fn name(&self) -> String {
-        let kind = {
-            let mut c = self.kind.chars();
+/// The name people know a runtime kind by: `node` is Node.js. homeCore keeps
+/// no list of kinds; one not known here is capitalised.
+pub fn kind_name(kind: &str) -> String {
+    match kind {
+        "python" => "Python".into(),
+        "node" => "Node.js".into(),
+        "dotnet" => ".NET".into(),
+        "java" => "Java".into(),
+        other => {
+            let mut c = other.chars();
             c.next()
                 .map(|f| f.to_uppercase().collect::<String>() + c.as_str())
                 .unwrap_or_default()
-        };
+        }
+    }
+}
+
+impl Interpreter {
+    /// "Python 3.12.15", or the series when no patch is known.
+    pub fn name(&self) -> String {
+        let kind = kind_name(&self.kind);
         match self.versions.as_slice() {
             [] => format!("{kind} {}", self.series),
             v => format!("{kind} {}", v.join(", ")),
@@ -525,11 +537,10 @@ pub fn interpreters_of<'a>(all: &'a [Interpreter], runtime_id: &str) -> Vec<&'a 
 /// " on Python 3.14.10" for a placement with an interpreter, else "".
 pub fn interpreter_note(p: &Placement) -> String {
     match p.interpreter.as_deref().map(str::trim) {
-        Some(i) if !i.is_empty() => {
-            let mut c = i.chars();
-            let first = c.next().map(|f| f.to_uppercase().collect::<String>());
-            format!(" on {}{}", first.unwrap_or_default(), c.as_str())
-        }
+        Some(i) if !i.is_empty() => match i.split_once(' ') {
+            Some((kind, version)) => format!(" on {} {version}", kind_name(kind)),
+            None => format!(" on {}", kind_name(i)),
+        },
         _ => String::new(),
     }
 }
@@ -570,6 +581,11 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(interpreter_note(&p), " on Python 3.14.10");
+        let node = Placement {
+            interpreter: Some("node 24.11.1".into()),
+            ..p.clone()
+        };
+        assert_eq!(interpreter_note(&node), " on Node.js 24.11.1");
         // Older cores send no interpreter at all.
         let old: Placement =
             serde_json::from_value(json!({"runtime_id": "rt-1", "plugin_id": "plugin.x"})).unwrap();
@@ -748,5 +764,13 @@ mod tests {
         }))
         .unwrap();
         assert!(!format!("{k:?}").contains("hcrt_secret"));
+    }
+
+    #[test]
+    fn a_kind_reads_as_its_language() {
+        assert_eq!(kind_name("python"), "Python");
+        assert_eq!(kind_name("node"), "Node.js");
+        assert_eq!(kind_name("dotnet"), ".NET");
+        assert_eq!(kind_name("deno"), "Deno");
     }
 }

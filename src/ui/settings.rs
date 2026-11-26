@@ -765,7 +765,16 @@ pub fn modal_hints(m: &SettingsModal) -> Vec<&'static str> {
             vec!["type a path", "Tab path or name", "Enter add", "Esc cancel"]
         }
         SettingsModal::Path(p) if p.purpose == PathPurpose::NewRuntime => {
-            vec!["Tab address or name", "Enter add", "Esc cancel"]
+            if p.kinds.len() > 1 {
+                vec![
+                    "Tab address or name",
+                    "↑↓ language",
+                    "Enter add",
+                    "Esc cancel",
+                ]
+            } else {
+                vec!["Tab address or name", "Enter add", "Esc cancel"]
+            }
         }
         SettingsModal::Path(p) if p.purpose == PathPurpose::EditRuntime => {
             vec!["Tab name or limit", "Enter save", "Esc cancel"]
@@ -1068,7 +1077,27 @@ pub fn draw_modal(frame: &mut Frame<'_>, app: &App) {
             } else {
                 error_line(&f.error)
             };
-            frame.render_widget(Paragraph::new(bottom).wrap(Wrap { trim: true }), r[3]);
+            let mut lines = Vec::new();
+            if f.purpose == PathPurpose::NewRuntime {
+                lines.push(Line::from(vec![
+                    Span::styled(" Language: ", dim()),
+                    Span::raw(if f.kind.is_empty() {
+                        "…".to_string()
+                    } else {
+                        crate::plugin_admin::kind_name(&f.kind)
+                    }),
+                    Span::styled(
+                        if f.kinds.len() > 1 {
+                            "  (↑↓ to change)"
+                        } else {
+                            ""
+                        },
+                        dim(),
+                    ),
+                ]));
+            }
+            lines.push(bottom);
+            frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), r[3]);
         }
     }
 }

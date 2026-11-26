@@ -229,10 +229,30 @@ impl HomeCoreClient {
         .await
     }
 
+    /// `GET /plugin-runtimes/kinds`: the languages a runtime can be added for.
+    /// A homeCore from before runtimes for any language hosts Python alone.
+    pub async fn list_runtime_kinds(&self) -> Result<Vec<String>> {
+        let a = self
+            .answer(Method::GET, "/plugin-runtimes/kinds", None)
+            .await?;
+        match a.status {
+            404 | 405 => Ok(vec!["python".to_string()]),
+            _ if a.ok() => Ok(serde_json::from_value(
+                a.body.get("kinds").cloned().unwrap_or_default(),
+            )
+            .unwrap_or_default()),
+            _ => Err(anyhow!("{}", a.error())),
+        }
+    }
+
     /// `POST /plugin-runtimes`: a new runtime and its key, shown once.
-    pub async fn add_runtime(&self, name: &str, homecore_url: &str) -> Result<IssuedKey> {
-        let body =
-            serde_json::json!({ "name": name, "kind": "python", "homecore_url": homecore_url });
+    pub async fn add_runtime(
+        &self,
+        name: &str,
+        kind: &str,
+        homecore_url: &str,
+    ) -> Result<IssuedKey> {
+        let body = serde_json::json!({ "name": name, "kind": kind, "homecore_url": homecore_url });
         let v = self
             .ok_answer(Method::POST, "/plugin-runtimes", Some(body))
             .await?;
