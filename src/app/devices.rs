@@ -451,10 +451,14 @@ impl App {
         if let Some(lux) = attrs.get("illuminance").and_then(Value::as_f64) {
             return format!("{lux:.0} lx");
         }
-        for key in ["smoke", "co", "water_detected"] {
-            if b(key) == Some(true) {
-                return normalize_label(key);
-            }
+        if b("smoke") == Some(true) {
+            return "Smoke".into();
+        }
+        if b("co_detected") == Some(true) || b("co") == Some(true) {
+            return "Carbon monoxide".into();
+        }
+        if b("water_detected") == Some(true) {
+            return normalize_label("water_detected");
         }
         if let Some(online) = b("online") {
             return if online { "Online" } else { "Offline" }.into();
