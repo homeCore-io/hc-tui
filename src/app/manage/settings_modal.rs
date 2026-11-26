@@ -191,6 +191,9 @@ pub struct PathForm {
     pub field: PathField,
     /// The runtime an `EditRuntime` form changes.
     pub target: String,
+    /// A `NewRuntime` form's languages on offer, and the one chosen.
+    pub kinds: Vec<String>,
+    pub kind: String,
     pub busy: bool,
     pub error: Option<String>,
 }
@@ -203,6 +206,8 @@ impl PathForm {
             name: String::new(),
             field: PathField::Path,
             target: String::new(),
+            kinds: Vec::new(),
+            kind: String::new(),
             busy: false,
             error: None,
         }
@@ -344,6 +349,18 @@ impl App {
                             PathField::Name => PathField::Path,
                         }
                     }
+                    KeyCode::Up | KeyCode::Down
+                        if f.purpose == PathPurpose::NewRuntime && f.kinds.len() > 1 =>
+                    {
+                        let at = f.kinds.iter().position(|k| *k == f.kind).unwrap_or(0);
+                        let n = f.kinds.len();
+                        let next = if key.code == KeyCode::Down {
+                            at + 1
+                        } else {
+                            at + n - 1
+                        } % n;
+                        f.kind = f.kinds[next].clone();
+                    }
                     KeyCode::Enter => self.submit_path_form(),
                     _ => {
                         let field = match f.field {
@@ -466,14 +483,22 @@ impl App {
         if f.purpose == PathPurpose::NewRuntime {
             let url = f.path.trim().to_string();
             let name = f.name.trim().to_string();
+            let kind = f.kind.clone();
             if name.is_empty() {
-                f.error = Some("Give it a name, such as Python runtime 1".into());
+                f.error = Some(format!(
+                    "Give it a name, such as {} runtime 1",
+                    crate::plugin_admin::kind_name(if kind.is_empty() { "python" } else { &kind })
+                ));
+                return;
+            }
+            if kind.is_empty() {
+                f.error = Some("homeCore offers no language for a runtime yet".into());
                 return;
             }
             f.busy = true;
             let c = self.client.clone();
             self.spawn(
-                async move { c.add_runtime(&name, &url).await },
+                async move { c.add_runtime(&name, &kind, &url).await },
                 |app, res| match res {
                     Ok(key) => {
                         app.manage.modal = None;

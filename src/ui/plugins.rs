@@ -918,7 +918,7 @@ fn draw_runtime_detail(frame: &mut Frame<'_>, app: &App, r: &pa::Runtime, area: 
                 .unwrap_or_else(|| "any number of plugins".into()),
         ),
         Line::from(""),
-        Line::from(Span::styled("  Python", heading())),
+        Line::from(Span::styled("  Interpreters", heading())),
     ]);
     let interps = pa::interpreters_of(&app.plugins_tab.manage.interpreters, &r.runtime_id);
     if interps.is_empty() {
@@ -931,7 +931,7 @@ fn draw_runtime_detail(frame: &mut Frame<'_>, app: &App, r: &pa::Runtime, area: 
                 i.plugins.join(", ")
             ),
             (None, true) => {
-                ": no longer gets fixes; rebuild its plugins for a newer Python".to_string()
+                ": no longer gets fixes; rebuild its plugins for a newer version".to_string()
             }
             (None, false) => ": up to date".to_string(),
         };

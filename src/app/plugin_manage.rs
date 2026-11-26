@@ -33,7 +33,7 @@ pub enum PluginConfirm {
         runtime_id: String,
         name: String,
     },
-    UpdatePython {
+    UpdateInterpreter {
         runtime_id: String,
         kind: String,
         series: String,
@@ -340,12 +340,12 @@ impl App {
             PluginConfirm::RemoveRuntime { runtime_id, name } => {
                 self.remove_runtime(runtime_id, name)
             }
-            PluginConfirm::UpdatePython {
+            PluginConfirm::UpdateInterpreter {
                 runtime_id,
                 kind,
                 series,
                 to,
-            } => self.update_python(runtime_id, kind, series, to),
+            } => self.update_interpreter(runtime_id, kind, series, to),
             PluginConfirm::RunAction {
                 plugin_id,
                 action,
@@ -528,10 +528,10 @@ impl App {
     }
 
     /// `R` on a runtime: ask, then make it a new key.
-    /// `U` on a runtime: move its plugins to the newest patch of their Python,
-    /// after naming what restarts.
-    pub fn ask_update_python(&mut self) {
-        if self.needs_admin("updating a runtime's Python") {
+    /// `U` on a runtime: move its plugins to the newest patch of their
+    /// interpreter (Python, Node.js, …), after naming what restarts.
+    pub fn ask_update_interpreter(&mut self) {
+        if self.needs_admin("updating a runtime's interpreter") {
             return;
         }
         let Some(r) = self
@@ -546,7 +546,7 @@ impl App {
             .find(|i| i.update.is_some())
             .cloned()
         else {
-            self.status = "No Python update is waiting for this runtime".into();
+            self.status = "No interpreter update is waiting for this runtime".into();
             return;
         };
         let to = i.update.clone().unwrap_or_default();
@@ -559,7 +559,7 @@ impl App {
             Confirm::new(
                 format!("Update {} to {to}?", i.name()),
                 format!("On {name}, these restart on it: {}.", i.plugins.join(", ")),
-                ConfirmAction::Plugins(PluginConfirm::UpdatePython {
+                ConfirmAction::Plugins(PluginConfirm::UpdateInterpreter {
                     runtime_id: r.runtime_id,
                     kind: i.kind,
                     series: i.series,
@@ -570,11 +570,12 @@ impl App {
         );
     }
 
-    fn update_python(&mut self, runtime_id: String, kind: String, series: String, to: String) {
-        self.status = format!("Updating to Python {to}...");
+    fn update_interpreter(&mut self, runtime_id: String, kind: String, series: String, to: String) {
+        let lang = crate::plugin_admin::kind_name(&kind);
+        self.status = format!("Updating to {lang} {to}...");
         let c = self.client.clone();
         self.spawn_ok(
-            "update Python",
+            "update the interpreter",
             async move { c.update_interpreter(&runtime_id, &kind, &series).await },
             move |app, v| {
                 let now = v
@@ -586,7 +587,7 @@ impl App {
                     .get("plugins")
                     .and_then(serde_json::Value::as_array)
                     .map_or(0, Vec::len);
-                app.status = format!("{n} plugin(s) now on Python {now}");
+                app.status = format!("{n} plugin(s) now on {lang} {now}");
                 app.load_runtimes();
             },
         );
@@ -604,6 +605,25 @@ impl App {
         f.path = self.client.base_url().to_string();
         f.field = super::manage::settings_modal::PathField::Name;
         self.manage.modal = Some(super::manage::settings_modal::SettingsModal::Path(f));
+        let c = self.client.clone();
+        self.spawn(async move { c.list_runtime_kinds().await }, |app, res| {
+            use super::manage::settings_modal::{PathPurpose, SettingsModal};
+            if let Some(SettingsModal::Path(f)) = app.manage.modal.as_mut()
+                && f.purpose == PathPurpose::NewRuntime
+            {
+                match res {
+                    Ok(kinds) => {
+                        f.kind = if kinds.iter().any(|k| k == "python") {
+                            "python".into()
+                        } else {
+                            kinds.first().cloned().unwrap_or_default()
+                        };
+                        f.kinds = kinds;
+                    }
+                    Err(e) => f.error = Some(e.to_string()),
+                }
+            }
+        });
     }
 
     /// `e` on a runtime: its name and plugin limit.
@@ -630,6 +650,25 @@ impl App {
         f.path = r.max_plugins.map(|n| n.to_string()).unwrap_or_default();
         f.field = super::manage::settings_modal::PathField::Name;
         self.manage.modal = Some(super::manage::settings_modal::SettingsModal::Path(f));
+        let c = self.client.clone();
+        self.spawn(async move { c.list_runtime_kinds().await }, |app, res| {
+            use super::manage::settings_modal::{PathPurpose, SettingsModal};
+            if let Some(SettingsModal::Path(f)) = app.manage.modal.as_mut()
+                && f.purpose == PathPurpose::NewRuntime
+            {
+                match res {
+                    Ok(kinds) => {
+                        f.kind = if kinds.iter().any(|k| k == "python") {
+                            "python".into()
+                        } else {
+                            kinds.first().cloned().unwrap_or_default()
+                        };
+                        f.kinds = kinds;
+                    }
+                    Err(e) => f.error = Some(e.to_string()),
+                }
+            }
+        });
     }
 
     /// `x` on a runtime: say what removing it uninstalls, then ask.

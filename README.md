@@ -245,7 +245,7 @@ Screens:
   choice, `u` undo a change, `Ctrl+S` save, `Esc` discard; Actions:
   `Enter` run, `f` run with a file; Logs: `Space` pause, `e`/`w`/`i`/`d` level, `c` clear.
   Catalog: `i` install. Runtimes: `Enter` detail (with each Python in use
-  and any update waiting), `U` update Python (restarts the plugins it names),
+  and any update waiting), `U` update its interpreter, such as Python (restarts the plugins it names),
   `R` reset login, `e` name and plugin limit (empty for none), `n` add
   a runtime (its key is shown once), `x` remove one (its plugins are
   uninstalled; the confirm names them) — admin.

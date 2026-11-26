@@ -207,8 +207,8 @@ fn runtime_bindings(app: &App, admin: bool) -> Vec<Binding> {
             v.push(Binding::new(
                 &[KeyCode::Char('U')],
                 "U",
-                "update Python",
-                App::ask_update_python,
+                "update interpreter",
+                App::ask_update_interpreter,
             ));
             v.push(Binding::new(
                 &[KeyCode::Char('e')],
@@ -239,8 +239,8 @@ fn runtime_bindings(app: &App, admin: bool) -> Vec<Binding> {
             Binding::new(
                 &[KeyCode::Char('U')],
                 "U",
-                "update Python",
-                App::ask_update_python,
+                "update interpreter",
+                App::ask_update_interpreter,
             )
             .more(),
         );
@@ -463,8 +463,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn e_on_a_runtime_edits_its_name_and_limit() {
+    /// Opening the form asks homeCore for its languages, so it needs a runtime.
+    #[tokio::test]
+    async fn e_on_a_runtime_edits_its_name_and_limit() {
         use crate::app::manage::settings_modal::{PathField, PathPurpose, SettingsModal};
         let mut a = signed_in(Role::Admin);
         states(&mut a);
@@ -498,8 +499,9 @@ mod tests {
         assert!(f.error.is_some_and(|e| e.contains("number of plugins")));
     }
 
-    #[test]
-    fn tab_reaches_a_new_runtimes_address() {
+    /// Opening the form asks homeCore for its languages, so it needs a runtime.
+    #[tokio::test]
+    async fn tab_reaches_a_new_runtimes_address() {
         use crate::app::manage::settings_modal::{PathField, SettingsModal};
         let mut a = signed_in(Role::Admin);
         states(&mut a);
