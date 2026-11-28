@@ -8,6 +8,7 @@ pub mod logs;
 pub mod matter;
 pub mod modes;
 pub mod people;
+pub mod rotations;
 pub mod settings_modal;
 pub mod status;
 pub mod users;
@@ -37,6 +38,7 @@ pub struct ManageTab {
     pub audit: audit::AuditPanel,
     pub backup: backup::BackupPanel,
     pub people: people::PeoplePanel,
+    pub rotations: rotations::RotationsPanel,
     /// The open Settings dialog, if any.
     pub modal: Option<settings_modal::SettingsModal>,
 }
@@ -59,6 +61,14 @@ impl App {
         self.manage.events.sel.resolve(&ids);
         let ids = self.data_row_ids();
         self.manage.backup.sel.resolve(&ids);
+        // Against the rows shown, so with a search on, the row lit is the
+        // one p plays.
+        let ids: Vec<String> = self
+            .visible_rotations()
+            .iter()
+            .map(|r| r.id.clone())
+            .collect();
+        self.manage.rotations.sel.resolve(&ids);
         self.resolve_people_selections();
         self.resolve_group_selection();
     }

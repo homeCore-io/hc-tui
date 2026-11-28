@@ -947,3 +947,29 @@ where
         other => other.to_string(),
     })
 }
+
+/// A rotation (homeCore 0.1.130): presets, playlists or favorites one
+/// device plays one at a time. Made and changed in the app; here they are
+/// listed, played and skipped.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct Rotation {
+    pub id: String,
+    pub name: String,
+    pub device_id: String,
+    #[serde(default)]
+    pub choices: Vec<Value>,
+    #[serde(default)]
+    pub now: Option<RotationNow>,
+}
+
+/// Where a rotation is: what plays now and next, and what its device no
+/// longer has.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct RotationNow {
+    #[serde(default)]
+    pub current_name: Option<String>,
+    #[serde(default)]
+    pub next_name: Option<String>,
+    #[serde(default)]
+    pub missing_names: Vec<String>,
+}

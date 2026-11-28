@@ -143,6 +143,36 @@ mod render_tests {
     }
 
     #[test]
+    fn rotations_show_what_plays_now_next_and_what_is_gone() {
+        let mut a = signed_in(Role::Admin);
+        a.manage.rotations.list = vec![
+            serde_json::from_value(serde_json::json!({
+                "id": "r1",
+                "name": "Bathroom music",
+                "device_id": "sonos_bathroom",
+                "choices": [{}, {}, {}],
+                "now": {
+                    "current_name": "ALT Radio",
+                    "next_name": "Sleep",
+                    "missing_names": ["Gone Favorite"]
+                }
+            }))
+            .unwrap(),
+        ];
+        a.screen = ScreenId::Rotations;
+        let screen = render(&mut a, 160, 30);
+        for want in [
+            "Bathroom music",
+            "ALT Radio",
+            "Sleep",
+            "gone: Gone Favorite",
+            "· 3",
+        ] {
+            assert!(screen.contains(want), "{want} missing:\n{screen}");
+        }
+    }
+
+    #[test]
     fn the_frame_fills_the_backend_it_was_given() {
         let mut a = signed_in(Role::Admin);
         let screen = render(&mut a, 100, 30);

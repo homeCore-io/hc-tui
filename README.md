@@ -18,12 +18,12 @@ It is built with:
   login screen. `L` signs out (`/api/v1/auth/logout`).
 - The app's screens and names. The sidebar has 1 Home, 2 Rooms,
   3 Devices, 4 Scenes, 5 Modes, 6 Helpers, 7 Automations, 8 Alerts (with
-  the number of open alerts) and 9 Plugins, then under Settings: People,
-  Data & backups, Logs, Events, Audit and System. A screen shows only to
-  roles that can use it, from the scopes `/auth/me` sends (core's role
-  table when it sends none): Plugins needs `plugins:read`, People
-  `users:read`, Audit `audit:read`, Logs the admin role, and Data &
-  backups the admin role or `automations:write`.
+  the number of open alerts) and 9 Plugins, then under Settings: Rotations,
+  People, Data & backups, Logs, Events, Audit and System. A screen shows only
+  to roles that can use it, from the scopes `/auth/me` sends (core's role
+  table when it sends none): Plugins needs `plugins:read`, Rotations
+  `automations:read`, People `users:read`, Audit `audit:read`, Logs the
+  admin role, and Data & backups the admin role or `automations:write`.
 - The header names the homeCore version, the modes that are on and the
   outside temperature when a weather device reports one; on the right,
   your role in words and whether the live stream is up.
@@ -250,6 +250,10 @@ Screens:
   a runtime (its key is shown once), `x` remove one (its plugins are
   uninstalled; the confirm names them) — admin.
   Matter: `c` commission, `i` reinterview, `x` remove a node.
+- Rotations (homeCore 0.1.130): presets, playlists and favorites a device
+  plays one at a time, each with what plays now and next and any choice its
+  device no longer has. `p` or `Space` plays the choice for now, `s` skips
+  to the next (`devices:command`). They are made and changed in the app.
 - People: `←/→` tab (People, Roles, API keys, Sessions, Displays).
   Displays (admins): `n` makes one for a hall tablet or kitchen panel and
   shows its key once (it may use the house and change nothing), `x` deletes

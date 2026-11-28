@@ -27,6 +27,7 @@ pub mod modes;
 pub mod people;
 pub mod plugins;
 pub mod rooms;
+pub mod rotations;
 pub mod scenes;
 pub mod system;
 
@@ -48,6 +49,7 @@ pub enum ScreenId {
     Automations,
     Alerts,
     Plugins,
+    Rotations,
     People,
     Data,
     Logs,
@@ -57,7 +59,7 @@ pub enum ScreenId {
 }
 
 impl ScreenId {
-    pub const ALL: [ScreenId; 15] = [
+    pub const ALL: [ScreenId; 16] = [
         ScreenId::Home,
         ScreenId::Rooms,
         ScreenId::Devices,
@@ -67,6 +69,7 @@ impl ScreenId {
         ScreenId::Automations,
         ScreenId::Alerts,
         ScreenId::Plugins,
+        ScreenId::Rotations,
         ScreenId::People,
         ScreenId::Data,
         ScreenId::Logs,
@@ -87,6 +90,7 @@ impl ScreenId {
             Self::Automations => "Automations",
             Self::Alerts => "Alerts",
             Self::Plugins => "Plugins",
+            Self::Rotations => "Rotations",
             Self::People => "People",
             Self::Data => "Data & backups",
             Self::Logs => "Logs",
@@ -134,7 +138,7 @@ impl ScreenId {
                 user.can("devices:read")
             }
             Self::Scenes => user.can("scenes:read"),
-            Self::Automations => user.can("automations:read"),
+            Self::Automations | Self::Rotations => user.can("automations:read"),
             Self::Plugins => user.can("plugins:read"),
             Self::People => user.can("users:read"),
             // The backup zip is admin only; exporting and importing
@@ -293,6 +297,7 @@ pub fn screen(id: ScreenId) -> &'static dyn Screen {
         ScreenId::Rooms => &rooms::RoomsScreen,
         ScreenId::Devices => &devices::DevicesScreen,
         ScreenId::Scenes => &scenes::ScenesScreen,
+        ScreenId::Rotations => &rotations::RotationsScreen,
         ScreenId::Modes => &modes::ModesScreen,
         ScreenId::Helpers => &helpers::HelpersScreen,
         ScreenId::Automations => &automations::AutomationsScreen,

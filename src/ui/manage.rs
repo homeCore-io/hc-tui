@@ -397,3 +397,78 @@ pub fn draw_audit(frame: &mut Frame<'_>, app: &App, area: Rect) {
         footer_area,
     );
 }
+
+/// Rotations: each with its device, what plays now and next, and any choice
+/// its device no longer has.
+pub fn draw_rotations(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let p = &app.manage.rotations;
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(6), Constraint::Length(3)])
+        .split(area);
+    let items: Vec<ListItem> = app
+        .visible_rotations()
+        .into_iter()
+        .map(|r| {
+            let now = r.now.clone().unwrap_or_default();
+            let mut spans = vec![
+                Span::styled(
+                    format!("  {:<24} ", take_chars(&r.name, 24)),
+                    Style::default().fg(Color::White),
+                ),
+                Span::styled(
+                    format!(
+                        "{:<26} ",
+                        take_chars(
+                            &format!("{} · {}", app.rotation_device(r), r.choices.len()),
+                            26
+                        )
+                    ),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::raw(format!(
+                    "now {:<22} ",
+                    take_chars(now.current_name.as_deref().unwrap_or("—"), 22)
+                )),
+                Span::styled(
+                    format!(
+                        "next {:<22}",
+                        take_chars(now.next_name.as_deref().unwrap_or("—"), 22)
+                    ),
+                    Style::default().fg(Color::Cyan),
+                ),
+            ];
+            if !now.missing_names.is_empty() {
+                spans.push(Span::styled(
+                    format!(" · gone: {}", now.missing_names.join(", ")),
+                    Style::default().fg(Color::Red),
+                ));
+            }
+            ListItem::new(Line::from(spans))
+        })
+        .collect();
+    let title = if p.loading {
+        "Rotations [loading...]".to_string()
+    } else if let Some(e) = &p.error {
+        format!("Rotations · {}", take_chars(e, 60))
+    } else {
+        format!("Rotations ({}) · made in the app", items.len())
+    };
+    let n = items.len();
+    render_list(
+        frame,
+        selectable_list(items, title),
+        n,
+        p.sel.index(),
+        layout[0],
+    );
+    let hint = if n == 0 && !p.loading && p.error.is_none() {
+        "No rotations yet. Make one in the app: Settings › Rotations."
+    } else {
+        "p plays the choice for now · s skips to the next · / finds"
+    };
+    frame.render_widget(
+        Paragraph::new(hint).block(Block::default().borders(Borders::ALL)),
+        layout[1],
+    );
+}
