@@ -8,6 +8,7 @@ pub mod logs;
 pub mod matter;
 pub mod modes;
 pub mod people;
+pub mod rotations;
 pub mod settings_modal;
 pub mod status;
 pub mod users;
@@ -37,6 +38,7 @@ pub struct ManageTab {
     pub audit: audit::AuditPanel,
     pub backup: backup::BackupPanel,
     pub people: people::PeoplePanel,
+    pub rotations: rotations::RotationsPanel,
     /// The open Settings dialog, if any.
     pub modal: Option<settings_modal::SettingsModal>,
 }

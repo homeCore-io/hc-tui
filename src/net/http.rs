@@ -431,6 +431,22 @@ impl HomeCoreClient {
         self.send_empty(Method::POST, &path, None).await
     }
 
+    pub async fn list_rotations(&self) -> Result<Vec<crate::model::Rotation>> {
+        self.get_json("/rotations").await
+    }
+
+    /// Play a rotation's choice for now; homeCore's answer says what played.
+    pub async fn play_rotation(&self, rotation_id: &str) -> Result<Value> {
+        let path = format!("/rotations/{}/play", seg(rotation_id));
+        self.send_json(Method::POST, &path, None).await
+    }
+
+    /// Move a rotation on without playing; the answer says what's next.
+    pub async fn advance_rotation(&self, rotation_id: &str) -> Result<Value> {
+        let path = format!("/rotations/{}/advance", seg(rotation_id));
+        self.send_json(Method::POST, &path, None).await
+    }
+
     pub async fn export_scenes(&self) -> Result<Value> {
         self.get_json("/scenes/export").await
     }

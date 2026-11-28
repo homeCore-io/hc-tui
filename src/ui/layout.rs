@@ -378,7 +378,7 @@ mod tests {
         assert_eq!(rows[0], "1 Home");
         assert!(rows.contains(&"8 Alerts (1)".to_string()), "{rows:?}");
         let div = rows.iter().position(|r| r.contains("Settings")).unwrap();
-        assert_eq!(rows[div + 1], "  People");
+        assert_eq!(rows[div + 1], "  Rotations");
     }
 
     #[test]
