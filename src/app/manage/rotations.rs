@@ -40,18 +40,12 @@ impl App {
             .unwrap_or_else(|| r.device_id.clone())
     }
 
+    /// The row lit: the selection is resolved against the rows shown each
+    /// frame, so its index is the row's.
     pub fn selected_rotation(&self) -> Option<&Rotation> {
-        let ids: Vec<&str> = self
-            .visible_rotations()
-            .iter()
-            .map(|r| r.id.as_str())
-            .collect();
-        let id = self.manage.rotations.sel.id().map(str::to_string);
-        let i = match id {
-            Some(id) => ids.iter().position(|x| *x == id)?,
-            None => self.manage.rotations.sel.index(),
-        };
-        self.visible_rotations().get(i).copied()
+        self.visible_rotations()
+            .get(self.manage.rotations.sel.index())
+            .copied()
     }
 
     pub fn move_rotation(&mut self, delta: isize) {
@@ -74,8 +68,6 @@ impl App {
             match res {
                 Ok(list) => {
                     p.list = list;
-                    let ids: Vec<String> = p.list.iter().map(|r| r.id.clone()).collect();
-                    p.sel.resolve(&ids);
                 }
                 Err(e) => {
                     p.error = Some(e.to_string());
@@ -124,5 +116,34 @@ impl App {
                 app.refresh_rotations();
             },
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::app::test_support::*;
+    use crate::model::Role;
+    use crate::screens::ScreenId;
+
+    /// With a search on, the row lit is the row p plays.
+    #[test]
+    fn the_row_lit_is_the_row_played() {
+        let mut a = signed_in(Role::Admin);
+        a.manage.rotations.list = ["Alpha", "Bravo", "Charlie"]
+            .iter()
+            .map(|n| {
+                serde_json::from_value(serde_json::json!({
+                    "id": n.to_lowercase(), "name": n, "device_id": "d"
+                }))
+                .unwrap()
+            })
+            .collect();
+        a.resolve_manage_selections();
+        a.move_rotation(1);
+        assert_eq!(a.selected_rotation().unwrap().name, "Bravo");
+        a.queries.insert(ScreenId::Rotations, "charlie".into());
+        a.resolve_manage_selections();
+        assert_eq!(a.manage.rotations.sel.index(), 0);
+        assert_eq!(a.selected_rotation().unwrap().name, "Charlie");
     }
 }

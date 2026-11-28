@@ -14,7 +14,8 @@ impl Screen for RotationsScreen {
 
     fn bindings(&self, app: &App) -> Vec<Binding> {
         let mut v = moves(|a| a.move_rotation(-1), |a| a.move_rotation(1)).to_vec();
-        if app.can("devices:command") {
+        // As homeCore takes it: devices:command, or devices:write.
+        if app.can("devices:command") || app.can("devices:write") {
             v.extend([
                 Binding::new(
                     &[KeyCode::Char('p')],

@@ -61,6 +61,14 @@ impl App {
         self.manage.events.sel.resolve(&ids);
         let ids = self.data_row_ids();
         self.manage.backup.sel.resolve(&ids);
+        // Against the rows shown, so with a search on, the row lit is the
+        // one p plays.
+        let ids: Vec<String> = self
+            .visible_rotations()
+            .iter()
+            .map(|r| r.id.clone())
+            .collect();
+        self.manage.rotations.sel.resolve(&ids);
         self.resolve_people_selections();
         self.resolve_group_selection();
     }
